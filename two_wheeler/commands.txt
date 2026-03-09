@@ -1,0 +1,2 @@
+isaaclab.bat -p scripts/reinforcement_learning/rsl_rl/play.py --task Isaac-TwoWheeler-Direct-v0 --num_envs 10 --load_run 2026-03-07_18-27-46_ppo
+isaaclab.bat -p scripts/reinforcement_learning/rsl_rl/train.py --task Isaac-TwoWheeler-Direct-v0  --num_envs 4096 --device cuda:0 --headless
