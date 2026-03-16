@@ -1,0 +1,75 @@
+---
+description: Run RL training and parse output for two_wheeler
+globs: "**/two_weeler/**"
+alwaysApply: false
+---
+
+# Training Agent
+
+When asked to train, run training, or monitor training for the two_wheeler task:
+
+## Step 1: Sync Master → Isaac Lab (always run first)
+
+**Before starting anything**, copy files from Master to Isaac Lab:
+
+```powershell
+Copy-Item -Path "H:\Projects\RobotRL\two_wheeler\*" -Destination "H:\Projects\IsaacV5\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\two_wheeler\" -Recurse -Force
+```
+
+## Step 2: Run Training
+
+**Conda environment**: `H:\isaac_env_v5`
+
+Use **cmd** (not PowerShell) so `conda activate` works:
+
+```cmd
+cmd /c "call conda.bat activate H:\isaac_env_v5 && cd /d H:\Projects\IsaacV5\IsaacLab && isaaclab.bat -p scripts/reinforcement_learning/rsl_rl/train.py --task Isaac-TwoWheeler-Direct-v0 --headless --num_envs 2048 --device cuda:0 > logs\rsl_rl\two_wheeler\training_output.log 2>&1"
+```
+
+**Training log file** (unbounded, use for status): `H:\Projects\IsaacV5\IsaacLab\logs\rsl_rl\two_wheeler\training_output.log`
+
+> Note: Output is redirected to the log file above because Cursor's terminal buffer has a size limit (~21k lines). For status checks, **read from the log file** (use `Read` with offset near end, or `Grep` for latest "Learning iteration" block). Fall back to `.cursor/projects/.../terminals/*.txt` only if the log file does not exist.
+
+**Optional args**: `--max_iterations N`, `--seed N`, `--video`
+
+## Status Report Format
+
+When outputting **status** (or when asked to monitor training), **always prominently show** these three metrics from the latest iteration in a **table** at the top:
+
+| Mean reward | Mean episode length | Mean action noise std |
+|-------------|---------------------|------------------------|
+| {value}     | {value}             | {value}                |
+
+Place this table at the top of every status output, before other details (iteration, FPS, checkpoint path, time elapsed, ETA, etc.).
+
+**Where to read status from:** Prefer `H:\Projects\IsaacV5\IsaacLab\logs\rsl_rl\two_wheeler\training_output.log` (unbounded). Use `Read` with a high offset to read from the end, or `Grep` for "Learning iteration" / "Mean reward" to find the latest block. Fall back to the terminal file only if the log does not exist.
+
+## Output to Monitor
+
+| Pattern | Meaning |
+|---------|---------|
+| `reward`, `mean reward`, `episode reward` | Training progress |
+| `fps`, `FPS`, `SPS` | Simulation/step rate |
+| `iteration`, `iter` | Training iteration |
+| `error`, `Error`, `Traceback` | Failures to report |
+| `checkpoint`, `saved` | Model saved |
+| `convergence`, `plateau` | Training status |
+
+## After Training
+
+1. **Read the latest iteration** from the training log file (`H:\Projects\IsaacV5\IsaacLab\logs\rsl_rl\two_wheeler\training_output.log`). If it does not exist (e.g. training was run without redirect), fall back to the terminal output file (`.cursor/projects/.../terminals/*.txt`).
+
+2. **Extract and display** these values from the most recent "Learning iteration" block in the agent chat:
+
+   | Metric | Pattern in output |
+   |--------|-------------------|
+   | Mean action noise std | `Mean action noise std: X.XX` |
+   | Mean reward | `Mean reward: X.XX` |
+   | Mean episode length | `Mean episode length: X.XX` |
+
+3. **Format for chat display** (as a table):
+   | Mean reward | Mean episode length | Mean action noise std |
+   |-------------|---------------------|------------------------|
+   | {value}     | {value}             | {value}                |
+
+4. **Also report**: final reward, FPS, checkpoint path (typically `logs/rsl_rl/two_wheeler/...`), any errors, and next steps if training failed or plateaued.

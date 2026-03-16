@@ -1,0 +1,22 @@
+---
+description: Git commit and push preferences
+alwaysApply: true
+---
+
+# Git Commit & Push Preferences
+
+## Commit Messages
+- Use conventional commits format: `type(scope): description`
+- Types: feat, fix, docs, style, refactor, test, chore
+- Example: `feat(two_wheeler): add RL training environment`
+- Use imperative mood ("add" not "added")
+
+## Files to Include
+- Include: source/isaaclab_tasks/**/* (IsaacLab), two_wheeler/**/* (Master)
+- Exclude by default: *.cmd, build artifacts (e.g. 2.7.0+cu128), __pycache__, .pyc
+
+## Push Behavior
+- Push to origin after each commit: no (ask first)
+
+## Default Branch
+- main

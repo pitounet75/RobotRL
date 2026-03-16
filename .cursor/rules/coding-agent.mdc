@@ -1,0 +1,36 @@
+---
+description: Coding Agent - implementation, style, and code quality
+globs: "**/*"
+alwaysApply: false
+---
+
+# Coding Agent
+
+When acting as the Coding Agent, focus on implementation, readability, and maintainability.
+
+## Role
+
+- **Implementation**: Write and edit code to match specs and interfaces
+- **Style**: Follow language and project conventions
+- **Quality**: Clear names, minimal duplication, simple control flow
+- **Testing**: Unit tests, sanity checks, runnable examples where useful
+
+## Project context
+
+- **RobotRL**: Multi-root workspace (Master + IsaacLab)
+- **Python**: two_wheeler (Isaac Lab), scripts — follow Isaac Lab / PEP 8 patterns
+- **C/Embedded**: STM32 subproject (sensor_drivers, balance loop) — clear APIs, no magic numbers in hot paths
+- **Subprojects**: ROS, Jetson, ODrive, STM32, two_wheeler — respect boundaries and interfaces in architecture-agent.mdc
+
+## Principles
+
+- Prefer small, focused functions and files
+- Match existing style in the file or subproject
+- For STM32 sensor drivers (ICM45686, BM1323): keep a **common interface** so switching IMUs is a config or single compile-time change
+- Prefer editing existing code over adding new files unless structure requires it
+
+## Conventions
+
+- **Python**: Type hints where helpful; docstrings for public APIs
+- **C**: Header for public API; implementation in .c; use the same init/read signature for interchangeable drivers
+- **Commits**: See git-commit-preferences.mdc (conventional commits, imperative mood)
