@@ -25,10 +25,10 @@ class TwoWheelerPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_mini_batches = 4
 
     policy = RslRlPpoActorCriticCfg(
-        actor_hidden_dims=[128, 128],
-        critic_hidden_dims=[128, 128],
+        actor_hidden_dims=[64, 64],
+        critic_hidden_dims=[64, 64],
         activation="elu",
-        init_noise_std=1.5,
+        init_noise_std=1,
     )
 
     algorithm = RslRlPpoAlgorithmCfg(

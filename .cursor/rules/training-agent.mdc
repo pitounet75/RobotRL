@@ -1,6 +1,6 @@
 ---
 description: Run RL training and parse output for two_wheeler
-globs: "**/two_weeler/**"
+globs: "**/two_wheeler/**"
 alwaysApply: false
 ---
 
@@ -23,14 +23,14 @@ Copy-Item -Path "H:\Projects\RobotRL\two_wheeler\*" -Destination "H:\Projects\Is
 Use **cmd** (not PowerShell) so `conda activate` works:
 
 ```cmd
-cmd /c "call conda.bat activate H:\isaac_env_v5 && cd /d H:\Projects\IsaacV5\IsaacLab && isaaclab.bat -p scripts/reinforcement_learning/rsl_rl/train.py --task Isaac-TwoWheeler-Direct-v0 --headless --num_envs 2048 --device cuda:0 > logs\rsl_rl\two_wheeler\training_output.log 2>&1"
+cmd /c "call conda.bat activate H:\isaac_env_v5 && cd /d H:\Projects\IsaacV5\IsaacLab && isaaclab.bat -p source/isaaclab_tasks/isaaclab_tasks/two_wheeler/train_with_overrides.py --task Isaac-TwoWheeler-Direct-v0 --headless --num_envs 2048 --device cuda:0 > logs\rsl_rl\two_wheeler\training_output.log 2>&1"
 ```
 
 **Training log file** (unbounded, use for status): `H:\Projects\IsaacV5\IsaacLab\logs\rsl_rl\two_wheeler\training_output.log`
 
 > Note: Output is redirected to the log file above because Cursor's terminal buffer has a size limit (~21k lines). For status checks, **read from the log file** (use `Read` with offset near end, or `Grep` for latest "Learning iteration" block). Fall back to `.cursor/projects/.../terminals/*.txt` only if the log file does not exist.
 
-**Optional args**: `--max_iterations N`, `--seed N`, `--video`
+**Optional args**: `--max_iterations N`, `--seed N`, `--video`, and config overrides: `--rew_pitch_rate_w`, `--rew_torque_w`, `--rew_action_rate_w`, `--rew_upright_k`, `--rew_track_vel_scale`, `--rew_track_yaw_scale`, `--rew_track_forward_w`, `--rew_track_yaw_w`, `--rew_terminated`, `--rew_accumulate_substeps`
 
 ## Status Report Format
 
@@ -73,3 +73,35 @@ Place this table at the top of every status output, before other details (iterat
    | {value}     | {value}             | {value}                |
 
 4. **Also report**: final reward, FPS, checkpoint path (typically `logs/rsl_rl/two_wheeler/...`), any errors, and next steps if training failed or plateaued.
+
+---
+
+## Parameter Sweep (multiple trainings in a row)
+
+When the user asks to **sweep** a parameter (e.g. "Train with rew_pitch_rate_w from 0.1 to 1.9 by steps of 0.01"):
+
+1. **Parse the instruction** to extract:
+   - `param`: parameter name (e.g. `rew_pitch_rate_w`)
+   - `min`: minimum value (e.g. `0.1`)
+   - `max`: maximum value (e.g. `1.9`)
+   - `step`: step size (e.g. `0.01`)
+
+2. **Step 1: Sync** (same as single training):
+   ```powershell
+   Copy-Item -Path "H:\Projects\RobotRL\two_wheeler\*" -Destination "H:\Projects\IsaacV5\IsaacLab\source\isaaclab_tasks\isaaclab_tasks\two_wheeler\" -Recurse -Force
+   ```
+
+3. **Step 2: Run the sweep script** (runs each training sequentially, saves results after each run):
+   ```cmd
+   cmd /c "call conda.bat activate H:\isaac_env_v5 && cd /d H:\Projects\IsaacV5\IsaacLab && python source/isaaclab_tasks/isaaclab_tasks/two_wheeler/sweep_param.py --param PARAM --min MIN --max MAX --step STEP"
+   ```
+
+   **Optional**: `--max_iterations N` for shorter runs per value (e.g. `--max_iterations 500`).
+
+4. **Results file**: `H:\Projects\IsaacV5\IsaacLab\logs\rsl_rl\two_wheeler\sweep_results.csv`
+
+   Columns: `param`, `param_value`, `mean_reward`, `mean_episode_length`, `mean_action_noise_std`, `final_iteration`, `run_name`, `exit_code`, `timestamp`
+
+   **To find the best value**: sort by `mean_reward` descending (higher is better).
+
+5. **Valid parameters** for sweep: `rew_upright_k`, `rew_pitch_rate_w`, `rew_track_vel_scale`, `rew_track_yaw_scale`, `rew_track_forward_w`, `rew_track_yaw_w`, `rew_torque_w`, `rew_action_rate_w`, `rew_terminated`, `rew_accumulate_substeps`
