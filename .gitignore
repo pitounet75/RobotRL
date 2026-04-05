@@ -6,3 +6,5 @@ __pycache__/
 # IDE (keep .cursor/rules for shared Cursor rules)
 .cursor/*
 !.cursor/rules/
+Odrive/venv/
+Odrive/ODrive_S-fw-v0.5.1/venv

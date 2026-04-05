@@ -1,0 +1,138 @@
+odrv0.axis0.controller.config.control_mode = CONTROL_MODE_POSITION_CONTROL # Mode Position CONTROL_MODE_VELOCITY_CONTROL CONTROL_MODE_TORQUE_CONTROL
+odrv0.axis0.controller.config.input_mode = 1    # Mode Direct
+
+odrv0.axis0.motor.config.current_lim = 15.0     # On redonne du muscle
+
+odrv0.axis0.requested_state = 4
+
+odrv0.axis0.requested_state = 7
+
+odrv0.axis0.controller.input_pos = odrv0.axis0.encoder.pos_estimate
+odrv0.axis0.controller.pos_setpoint
+
+odrv0.axis0.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL  
+odrv0.axis0.controller.config.input_mode = 1 # Passthrough (Indispensable)
+odrv0.axis0.controller.config.input_filter_bandwidth = 1000.0 # Très réactif
+odrv0.axis0.trap_traj.config.vel_limit = 1.0    
+
+
+#Pos control trap trajectory
+odrv0.axis0.controller.config.control_mode = CONTROL_MODE_POSITION_CONTROL  # 3
+odrv0.axis0.controller.config.input_mode = INPUT_MODE_TRAP_TRAJ  # trap
+# Limites de la rampe (à tuner)
+odrv0.axis0.trap_traj.config.vel_limit = 1.0    # tours/s max sur la traj
+odrv0.axis0.trap_traj.config.accel_limit = 2.0  # (tours/s²) typique à ajuster
+odrv0.axis0.trap_traj.config.decel_limit = 2.0
+
+
+#reset
+odrv0.reboot()
+odrv0.axis0.clear_errors()
+odrv0.axis0.requested_state = AXIS_STATE_IDLE  # IDLE
+odrv0.axis0.clear_errors()
+
+sleep²
+
+#Mode Velocity Ramp
+odrv0.axis0.controller.config.control_mode = 2
+odrv0.axis0.controller.config.input_mode = 2      # VEL_RAMP
+odrv0.axis0.controller.config.vel_ramp_rate = 2.0 # (turn/s)/s par ex.
+odrv0.axis0.requested_state = 8
+odrv0.axis0.controller.config.vel_limit = 20.0          # ou plus, selon moteur / méca
+odrv0.axis0.controller.config.vel_limit_tolerance = 2.0 
+odrv0.axis0.controller.input_vel = 2.0          # cible ; la vitesse suit la rampe
+
+
+
+
+# --- Anticogging calibration (MT6835 gros cpr : seuils /cpr dans le firmware !) ---
+# CRITIQUE : calib_vel_threshold=2 et calib_pos_threshold=2 => fenêtre vitesse ~2/cpr turn/s = quasi 0
+#    => index bloque des dizaines de secondes. Utiliser des seuils ~ proportionnels à encoder.config.cpr.
+#
+# Prérequis : direction != 0, motor.is_calibrated, encoder.is_ready, pas d'erreur, méca libre ~1 tour.
+# Après odrv0.reboot() : reconnecter odrivetool puis refaire calib moteur (4) + offset (7) si besoin.
+
+odrv0.axis0.clear_errors()
+odrv0.axis0.requested_state = 4
+odrv0.axis0.requested_state = 7
+odrv0.axis0.motor.config.current_lim = 20.0   # ajuster ; 5065 + cogging peut demander du couple
+odrv0.axis0.controller.config.vel_limit = 15.0
+odrv0.axis0.controller.config.enable_overspeed_error = False   # option test ; remettre True après
+
+cpr = float(odrv0.axis0.encoder.config.cpr)
+odrv0.axis0.controller.config.anticogging.calib_vel_threshold = 0.05 * cpr   # ~0.05 turn/s ; monter à 0.1*cpr si trop lent
+odrv0.axis0.controller.config.anticogging.calib_pos_threshold = 500.0       # monter 1000–2000 si index stagne
+odrv0.axis0.controller.config.pos_gain = 50
+odrv0.axis0.controller.config.vel_gain = 0.35
+odrv0.axis0.controller.config.vel_integrator_gain = 0.45   # PAS sous config.anticogging
+
+odrv0.axis0.controller.config.control_mode = 3   # POSITION
+odrv0.axis0.controller.config.input_mode = 1    # PASSTHROUGH
+odrv0.axis0.requested_state = 8
+odrv0.axis0.controller.start_anticogging_calibration()
+
+# Suivi : index 0..3600 ; anticogging_valid True à la fin
+# odrv0.axis0.controller.config.anticogging.index
+# odrv0.axis0.motor.current_control.Iq_setpoint
+# odrv0.axis0.encoder.pos_estimate
+
+
+
+## Après
+odrv0.axis0.controller.anticogging_valid   # doit passer à True
+odrv0.axis0.controller.config.anticogging.calib_anticogging  #
+odrv0.axis0.controller.config.anticogging.pre_calibrated = True
+odrv0.axis0.controller.config.pos_gain=20
+odrv0.axis0.controller.config.vel_gain=0.1666666716337204
+odrv0.axis0.controller.config.vel_integrator_gain = 0.32  
+odrv0.save_configuration()
+
+
+
+odrv0.axis0.controller.config.anticogging.index
+
+
+iq_current_setpoint
+odrv0.axis0.motor.current_control.Iq_setpoint
+odrv0.axis0.motor.current_control.Iq_setpoint   
+odrv0.axis0.controller.config.anticogging.cogging_map
+
+odrv0.axis0.controller.config.anticogging.calib_anticogging
+
+odrv0.axis0.controller.config.anticogging.anticogging_enabled
+odrv0.axis0.controller.config.anticogging.calib_pos_threshold
+odrv0.axis0.controller.config.anticogging.calib_vel_threshold
+odrv0.axis0.controller.config.anticogging.cogging_ratio
+odrv0.axis0.controller.config.anticogging.index
+odrv0.axis0.controller.config.anticogging.cogging_map
+odrv0.axis0.controller.config.anticogging.calib_anticogging
+odrv0.axis0.controller.config.anticogging.anticogging_enabled
+odrv0.axis0.controller.config.anticogging.calib_pos_threshold
+odrv0.axis0.controller.config.anticogging.calib_vel_threshold
+odrv0.axis0.controller.config.anticogging.cogging_ratio
+
+
+
+odrv0.axis0.encoder.pos_estimate
+
+
+
+odrv0.axis0.controller.config.pos_gain=20
+odrv0.axis0.controller.config.vel_gain=0.1666666716337204
+
+
+###Reboot after a problem
+odrv0.reboot()
+odrv0.axis0.clear_errors()
+odrv0.axis0.requested_state = 1  # IDLE
+odrv0.axis0.clear_errors()
+
+
+
+
+odrv0.axis0.motor.current_control.Iq_setpoint   # A, command (q-axis)
+odrv0.axis0.motor.current_control.Iq_measured  # A, estimated q-axis current (filtered)
+odrv0.axis0.motor.config.current_lim	A – user-set max motor current (phase / FOC frame behavior per firmware).
+odrv0.axis0.motor.effective_current_lim	A – limit after derating (thermistors, etc.).
+odrv0.axis0.motor.current_control.max_allowed_current	A – max the current controller will allow (derived from hardware/range).
+odrv0.axis0.motor.config.current_lim_margin	A – extra slack before 

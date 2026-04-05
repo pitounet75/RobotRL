@@ -20,7 +20,11 @@ class TwoWheelerPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     max_iterations = 4000
     save_interval = 200
 
-    num_steps_per_env = 16
+    # Rollout length (env steps collected per env before each PPO update).
+    # With episode_length_s=10, dt=1/120, decimation=1 → ~1200 steps/episode; 16 was
+    # far too short for delayed fall / balance credit assignment. Scale up (e.g. 64–256)
+    # if VRAM allows; reduce num_envs first if rollout buffer OOMs.
+    num_steps_per_env = 128
     num_learning_epochs = 4
     num_mini_batches = 4
 
