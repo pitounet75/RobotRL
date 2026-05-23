@@ -1,0 +1,28 @@
+# odrivetool: torque (current) mode — start with 0 Nm so the axis does not jump.
+# Device: odrv0, axis: axis0.
+
+# --- Preamble: clear errors and calibration ---
+odrv0.axis0.requested_state = AXIS_STATE_IDLE
+odrv0.axis0.clear_errors()
+odrv0.axis1.clear_errors()
+dump_errors(odrv0, True)
+
+odrv0.axis0.requested_state = AXIS_STATE_FULL_CALIBRATION_SEQUENCE
+import time
+_busy = (AXIS_STATE_FULL_CALIBRATION_SEQUENCE, AXIS_STATE_MOTOR_CALIBRATION, AXIS_STATE_ENCODER_OFFSET_CALIBRATION, AXIS_STATE_ENCODER_INDEX_SEARCH)
+while odrv0.axis0.current_state in _busy:
+    time.sleep(0.1)
+
+odrv0.axis0.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+while odrv0.axis0.current_state != AXIS_STATE_CLOSED_LOOP_CONTROL:
+    time.sleep(0.1)
+
+# --- Torque control, passthrough (command torque in Nm) ---
+odrv0.axis0.controller.config.control_mode = CONTROL_MODE_TORQUE_CONTROL
+odrv0.axis0.controller.config.input_mode = INPUT_MODE_PASSTHROUGH
+
+odrv0.axis0.controller.input_torque = 0.0
+odrv0.axis0.controller.input_vel = 0.0
+
+# Apply torque gradually, e.g.:
+# odrv0.axis0.controller.input_torque = 0.05

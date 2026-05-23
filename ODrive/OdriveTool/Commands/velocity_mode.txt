@@ -1,0 +1,32 @@
+# odrivetool: velocity mode — start with 0 turn/s so the axis does not jump.
+# Device: odrv0, axis: axis0.
+
+# --- Preamble: clear errors and calibration ---
+odrv0.axis0.requested_state = AXIS_STATE_IDLE
+odrv0.axis0.clear_errors()
+odrv0.axis1.clear_errors()
+dump_errors(odrv0, True)
+
+odrv0.axis0.requested_state = AXIS_STATE_FULL_CALIBRATION_SEQUENCE
+import time
+_busy = (AXIS_STATE_FULL_CALIBRATION_SEQUENCE, AXIS_STATE_MOTOR_CALIBRATION, AXIS_STATE_ENCODER_OFFSET_CALIBRATION, AXIS_STATE_ENCODER_INDEX_SEARCH)
+while odrv0.axis0.current_state in _busy:
+    time.sleep(0.1)
+
+odrv0.axis0.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+while odrv0.axis0.current_state != AXIS_STATE_CLOSED_LOOP_CONTROL:
+    time.sleep(0.1)
+
+# --- Velocity control, passthrough (command speed in turn/s) ---
+odrv0.axis0.controller.config.control_mode = CONTROL_MODE_VELOCITY_CONTROL
+odrv0.axis0.controller.config.input_mode = INPUT_MODE_PASSTHROUGH
+
+odrv0.axis0.controller.input_vel = 0.0
+odrv0.axis0.controller.input_torque = 0.0
+
+# Command speed (turn/s). Respect controller.config.vel_limit and tuning.
+# odrv0.axis0.controller.input_vel = 0.2
+
+# Smoothed ramp to target instead of a step:
+# odrv0.axis0.controller.config.input_mode = INPUT_MODE_VEL_RAMP
+# odrv0.axis0.controller.input_vel = 0.5

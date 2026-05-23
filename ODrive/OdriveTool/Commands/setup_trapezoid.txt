@@ -1,0 +1,18 @@
+# odrivetool: trapezoidal trajectory limits for axis0 (used with INPUT_MODE_TRAP_TRAJ).
+# Safe defaults — lower accel/decel if you see following errors.
+
+# --- Preamble: clear errors (recommended before saving config) ---
+odrv0.axis0.requested_state = AXIS_STATE_IDLE
+odrv0.axis0.clear_errors()
+odrv0.axis1.clear_errors()
+dump_errors(odrv0, True)
+
+# --- trap_traj planner caps (position mode + trap input mode) ---
+odrv0.axis0.trap_traj.config.vel_limit = 1.0
+odrv0.axis0.trap_traj.config.accel_limit = 0.5
+odrv0.axis0.trap_traj.config.decel_limit = 0.5
+
+# Units: vel_limit in turn/s; accel_limit / decel_limit in turn/s^2 (per ODrive docs).
+
+# Persist:
+# odrv0.save_configuration()

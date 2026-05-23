@@ -1,0 +1,29 @@
+# odrivetool: example PID / limit settings for axis0 controller.
+# Edit numbers for your mechanism. No state changes — set with axis idle or as needed.
+
+# --- Preamble: clear errors only (optional if you only edit gains while idle) ---
+odrv0.axis0.requested_state = AXIS_STATE_IDLE
+odrv0.axis0.clear_errors()
+odrv0.axis1.clear_errors()
+dump_errors(odrv0, True)
+
+# --- Position / velocity loop gains ---
+odrv0.axis0.controller.config.pos_gain = 20.0
+odrv0.axis0.controller.config.vel_gain = 0.1666666716337204
+odrv0.axis0.controller.config.vel_integrator_gain = 0.3199999928474426
+
+# --- Limits ---
+odrv0.axis0.controller.config.vel_limit = 1200.0
+odrv0.axis0.controller.config.vel_limit_tolerance = 2.0
+odrv0.axis0.controller.config.enable_vel_limit = True
+odrv0.axis0.controller.config.enable_overspeed_error = True
+
+# --- Ramps (used in some input modes) ---
+odrv0.axis0.controller.config.vel_ramp_rate = 2.0
+odrv0.axis0.controller.config.torque_ramp_rate = 0.01
+
+# --- Input shaping ---
+odrv0.axis0.controller.config.input_filter_bandwidth = 2.0
+
+# Persist:
+# odrv0.save_configuration()

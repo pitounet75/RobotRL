@@ -1,0 +1,35 @@
+# odrivetool: position mode WITH trapezoidal trajectory planner (INPUT_MODE_TRAP_TRAJ).
+# Aligns input_pos to current position first; motion uses trap_traj.config limits.
+# Device: odrv0, axis: axis0.
+
+# --- Preamble: clear errors and calibration ---
+odrv0.axis0.requested_state = AXIS_STATE_IDLE
+odrv0.axis0.clear_errors()
+odrv0.axis1.clear_errors()
+dump_errors(odrv0, True)
+
+odrv0.axis0.requested_state = AXIS_STATE_FULL_CALIBRATION_SEQUENCE
+import time
+_busy = (AXIS_STATE_FULL_CALIBRATION_SEQUENCE, AXIS_STATE_MOTOR_CALIBRATION, AXIS_STATE_ENCODER_OFFSET_CALIBRATION, AXIS_STATE_ENCODER_INDEX_SEARCH)
+while odrv0.axis0.current_state in _busy:
+    time.sleep(0.1)
+
+odrv0.axis0.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+while odrv0.axis0.current_state != AXIS_STATE_CLOSED_LOOP_CONTROL:
+    time.sleep(0.1)
+
+# --- Position + trap trajectory ---
+odrv0.axis0.controller.config.control_mode = CONTROL_MODE_POSITION_CONTROL
+odrv0.axis0.controller.config.input_mode = INPUT_MODE_TRAP_TRAJ
+
+p = odrv0.axis0.encoder.pos_estimate
+odrv0.axis0.controller.input_pos = p
+odrv0.axis0.controller.input_vel = 0.0
+odrv0.axis0.controller.input_torque = 0.0
+
+# Smooth move in turns (planner respects trap_traj.config limits):
+# odrv0.axis0.controller.input_pos = p + 1.0
+
+# Wait for move (optional):
+# while not odrv0.axis0.controller.trajectory_done:
+#     time.sleep(0.05)

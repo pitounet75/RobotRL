@@ -1,0 +1,93 @@
+# odrivetool (IPython): paste blocks in order. Device: odrv0, axis: axis0.
+# Adjust axis name / run axis1 similarly if needed.
+
+# --- Preamble: clear errors and run motor + encoder calibration ---
+odrv0.axis0.requested_state = AXIS_STATE_IDLE
+odrv0.axis0.clear_errors()
+odrv0.axis1.clear_errors()
+dump_errors(odrv0, True)
+odrv0.axis0.controller.config.pos_gain = 20.0 
+#odrv0.axis0.controller.config.vel_gain = 0.1666666716337204 #5065
+odrv0.axis0.controller.config.vel_gain =  0.08 #2836
+odrv0.axis0.controller.config.vel_integrator_gain = 0.3199999928474426
+
+
+
+odrv0.axis0.requested_state = AXIS_STATE_FULL_CALIBRATION_SEQUENCE
+import time
+_busy = (AXIS_STATE_FULL_CALIBRATION_SEQUENCE, AXIS_STATE_MOTOR_CALIBRATION, AXIS_STATE_ENCODER_OFFSET_CALIBRATION, AXIS_STATE_ENCODER_INDEX_SEARCH)
+while odrv0.axis0.current_state in _busy:
+    time.sleep(0.1)
+
+odrv0.axis0.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+while odrv0.axis0.current_state != AXIS_STATE_CLOSED_LOOP_CONTROL:
+    time.sleep(0.1)
+
+# Anticogging steps input_pos each bin; you must reach that setpoint immediately.
+# INPUT_MODE 5 = INPUT_MODE_TRAP_TRAJ — planner lags input_pos, index often stalls at 1+.
+# INPUT_MODE 1 = INPUT_MODE_PASSTHROUGH — required here (set even if you use trap for normal moves).
+odrv0.axis0.controller.config.control_mode = CONTROL_MODE_POSITION_CONTROL
+odrv0.axis0.controller.config.input_mode = INPUT_MODE_PASSTHROUGH
+
+# --- Anticogging: reset stored map, run calibration ---
+odrv0.axis0.controller.anticogging_valid = False
+odrv0.axis0.controller.config.anticogging.anticogging_enabled = False
+odrv0.axis0.controller.config.anticogging.pre_calibrated = False
+
+# --- Loosen the "settled" band (almost always required vs stock-like defaults) ---
+# Firmware declares a bin done only when |pos err| and |vel| stay inside these limits for many
+# control cycles. Defaults such as calib_pos_threshold=500 mean |err| <= 500 encoder counts;
+# if pos_estimate hunts (limit cycle), errors are often ~0.005 turn (~10k+ counts) so index
+# never advances. Same idea for velocity spikes vs calib_vel_threshold.
+# Widen first so the full forward sweep (3600 bins) can finish; tighten thresholds later for a cleaner map if you want.
+odrv0.axis0.controller.config.anticogging.calib_pos_threshold = 250.0
+odrv0.axis0.controller.config.anticogging.calib_vel_threshold = 0.1 * float(odrv0.axis0.encoder.config.cpr)
+odrv0.axis0.controller.input_pos=0
+
+#2836
+odrv0.axis0.controller.config.pos_gain = 100
+odrv0.axis0.controller.config.vel_integrator_gain = 2
+#5065
+#odrv0.axis0.controller.config.pos_gain = 200
+#odrv0.axis0.controller.config.vel_integrator_gain = 8
+
+
+# Hunting / index stuck: also ensure PASSTHROUGH above (not trap 5); firmware may use ~120 consecutive
+# settled cycles (~15 ms @ 8 kHz) before each bin step.
+# If index stalls: loosen (e.g. pos 12000, vel 0.1*cpr); if only vel fails, try 0.15 * float(odrv0.axis0.encoder.config.cpr).
+
+# --- Optional: higher gains only for anticogging cal, then restore for normal runs ---
+# _pg, _vg, _vi = odrv0.axis0.controller.config.pos_gain, odrv0.axis0.controller.config.vel_gain, odrv0.axis0.controller.config.vel_integrator_gain
+# odrv0.axis0.controller.config.pos_gain = 40.0
+# odrv0.axis0.controller.config.vel_integrator_gain = 1.2
+# ... start_anticogging_calibration(), wait until calib_anticogging False ...
+# odrv0.axis0.controller.config.pos_gain, odrv0.axis0.controller.config.vel_gain, odrv0.axis0.controller.config.vel_integrator_gain = _pg, _vg, _vi
+# Or use: python run_anticogging_calibration.py --cal-pos-gain 40 --cal-vel-integrator-gain 1.2
+
+
+odrv0.axis0.controller.start_anticogging_calibration()
+
+
+
+
+# Monitor until complete:
+#   calib_anticogging == True  while the sweep is running; False when the routine exits.
+#   anticogging_valid == True  after a successful single-pass cal (3600 bins).
+# Check any time:
+# odrv0.axis0.controller.config.anticogging.index
+# odrv0.axis0.controller.config.anticogging.calib_anticogging
+# odrv0.axis0.controller.anticogging_valid
+# One-liner:
+# print("index", odrv0.axis0.controller.config.anticogging.index, "calib_anticogging", odrv0.axis0.controller.config.anticogging.calib_anticogging, "anticogging_valid", odrv0.axis0.controller.anticogging_valid)
+
+# After successful cal, enable and save:
+# 
+
+odrv0.axis0.controller.config.pos_gain = 20.0
+odrv0.axis0.controller.config.vel_gain = 0.1
+odrv0.axis0.controller.config.vel_integrator_gain = 0.3199999928474426
+
+
+odrv0.axis0.controller.config.anticogging.pre_calibrated = True
+odrv0.axis0.controller.config.anticogging.anticogging_enabled = True
+odrv0.save_configuration()
