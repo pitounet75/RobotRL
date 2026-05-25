@@ -8,3 +8,28 @@ __pycache__/
 !.cursor/rules/
 Odrive/venv/
 Odrive/ODrive_S-fw-v0.5.1/venv
+
+# STM32 CubeIDE / Make build outputs
+STM32/RobotSTM32FirmWare/Debug/
+*.o
+*.elf
+*.map
+*.list
+*.su
+*.cyclo
+*.d
+
+# KiCad locks / auto backups
+~*.lck
+**/~*.lck
+**/*-backups/
+**/*.kicad_prl
+
+# ODrive / tooling artifacts (do not commit)
+ODrive/gcc-arm-none-eabi*/
+ODrive/gnu-mcu-eclipse*/
+ODrive/lua-*/
+ODrive/tup/
+ODrive/**/build*/
+ODrive/**/*.npy
+ODrive/**/*.csv

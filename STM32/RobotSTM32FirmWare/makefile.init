@@ -1,0 +1,6 @@
+################################################################################
+# User makefile (not overwritten by CubeIDE). Included from Debug/makefile.
+# VS Code "make" uses Debug/*.mk; main.c now boots ODrive by default in Debug.
+# Optional: force legacy symbol for tooling that still checks it:
+################################################################################
+# C_DEFS += -DDEBUG_REQUIRE_ODRIVE

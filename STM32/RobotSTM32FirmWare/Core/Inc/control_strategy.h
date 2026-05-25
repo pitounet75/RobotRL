@@ -1,0 +1,52 @@
+/**
+ * @file control_strategy.h
+ * @brief Swappable balance / velocity control laws (500 Hz).
+ *
+ * Change at runtime via control_strategy_set() or Live Expression g_ctrl_strategy.
+ */
+#ifndef CONTROL_STRATEGY_H
+#define CONTROL_STRATEGY_H
+
+#include <stdbool.h>
+#include <stdint.h>
+
+typedef enum {
+    CTRL_STRATEGY_DUAL_PID = 0,
+    /** F407-style: u = kθ·θ + kω·θ̇ + kv·ẋ with optional output smoothing. */
+    CTRL_STRATEGY_LINEAR = 1,
+    /** Segway-style: velocity error shifts pitch_ref, then pitch PID. */
+    CTRL_STRATEGY_CASCADE = 2,
+    CTRL_STRATEGY_COUNT
+} control_strategy_id_t;
+
+typedef struct {
+    float pitch_rad;
+    float pitch_rate_rads;
+    float vel_wheel_turns_s;
+    float pitch_ref_rad;
+    float vel_ref_turns_s;
+    float dt_s;
+} control_strategy_input_t;
+
+typedef struct {
+    bool ok;
+    bool estop;
+    float vel_left_turns_s;
+    float vel_right_turns_s;
+    /** Debug taps (strategy-dependent; zero if unused). */
+    float u_balance;
+    float u_vel;
+    float cmd;
+} control_strategy_output_t;
+
+/** Active strategy (writable from debugger for quick A/B). */
+extern volatile control_strategy_id_t g_ctrl_strategy;
+
+void control_strategy_init(void);
+control_strategy_id_t control_strategy_get(void);
+bool control_strategy_set(control_strategy_id_t id);
+const char *control_strategy_name(control_strategy_id_t id);
+
+void control_strategy_update(const control_strategy_input_t *in, control_strategy_output_t *out);
+
+#endif /* CONTROL_STRATEGY_H */
