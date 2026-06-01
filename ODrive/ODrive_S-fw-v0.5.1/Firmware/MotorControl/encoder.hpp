@@ -103,6 +103,8 @@ public:
     bool abs_spi_start_transaction();
     void abs_spi_cb();
     void abs_spi_cs_pin_init();
+    /** Seed ABZ timer from last SPI absolute position; see MODE_SPI_THEN_ABZ_MT6835. */
+    void spi_then_abz_handoff_from_abs_spi();
     uint16_t abs_spi_dma_tx_[1] = {0xFFFF};
     uint16_t abs_spi_dma_rx_[1];
     static constexpr size_t MT6835_SPI_XFER_BYTES = 6;
@@ -110,6 +112,8 @@ public:
     uint8_t mt6835_dma_rx_[6];
     uint8_t mt6835_accum_[4] = {0};
     bool abs_spi_pos_updated_ = false;
+    /** After first good MT6835 SPI read: timer/PLL seeded, ABZ incremental path used (MODE_SPI_THEN_ABZ_MT6835 only). */
+    bool spi_then_abz_handoff_done_ = false;
     Mode mode_ = MODE_INCREMENTAL;
     GPIO_TypeDef* abs_spi_cs_port_;
     uint16_t abs_spi_cs_pin_;

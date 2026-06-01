@@ -271,7 +271,7 @@ odrv0.axis1.step_dir_active = False
 
 odrv0.axis1.config.can_heartbeat_rate_ms = 100
 odrv0.axis1.config.can_node_id = 1
-odrv0.axis1.config.can_node_id_extended = False
+odrv0.axis1.config. _node_id_extended = False
 odrv0.axis1.config.dir_gpio_pin = 8
 odrv0.axis1.config.enable_step_dir = False
 odrv0.axis1.config.enable_watchdog = False

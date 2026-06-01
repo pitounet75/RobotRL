@@ -1,0 +1,6 @@
+# Python packages for the Firmware build (Tup rules run interface_generator on odrive-interface.yaml).
+# Install: pip install -r Requirement.txt
+
+PyYAML
+Jinja2
+jsonschema

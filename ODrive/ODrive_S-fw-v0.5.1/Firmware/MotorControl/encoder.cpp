@@ -15,7 +15,7 @@ static AbsSpiFmt s_abs_fmt = AbsSpiFmt::Unset;
 
 static void abs_spi_apply_hw(SPI_HandleTypeDef* spi, Encoder::Mode mode) {
     AbsSpiFmt want = AbsSpiFmt::Unset;
-    if (mode == Encoder::MODE_SPI_ABS_MT6835) {
+    if (mode == Encoder::MODE_SPI_ABS_MT6835 || mode == Encoder::MODE_SPI_THEN_ABZ_MT6835) {
         want = AbsSpiFmt::W8Mt6835;
     } else if (mode == Encoder::MODE_SPI_ABS_AEAT) {
         want = AbsSpiFmt::W16Aeat;
@@ -123,6 +123,7 @@ void Encoder::setup() {
     set_idx_subscribe();
 
     mode_ = config_.mode;
+    spi_then_abz_handoff_done_ = false;
     if(mode_ & MODE_FLAG_ABS){
         abs_spi_cs_pin_init();
         abs_spi_init();
@@ -374,6 +375,10 @@ bool Encoder::run_offset_calibration() {
     int32_t residual = encvaluesum - ((int64_t)config_.offset * (int64_t)(num_steps * 2));
     config_.offset_float = (float)residual / (float)(num_steps * 2) + 0.5f;  // add 0.5 to center-align state to phase
 
+    /* Switch to ABZ only after offset cal: CPR check uses shadow_count_ in MT6835 count
+     * space; early handoff made shadow track 16-bit quadrature and broke the ratio test. */
+    spi_then_abz_handoff_from_abs_spi();
+
     is_ready_ = true;
     return true;
 }
@@ -415,6 +420,14 @@ void Encoder::sample_now() {
             // Do nothing
         } break;
 
+        case MODE_SPI_THEN_ABZ_MT6835: {
+            if (spi_then_abz_handoff_done_) {
+                tim_cnt_sample_ = (int16_t)hw_config_.timer->Instance->CNT;
+            } else {
+                axis_->motor_.log_timing(TIMING_LOG_SAMPLE_NOW);
+            }
+        } break;
+
         default: {
            set_error(ERROR_UNSUPPORTED_ENCODER_MODE);
         } break;
@@ -431,6 +444,9 @@ bool Encoder::abs_spi_init(){
 
 bool Encoder::abs_spi_start_transaction(){
     if (mode_ & MODE_FLAG_ABS){
+        if (mode_ == MODE_SPI_THEN_ABZ_MT6835 && spi_then_abz_handoff_done_) {
+            return true;
+        }
         abs_spi_apply_hw(hw_config_.spi, mode_);
         axis_->motor_.log_timing(TIMING_LOG_SPI_START);
         if(hw_config_.spi->State != HAL_SPI_STATE_READY){
@@ -438,7 +454,7 @@ bool Encoder::abs_spi_start_transaction(){
             return false;
         }
         HAL_GPIO_WritePin(abs_spi_cs_port_, abs_spi_cs_pin_, GPIO_PIN_RESET);
-        if (mode_ == MODE_SPI_ABS_MT6835) {
+        if (mode_ == MODE_SPI_ABS_MT6835 || (mode_ == MODE_SPI_THEN_ABZ_MT6835 && !spi_then_abz_handoff_done_)) {
             mt6835_fill_burst_tx(mt6835_dma_tx_);
             HAL_SPI_TransmitReceive_DMA(hw_config_.spi, mt6835_dma_tx_, mt6835_dma_rx_,
                                         MT6835_SPI_XFER_BYTES);
@@ -467,7 +483,10 @@ uint8_t cui_parity(uint16_t v) {
 void Encoder::abs_spi_cb(){
     axis_->motor_.log_timing(TIMING_LOG_SPI_END);
 
-    if (mode_ == MODE_SPI_ABS_MT6835) {
+    const bool mt6835_xfer = (mode_ == MODE_SPI_ABS_MT6835)
+        || (mode_ == MODE_SPI_THEN_ABZ_MT6835 && !spi_then_abz_handoff_done_);
+
+    if (mt6835_xfer) {
         HAL_GPIO_WritePin(abs_spi_cs_port_, abs_spi_cs_pin_, GPIO_PIN_SET);
 
         mt6835_accum_[0] = mt6835_dma_rx_[2];
@@ -486,6 +505,11 @@ void Encoder::abs_spi_cb(){
         pos_abs_ = (int32_t)((raw21 * (uint64_t)(uint32_t)config_.cpr) >> 21);
 
         abs_spi_pos_updated_ = true;
+        /* Defer SPI→ABZ handoff until offset cal ends so CPR check sees MT6835-scaled
+         * counts. If pre_calibrated skips offset cal, hand off on first good read. */
+        if (mode_ == MODE_SPI_THEN_ABZ_MT6835 && !spi_then_abz_handoff_done_ && config_.pre_calibrated) {
+            spi_then_abz_handoff_from_abs_spi();
+        }
         if (config_.pre_calibrated) {
             is_ready_ = true;
         }
@@ -531,6 +555,17 @@ void Encoder::abs_spi_cb(){
     if (config_.pre_calibrated) {
         is_ready_ = true;
     }
+}
+
+void Encoder::spi_then_abz_handoff_from_abs_spi() {
+    if (mode_ != MODE_SPI_THEN_ABZ_MT6835 || spi_then_abz_handoff_done_) {
+        return;
+    }
+    int32_t p = mod(pos_abs_, config_.cpr);
+    set_circular_count(p, false);
+    set_linear_count(p);
+    spi_then_abz_handoff_done_ = true;
+    spi_error_rate_ = 0.0f;
 }
 
 void Encoder::abs_spi_cs_pin_init(){
@@ -613,6 +648,28 @@ bool Encoder::update() {
             }
 
         }break;
+
+        case MODE_SPI_THEN_ABZ_MT6835: {
+            if (spi_then_abz_handoff_done_) {
+                int16_t delta_enc_16 = (int16_t)tim_cnt_sample_ - (int16_t)shadow_count_;
+                delta_enc = (int32_t)delta_enc_16;
+            } else {
+                if (abs_spi_pos_updated_ == false) {
+                    spi_error_rate_ += current_meas_period * (1.0f - spi_error_rate_);
+                    if (spi_error_rate_ > 0.005f)
+                        set_error(ERROR_ABS_SPI_COM_FAIL);
+                } else {
+                    spi_error_rate_ += current_meas_period * (0.0f - spi_error_rate_);
+                }
+                abs_spi_pos_updated_ = false;
+                delta_enc = pos_abs_latched - count_in_cpr_;
+                delta_enc = mod(delta_enc, config_.cpr);
+                if (delta_enc > config_.cpr/2) {
+                    delta_enc -= config_.cpr;
+                }
+            }
+        } break;
+
         default: {
            set_error(ERROR_UNSUPPORTED_ENCODER_MODE);
            return false;
@@ -623,8 +680,9 @@ bool Encoder::update() {
     count_in_cpr_ += delta_enc;
     count_in_cpr_ = mod(count_in_cpr_, config_.cpr);
 
-    if(mode_ & MODE_FLAG_ABS)
+    if ((mode_ & MODE_FLAG_ABS) && !(mode_ == MODE_SPI_THEN_ABZ_MT6835 && spi_then_abz_handoff_done_)) {
         count_in_cpr_ = pos_abs_latched;
+    }
 
     //// run pll (for now pll is in units of encoder counts)
     // Predict current pos

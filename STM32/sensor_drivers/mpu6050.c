@@ -26,7 +26,7 @@
 static int reg_write8(mpu6050_t *dev, uint8_t reg, uint8_t val)
 {
 	I2C_HandleTypeDef *hi2c = (I2C_HandleTypeDef *)dev->hal.i2c;
-	uint8_t addr = dev->hal.i2c.i2c_addr << 1;
+	uint8_t addr = dev->hal.i2c_addr << 1;
 	HAL_StatusTypeDef s = HAL_I2C_Mem_Write(hi2c, addr, reg, I2C_MEMADD_SIZE_8BIT,
 		&val, 1, IMU_HAL_TIMEOUT_MS);
 	return (s == HAL_OK) ? 0 : -1;
@@ -35,7 +35,7 @@ static int reg_write8(mpu6050_t *dev, uint8_t reg, uint8_t val)
 static int reg_read(mpu6050_t *dev, uint8_t reg, uint8_t *buf, uint16_t len)
 {
 	I2C_HandleTypeDef *hi2c = (I2C_HandleTypeDef *)dev->hal.i2c;
-	uint8_t addr = dev->hal.i2c.i2c_addr << 1;
+	uint8_t addr = dev->hal.i2c_addr << 1;
 	HAL_StatusTypeDef s = HAL_I2C_Mem_Read(hi2c, addr, reg, I2C_MEMADD_SIZE_8BIT,
 		buf, len, IMU_HAL_TIMEOUT_MS);
 	return (s == HAL_OK) ? 0 : -1;

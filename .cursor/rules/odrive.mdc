@@ -1,0 +1,61 @@
+---
+description: ODrive firmware, odrivetool, and toolchain invariants
+globs: "ODrive/**"
+alwaysApply: false
+---
+
+# ODrive — context invariants
+
+Stable notes for assistants working on this user’s ODrive stack. **Update this rule** when hardware, paths, or conventions change.
+
+## Scope and intent
+
+- Treat this repo’s ODrive tree as the **primary working copy** for tooling and firmware exploration unless a task names another path.
+- Prefer **firmware facts** and **repro paths** over repeating full chat history.
+
+## Paths (verify on machine)
+
+| Role | Typical location |
+|------|------------------|
+| RobotRL ODrive + venv | `H:\Projects\RobotRL\ODrive\` |
+| ODrive_S firmware bundle (this repo) | `H:\Projects\RobotRL\ODrive\ODrive_S-fw-v0.5.1\` |
+| Firmware root | `...\ODrive_S-fw-v0.5.1\Firmware\` |
+
+Other clones have appeared in past sessions (Makerbase trees under `H:\Projects\OdriveMKS\...`, original ODrive under `H:\Projects\ODRIVE_Original\...`). **Do not assume** they match this repo without checking.
+
+## Build / toolchain
+
+- Firmware builds use **tup**; `tup.config` must define board variant (e.g. `CONFIG_BOARD_VERSION=...`). Missing or wrong board config aborts generation or mis-matches hardware.
+- **`tup generate ./build.sh`** produces `build.sh`; on Windows, running it often needs **Git Bash** and a sane `PATH` (venv + Arm GNU + system tools). Paths with spaces need careful quoting or a small launcher script.
+- GCC 12+ and C++ standard / `#include` issues have shown up before; treat toolchain drift as a first-class failure mode.
+
+## `odrivetool` / Fibre (Windows)
+
+- If `Logger` hits `win32console` on Windows, optional deps matter; a failed import can yield **`NameError: name 'win32console' is not defined`** unless the code falls back cleanly.
+- After fixes, confirm both **workspace** `fibre` sources and **venv** `site-packages` if the user runs the installed `odrivetool` script.
+
+## Control / API invariants (0.5.x class firmware)
+
+- **`input_pos`**: often **setter-oriented** in the interface; reading `input_pos` back over USB may not reflect the internal setpoint. Trust **`pos_setpoint`**, **`pos_estimate`**, and motion, not readback of `input_pos` alone.
+- **Position mode**: zero motion with **`input_pos == pos_estimate`** is expected; change the setpoint to see movement.
+- **`vel_setpoint` / `torque_setpoint`** in passthrough: what you read may not be the same as internal `vel_des` / current-loop drive used inside `Controller::update()`—interpret logs against the docs or source.
+
+## Encoder / board
+
+- ABS SPI **CS GPIO** and **24V vs 56V** board strings affect `vbus` scaling and peripherals; wrong `HW_VERSION_VOLTAGE` or CS pin shows up as wrong bus voltage or encoder failures, not only “encoder broken.”
+
+## Agent transcripts (parent UUIDs, for deep history)
+
+Cursor parent chat IDs (not subagents), for topics already covered:
+
+- `dee9c7d4-c2c2-4f25-8cf2-8a72f7996b05` — position mode / `odrivetool`, MKS-flavored firmware.
+- `d4c37980-8ef2-48a6-881a-31196cbd7a62` — MT6835 / SPI encoder support.
+- `b98eb89f-5505-479e-b238-fc8ce5e66f09` — Makerbase build, `tup.config`, board voltage variant, ABS encoder CS.
+- `f5f828bc-7a9d-42af-a7ec-dbedecc00ee2` — venv + tup + Git Bash build wiring.
+- `0df4cea1-6af6-4d41-8159-0a707c789441` — original ODrive tree, `NullStream` vs `HexArrayPrinter` ambiguity when logs compiled out.
+- `03b42f40-3fd2-4fe9-9ab9-02c8757b676a` — `odrivetool` / `fibre` Windows console.
+
+## Housekeeping
+
+- When adding invariants, use **short bullets** and **one line per fact** where possible.
+- Date significant changes (optional): `YYYY-MM-DD — what changed`.

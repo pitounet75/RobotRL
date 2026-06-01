@@ -1,6 +1,5 @@
 /**
  * @file odrive_can_dma.c
- * @brief File TX + IRQ RX pour ODrive CAN simple (bxCAN HAL).
  */
 
 #include "odrive_can_dma.h"
@@ -17,7 +16,7 @@ typedef struct {
     uint8_t data[8];
 } ODriveCanDmaTxSlot;
 
-static CAN_HandleTypeDef *s_hcan;
+static ODriveCanHalHandle *s_hcan;
 static uint32_t s_node_id;
 
 static ODriveCanDmaTxSlot s_tx_q[ODRIVE_CAN_DMA_TX_QUEUE_DEPTH];
@@ -60,26 +59,7 @@ static void tx_queue_drop_head(void)
     }
 }
 
-static bool hal_tx_one(CAN_HandleTypeDef *hcan, const ODriveCanDmaTxSlot *slot)
-{
-    CAN_TxHeaderTypeDef hdr = {0};
-    hdr.StdId = slot->std_id & 0x7FFu;
-    hdr.IDE = CAN_ID_STD;
-    hdr.RTR = slot->rtr ? CAN_RTR_REMOTE : CAN_RTR_DATA;
-    hdr.DLC = slot->dlc > 8u ? 8u : slot->dlc;
-    hdr.TransmitGlobalTime = DISABLE;
-
-    uint8_t payload[8];
-    memset(payload, 0, sizeof(payload));
-    if (slot->rtr == 0u) {
-        memcpy(payload, slot->data, hdr.DLC);
-    }
-
-    uint32_t mb = 0;
-    return HAL_CAN_AddTxMessage(hcan, &hdr, payload, &mb) == HAL_OK;
-}
-
-bool odrive_can_dma_init(CAN_HandleTypeDef *hcan, uint32_t default_node_id)
+bool odrive_can_dma_init(ODriveCanHalHandle *hcan, uint32_t default_node_id)
 {
     if (hcan == NULL) {
         return false;
@@ -89,7 +69,7 @@ bool odrive_can_dma_init(CAN_HandleTypeDef *hcan, uint32_t default_node_id)
     s_tx_head = s_tx_tail = 0u;
     memset(&s_enc_snap, 0, sizeof(s_enc_snap));
 
-    (void)HAL_CAN_ActivateNotification(hcan, CAN_IT_RX_FIFO0_MSG_PENDING);
+    odrive_can_hal_rx_irq_enable(hcan);
     return true;
 }
 
@@ -103,47 +83,49 @@ uint32_t odrive_can_dma_get_node_id(void)
     return s_node_id;
 }
 
-void odrive_can_dma_process_tx(CAN_HandleTypeDef *hcan)
+void odrive_can_dma_process_tx(ODriveCanHalHandle *hcan)
 {
     if (hcan == NULL || hcan != s_hcan) {
         return;
     }
-    while (HAL_CAN_GetTxMailboxesFreeLevel(hcan) > 0u) {
+    while (odrive_can_hal_tx_ready(hcan)) {
         const ODriveCanDmaTxSlot *slot = tx_queue_peek();
         if (slot == NULL) {
             break;
         }
-        if (!hal_tx_one(hcan, slot)) {
+        if (!odrive_can_hal_tx(hcan, slot->std_id, slot->rtr != 0u, slot->data, slot->dlc)) {
             break;
         }
         tx_queue_drop_head();
     }
 }
 
-void odrive_can_dma_on_rx_fifo0(CAN_HandleTypeDef *hcan)
+void odrive_can_dma_on_rx_fifo0(ODriveCanHalHandle *hcan)
 {
     if (hcan == NULL || hcan != s_hcan) {
         return;
     }
 
-    while (HAL_CAN_GetRxFifoFillLevel(hcan, CAN_RX_FIFO0) > 0u) {
-        CAN_RxHeaderTypeDef hdr;
+    for (;;) {
+        uint32_t std_id = 0u;
+        bool ext = false;
+        bool rtr = false;
         uint8_t data[8];
-        if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &hdr, data) != HAL_OK) {
+        uint8_t dlc = 0u;
+
+        if (!odrive_can_hal_rx(hcan, &std_id, &ext, &rtr, data, &dlc)) {
             break;
         }
 
-        if (hdr.IDE != CAN_ID_STD || hdr.RTR == CAN_RTR_REMOTE) {
+        if (ext || rtr) {
             continue;
         }
-        uint8_t dlc = hdr.DLC > 8u ? 8u : hdr.DLC;
         if (dlc < 8u) {
             continue;
         }
 
-        uint32_t std_id = hdr.StdId;
-        uint32_t nid = odrive_can_node_from_id(std_id);
-        uint8_t cmd = odrive_can_cmd_from_id(std_id);
+        const uint32_t nid = odrive_can_node_from_id(std_id);
+        const uint8_t cmd = odrive_can_cmd_from_id(std_id);
         if (nid != s_node_id) {
             continue;
         }

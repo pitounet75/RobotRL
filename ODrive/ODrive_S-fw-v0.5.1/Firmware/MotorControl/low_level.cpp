@@ -820,7 +820,8 @@ void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
         if (!(enc.mode_ & Encoder::MODE_FLAG_ABS)) {
             continue;
         }
-        if (enc.mode_ == Encoder::MODE_SPI_ABS_MT6835) {
+        if (enc.mode_ == Encoder::MODE_SPI_ABS_MT6835 ||
+            (enc.mode_ == Encoder::MODE_SPI_THEN_ABZ_MT6835 && !enc.spi_then_abz_handoff_done_)) {
             if (hspi->pRxBuffPtr == enc.mt6835_dma_rx_) {
                 enc.abs_spi_cb();
             }

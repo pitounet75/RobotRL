@@ -1,0 +1,36 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "RobotSTM32: Kill Debug Servers",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-Command",
+        "Get-Process -Name 'ST-LINK_gdbserver','openocd' -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Milliseconds 500"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "RobotSTM32: Build Debug",
+      "type": "shell",
+      "command": "make",
+      "args": ["-j16", "all"],
+      "options": {
+        "cwd": "${workspaceFolder}/STM32/RobotSTM32FirmWare/Debug"
+      },
+      "group": "build",
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "RobotSTM32: Prepare Debug",
+      "dependsOn": [
+        "RobotSTM32: Kill Debug Servers",
+        "RobotSTM32: Build Debug"
+      ],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    }
+  ]
+}

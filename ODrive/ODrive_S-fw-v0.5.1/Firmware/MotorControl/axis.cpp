@@ -512,6 +512,11 @@ void Axis::run_state_machine_loop() {
         // Handlers should exit if requested_state != AXIS_STATE_UNDEFINED
         bool status;
         switch (current_state_) {
+            case AXIS_STATE_UNDEFINED: {
+                // Task-chain sentinel or post-rotate padding slot — not a runnable state
+                status = true;
+            } break;
+
             case AXIS_STATE_MOTOR_CALIBRATION: {
                 status = motor_.run_calibration();
             } break;

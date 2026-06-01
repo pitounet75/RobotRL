@@ -2,8 +2,6 @@
 #include "odrive_main.h"
 #include <algorithm>
 
-#include <algorithm>
-
 Controller::Controller(Config_t& config) :
     config_(config)
 {
@@ -64,42 +62,119 @@ void Controller::move_incremental(float displacement, bool from_input_pos = true
 void Controller::start_anticogging_calibration() {
     // Ensure the cogging map was correctly allocated earlier and that the motor is capable of calibrating
     if (axis_->error_ == Axis::ERROR_NONE) {
+        config_.anticogging.index = 0;
+        anticogging_settle_streak_ = 0;
+        anticogging_calib_phase_ = 0;
+        for (float& v : anticogging_rev_buffer_) {
+            v = 0.0f;
+        }
         config_.anticogging.calib_anticogging = true;
     }
 }
 
+float Controller::get_anticogging_value(uint32_t index) {
+    const uint32_t i = std::min<uint32_t>(index, 3599u);
+    return config_.anticogging.cogging_map[i];
+}
 
 /*
- * This anti-cogging implementation iterates through each encoder position,
- * waits for zero velocity & position error,
- * then samples the current required to maintain that position.
- * 
- * This holding current is added as a feedforward term in the control loop.
+ * Anti-cogging: forward sweep (bins 0..3599), then reverse sweep (bins 3599..0), same hold
+ * per bin. Reverse samples are stored per bin index. Combined map = (forward + reverse) / 2,
+ * then subtract global mean (zero-mean / balanced map).
  */
 bool Controller::anticogging_calibration(float pos_estimate, float vel_estimate) {
-    float pos_err = input_pos_ - pos_estimate;
-    if (std::abs(pos_err) <= config_.anticogging.calib_pos_threshold / (float)axis_->encoder_.config_.cpr &&
-        std::abs(vel_estimate) < config_.anticogging.calib_vel_threshold / (float)axis_->encoder_.config_.cpr) {
-        config_.anticogging.cogging_map[std::clamp<uint32_t>(config_.anticogging.index++, 0, 3600)] = vel_integrator_torque_;
-    }
-    if (config_.anticogging.index < 3600) {
-        config_.control_mode = CONTROL_MODE_POSITION_CONTROL;
-        input_pos_ = config_.anticogging.index * axis_->encoder_.getCoggingRatio();
-        input_vel_ = 0.0f;
-        input_torque_ = 0.0f;
-        input_pos_updated();
-        return false;
+    // ~15 ms at 8 kHz: require stable settle to avoid advancing on limit-cycle zero-crossings.
+    static constexpr uint16_t kSettleCycles = 120;
+    static constexpr uint32_t kBins = 3600;
+    const float cpr = (float)axis_->encoder_.config_.cpr;
+    const float ratio = axis_->encoder_.getCoggingRatio();
+    // Match position-loop geometry: circular mode uses wrapped error vs pos_circular_,
+    // not linear pos_estimate, or settling never happens after the first bin.
+    float pos_err;
+    if (config_.circular_setpoints) {
+        const float range = config_.circular_setpoint_range;
+        const float cmd = fmodf_pos(input_pos_, range);
+        pos_err = cmd - axis_->encoder_.pos_circular_;
+        pos_err = wrap_pm(pos_err, 0.5f * range);
     } else {
+        pos_err = input_pos_ - pos_estimate;
+    }
+    const bool settled =
+        (std::abs(pos_err) <= config_.anticogging.calib_pos_threshold / cpr &&
+         std::abs(vel_estimate) < config_.anticogging.calib_vel_threshold / cpr);
+    if (settled) {
+        if (anticogging_settle_streak_ < UINT16_MAX) {
+            anticogging_settle_streak_++;
+        }
+    } else {
+        anticogging_settle_streak_ = 0;
+    }
+    const bool settled_stable = settled && (anticogging_settle_streak_ >= kSettleCycles);
+
+    if (settled_stable) {
+        anticogging_settle_streak_ = 0;
+        const uint32_t i = std::min<uint32_t>(config_.anticogging.index, 3599u);
+        if (anticogging_calib_phase_ == 0) {
+            // Forward pass: sample bin i, then advance toward 3600
+            config_.anticogging.cogging_map[i] = vel_integrator_torque_;
+            config_.anticogging.index++;
+            if (config_.anticogging.index >= kBins) {
+                anticogging_calib_phase_ = 1;
+                config_.anticogging.index = 3599;
+            }
+        } else if (anticogging_calib_phase_ == 1) {
+            // Reverse pass: visit bins 3599..0; store at bin i (aligned with forward indexing)
+            anticogging_rev_buffer_[i] = vel_integrator_torque_;
+            if (i == 0) {
+                anticogging_calib_phase_ = 2;
+            } else {
+                config_.anticogging.index--;
+            }
+        }
+    }
+
+    if (anticogging_calib_phase_ == 2) {
+        float sum = 0.0f;
+        for (uint32_t j = 0; j < kBins; j++) {
+            const float v = 0.5f * (config_.anticogging.cogging_map[j] + anticogging_rev_buffer_[j]);
+            config_.anticogging.cogging_map[j] = v;
+            sum += v;
+        }
+        const float mean = sum / (float)kBins;
+        for (uint32_t j = 0; j < kBins; j++) {
+            config_.anticogging.cogging_map[j] -= mean;
+        }
+
         config_.anticogging.index = 0;
         config_.control_mode = CONTROL_MODE_POSITION_CONTROL;
-        input_pos_ = 0.0f;  // Send the motor home
+        input_pos_ = 0.0f;
         input_vel_ = 0.0f;
         input_torque_ = 0.0f;
         input_pos_updated();
         anticogging_valid_ = true;
         config_.anticogging.calib_anticogging = false;
+        anticogging_calib_phase_ = 0;
         return true;
     }
+
+    if (anticogging_calib_phase_ == 0 && config_.anticogging.index < kBins) {
+        config_.control_mode = CONTROL_MODE_POSITION_CONTROL;
+        input_pos_ = config_.anticogging.index * ratio;
+        input_vel_ = 0.0f;
+        input_torque_ = 0.0f;
+        input_pos_updated();
+        return false;
+    }
+    if (anticogging_calib_phase_ == 1) {
+        config_.control_mode = CONTROL_MODE_POSITION_CONTROL;
+        input_pos_ = config_.anticogging.index * ratio;
+        input_vel_ = 0.0f;
+        input_torque_ = 0.0f;
+        input_pos_updated();
+        return false;
+    }
+
+    return false;
 }
 
 void Controller::update_filter_gains() {
@@ -134,7 +209,7 @@ bool Controller::update(float* torque_setpoint_output) {
     }
 
     // TODO also enable circular deltas for 2nd order filter, etc.
-    if (config_.circular_setpoints) {
+    if (config_.circular_setpoints && !config_.anticogging.calib_anticogging) {
         // Keep pos setpoint from drifting
         input_pos_ = fmodf_pos(input_pos_, config_.circular_setpoint_range);
     }

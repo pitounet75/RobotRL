@@ -11,6 +11,14 @@
 
 #include "imu_driver.h"
 
+#include <stdint.h>
+
+/** Last WHO_AM_I byte from init (0xE9 expected). */
+extern volatile uint8_t icm45686_last_who_am_i;
+/** WHO_AM_I probes at slow SPI (0xFF = no MISO response). */
+extern volatile uint8_t icm45686_who_am_i_mode0;
+extern volatile uint8_t icm45686_who_am_i_mode3;
+
 /* Opaque HAL types for init_spi/init_i2c (include imu_hal_platform.h in .c). */
 struct _SPI_HandleTypeDef;
 struct _I2C_HandleTypeDef;

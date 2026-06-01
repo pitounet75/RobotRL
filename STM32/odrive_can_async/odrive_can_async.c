@@ -45,7 +45,7 @@ typedef struct {
     TickType_t deadline_ticks;
 } pending_slot_t;
 
-static CAN_HandleTypeDef *s_hcan;
+static ODriveCanHalHandle *s_hcan;
 static QueueHandle_t s_rx_queue;
 static SemaphoreHandle_t s_mtx;
 static TaskHandle_t s_worker;
@@ -53,7 +53,8 @@ static pending_slot_t s_pending[ODRIVE_CAN_ASYNC_MAX_PENDING];
 
 static void odrive_can_async_worker(void *arg);
 
-static bool tx_mailbox_send_locked(uint32_t std_id, bool rtr, const uint8_t *data, uint8_t dlc) {
+static bool tx_send_locked(uint32_t std_id, bool rtr, const uint8_t *data, uint8_t dlc)
+{
     if (s_hcan == NULL) {
         return false;
     }
@@ -62,35 +63,20 @@ static bool tx_mailbox_send_locked(uint32_t std_id, bool rtr, const uint8_t *dat
     }
 
     for (int spin = 0; spin < 2000; ++spin) {
-        if (HAL_CAN_GetTxMailboxesFreeLevel(s_hcan) > 0) {
+        if (odrive_can_hal_tx_ready(s_hcan)) {
             break;
         }
         taskYIELD();
     }
-    if (HAL_CAN_GetTxMailboxesFreeLevel(s_hcan) == 0) {
+    if (!odrive_can_hal_tx_ready(s_hcan)) {
         return false;
     }
 
-    CAN_TxHeaderTypeDef hdr = {0};
-    hdr.StdId = std_id & 0x7FFU;
-    hdr.IDE = CAN_ID_STD;
-    hdr.RTR = rtr ? CAN_RTR_REMOTE : CAN_RTR_DATA;
-    hdr.DLC = dlc;
-    hdr.TransmitGlobalTime = DISABLE;
-
-    uint32_t mb = 0U;
-    uint8_t buf[8] = {0};
-    if (!rtr && data != NULL && dlc > 0U) {
-        memcpy(buf, data, dlc);
-    }
-
-    if (HAL_CAN_AddTxMessage(s_hcan, &hdr, buf, &mb) != HAL_OK) {
-        return false;
-    }
-    return true;
+    return odrive_can_hal_tx(s_hcan, std_id, rtr, data, dlc);
 }
 
-static int pending_find_by_std_id(uint32_t std_id) {
+static int pending_find_by_std_id(uint32_t std_id)
+{
     for (unsigned i = 0; i < ODRIVE_CAN_ASYNC_MAX_PENDING; ++i) {
         if (s_pending[i].active && s_pending[i].expected_std_id == std_id) {
             return (int)i;
@@ -99,7 +85,8 @@ static int pending_find_by_std_id(uint32_t std_id) {
     return -1;
 }
 
-static int pending_alloc_slot(uint32_t expected_std_id) {
+static int pending_alloc_slot(uint32_t expected_std_id)
+{
     if (pending_find_by_std_id(expected_std_id) >= 0) {
         return -1;
     }
@@ -113,19 +100,20 @@ static int pending_alloc_slot(uint32_t expected_std_id) {
     return -1;
 }
 
-static void pending_clear(int idx) {
+static void pending_clear(int idx)
+{
     if (idx >= 0 && (unsigned)idx < ODRIVE_CAN_ASYNC_MAX_PENDING) {
         memset(&s_pending[idx], 0, sizeof(s_pending[idx]));
     }
 }
 
-static void dispatch_timeouts_locked(void) {
+static void dispatch_timeouts_locked(void)
+{
     const TickType_t now = xTaskGetTickCount();
     for (unsigned i = 0; i < ODRIVE_CAN_ASYNC_MAX_PENDING; ++i) {
         if (!s_pending[i].active) {
             continue;
         }
-        /* Timed out when `deadline_ticks` is in the past (wrap-safe compare, max ~24 days). */
         if ((TickType_t)(now - s_pending[i].deadline_ticks) >= (TickType_t)0x80000000UL) {
             continue;
         }
@@ -139,7 +127,8 @@ static void dispatch_timeouts_locked(void) {
     }
 }
 
-static void try_dispatch_rx_locked(const can_rx_item_t *rx) {
+static void try_dispatch_rx_locked(const can_rx_item_t *rx)
+{
     const int idx = pending_find_by_std_id(rx->std_id);
     if (idx < 0) {
         return;
@@ -152,7 +141,8 @@ static void try_dispatch_rx_locked(const can_rx_item_t *rx) {
     }
 }
 
-static void odrive_can_async_worker(void *arg) {
+static void odrive_can_async_worker(void *arg)
+{
     (void)arg;
     can_rx_item_t rx;
 
@@ -172,7 +162,8 @@ static void odrive_can_async_worker(void *arg) {
     }
 }
 
-bool odrive_can_async_init(CAN_HandleTypeDef *hcan) {
+bool odrive_can_async_init(ODriveCanHalHandle *hcan)
+{
     if (hcan == NULL) {
         return false;
     }
@@ -195,15 +186,16 @@ bool odrive_can_async_init(CAN_HandleTypeDef *hcan) {
         return false;
     }
 
-    (void)HAL_CAN_ActivateNotification(hcan, CAN_IT_RX_FIFO0_MSG_PENDING);
+    odrive_can_hal_rx_irq_enable(hcan);
     return true;
 }
 
-void odrive_can_async_deinit(void) {
+void odrive_can_async_deinit(void)
+{
     odrive_can_async_stop();
 
     if (s_hcan != NULL) {
-        (void)HAL_CAN_DeactivateNotification(s_hcan, CAN_IT_RX_FIFO0_MSG_PENDING);
+        odrive_can_hal_rx_irq_disable(s_hcan);
     }
 
     if (s_mtx != NULL) {
@@ -219,7 +211,8 @@ void odrive_can_async_deinit(void) {
     s_hcan = NULL;
 }
 
-bool odrive_can_async_start(void) {
+bool odrive_can_async_start(void)
+{
     if (s_hcan == NULL || s_rx_queue == NULL || s_mtx == NULL) {
         return false;
     }
@@ -236,32 +229,40 @@ bool odrive_can_async_start(void) {
     return true;
 }
 
-void odrive_can_async_stop(void) {
+void odrive_can_async_stop(void)
+{
     if (s_worker != NULL) {
         vTaskDelete(s_worker);
         s_worker = NULL;
     }
 }
 
-void odrive_can_async_on_rx_fifo0_isr(CAN_HandleTypeDef *hcan) {
+void odrive_can_async_on_rx_fifo0_isr(ODriveCanHalHandle *hcan)
+{
     if (hcan != s_hcan || s_rx_queue == NULL) {
         return;
     }
 
-    while (HAL_CAN_GetRxFifoFillLevel(hcan, CAN_RX_FIFO0) > 0) {
-        CAN_RxHeaderTypeDef hdr = {0};
+    for (;;) {
+        uint32_t std_id = 0u;
+        bool ext = false;
+        bool rtr = false;
         uint8_t data[8] = {0};
-        if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO0, &hdr, data) != HAL_OK) {
+        uint8_t dlc = 0u;
+
+        if (!odrive_can_hal_rx(hcan, &std_id, &ext, &rtr, data, &dlc)) {
             break;
         }
-        if (hdr.IDE != CAN_ID_STD || hdr.RTR == CAN_RTR_REMOTE) {
+        if (ext || rtr) {
             continue;
         }
 
         can_rx_item_t item = {0};
-        item.std_id = hdr.StdId & 0x7FFU;
-        item.dlc = (hdr.DLC <= 8U) ? hdr.DLC : 8U;
-        memcpy(item.data, data, item.dlc);
+        item.std_id = std_id & 0x7FFU;
+        item.dlc = dlc;
+        if (dlc > 0u) {
+            memcpy(item.data, data, dlc);
+        }
 
         BaseType_t hpw = pdFALSE;
         (void)xQueueSendFromISR(s_rx_queue, &item, &hpw);
@@ -269,7 +270,8 @@ void odrive_can_async_on_rx_fifo0_isr(CAN_HandleTypeDef *hcan) {
     }
 }
 
-bool odrive_can_async_send_data(uint32_t node_id, ODriveCanMsg cmd, const uint8_t *data, uint8_t dlc) {
+bool odrive_can_async_send_data(uint32_t node_id, ODriveCanMsg cmd, const uint8_t *data, uint8_t dlc)
+{
     if (s_hcan == NULL || s_mtx == NULL) {
         return false;
     }
@@ -278,13 +280,14 @@ bool odrive_can_async_send_data(uint32_t node_id, ODriveCanMsg cmd, const uint8_
     if (xSemaphoreTake(s_mtx, portMAX_DELAY) != pdTRUE) {
         return false;
     }
-    const bool ok = tx_mailbox_send_locked(std_id, false, data, dlc);
+    const bool ok = tx_send_locked(std_id, false, data, dlc);
     xSemaphoreGive(s_mtx);
     return ok;
 }
 
 bool odrive_can_async_request(uint32_t node_id, ODriveCanMsg cmd, bool rtr, const uint8_t *tx_data, uint8_t tx_dlc,
-                              ODriveCanAsyncReplyCb on_done, void *user_ctx, uint32_t timeout_ms) {
+                              ODriveCanAsyncReplyCb on_done, void *user_ctx, uint32_t timeout_ms)
+{
     if (s_hcan == NULL || s_mtx == NULL || on_done == NULL) {
         return false;
     }
@@ -309,7 +312,7 @@ bool odrive_can_async_request(uint32_t node_id, ODriveCanMsg cmd, bool rtr, cons
     s_pending[slot].user_ctx = user_ctx;
     s_pending[slot].deadline_ticks = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
 
-    const bool sent = tx_mailbox_send_locked(std_id, rtr, tx_data, tx_dlc);
+    const bool sent = tx_send_locked(std_id, rtr, tx_data, tx_dlc);
     if (!sent) {
         pending_clear(slot);
         xSemaphoreGive(s_mtx);

@@ -724,6 +724,14 @@ interfaces:
             usually corresponds roughly to the current position of the axis.'
           }
       start_anticogging_calibration:
+        doc: |
+          Runs forward bin sweep (0..3599), then reverse sweep (3599..0), averages the two
+          vel-integrator maps, then subtracts the global mean (zero-mean map). Takes ~2x longer
+          than a single-pass cal.
+      get_anticogging_value:
+        doc: Return cogging_map[index] for index 0..3599 (clamped). Nm feedforward per bin.
+        in: {index: uint32}
+        out: {val: float32}
 
 
   ODrive.Encoder:
@@ -934,6 +942,13 @@ valuetypes:
           commande « Burst Angle Read » (C3~C0=1010) avec adresse 0x003, CSN
           maintenu bas pendant un transfert de 6 octets (0x003…0x006, dernier = CRC).
           Résolution 21 bits ; `config.cpr` typique 2097152 (2^21).
+      SpiThenAbzMt6835:
+        value: 0x105
+        doc: |
+          MT6835 (same SPI wiring and burst protocol as SpiAbsMt6835) with ABZ also connected.
+          On the first successful SPI read (valid CRC), the quadrature timer is seeded from the
+          absolute count and the axis continues in incremental (ABZ) mode — no index search for
+          initial mechanical angle. Use encoder ``config.cpr`` consistent with the part (e.g. 2^21).
 
   ODrive.Controller.ControlMode:
     values:

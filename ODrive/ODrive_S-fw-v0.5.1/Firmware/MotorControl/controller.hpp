@@ -65,6 +65,7 @@ public:
     
     // TODO: make this more similar to other calibration loops
     void start_anticogging_calibration();
+    float get_anticogging_value(uint32_t index) override;
     bool anticogging_calibration(float pos_estimate, float vel_estimate);
 
     void update_filter_gains();
@@ -100,6 +101,14 @@ public:
     bool trajectory_done_ = true;
 
     bool anticogging_valid_ = false;
+
+    /** Consecutive control cycles with "settled" true before sampling a bin (reduces limit-cycle stalls). */
+    uint16_t anticogging_settle_streak_ = 0;
+
+    /** 0 = forward sweep, 1 = reverse sweep (bin index 3599..0), 2 = finalize (average + zero-mean). */
+    uint8_t anticogging_calib_phase_ = 0;
+    /** Second-pass samples at each bin (forward pass uses config_.anticogging.cogging_map). */
+    float anticogging_rev_buffer_[3600] = {};
 
     // custom setters
     void set_input_pos(float value) { input_pos_ = value; input_pos_updated(); }

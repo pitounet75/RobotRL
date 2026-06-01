@@ -8,6 +8,7 @@
  */
 
 #include "icm45686.h"
+#include "icm45686_parse.h"
 #include "imu_hal_platform.h"
 #include <string.h>
 
@@ -24,10 +25,62 @@
 #define ICM45686_ACCEL_ODR_800HZ    0x6
 #define ICM45686_GYRO_ODR_800HZ     0x6
 
-#define ICM45686_TEMP_LSB_PER_C     132.48f
-#define ICM45686_TEMP_OFFSET_C      25.0f
-
 #define ICM45686_SPI_READ_BIT     0x80
+
+/** Last WHO_AM_I byte read (for debugger when init returns -2). */
+volatile uint8_t icm45686_last_who_am_i;
+volatile uint8_t icm45686_who_am_i_mode0;
+volatile uint8_t icm45686_who_am_i_mode3;
+
+static void cs_gpio_enable_clock(GPIO_TypeDef *port)
+{
+	if (port == GPIOA) {
+		__HAL_RCC_GPIOA_CLK_ENABLE();
+	} else if (port == GPIOB) {
+		__HAL_RCC_GPIOB_CLK_ENABLE();
+	} else if (port == GPIOC) {
+		__HAL_RCC_GPIOC_CLK_ENABLE();
+	} else if (port == GPIOD) {
+		__HAL_RCC_GPIOD_CLK_ENABLE();
+	}
+}
+
+static void cs_gpio_init(icm45686_t *dev)
+{
+	GPIO_InitTypeDef gpio = {0};
+	GPIO_TypeDef *port = (GPIO_TypeDef *)dev->hal.spi.cs_port;
+
+	cs_gpio_enable_clock(port);
+	gpio.Pin = dev->hal.spi.cs_pin;
+	gpio.Mode = GPIO_MODE_OUTPUT_PP;
+	gpio.Pull = GPIO_PULLUP;
+	gpio.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+	HAL_GPIO_Init(port, &gpio);
+	cs_deassert(dev);
+}
+
+static int spi_prepare(SPI_HandleTypeDef *hspi)
+{
+	if (hspi->State != HAL_SPI_STATE_READY) {
+		(void)HAL_SPI_Abort(hspi);
+	}
+	return 0;
+}
+
+static int spi_apply_mode(SPI_HandleTypeDef *hspi, uint32_t cpol, uint32_t cpha, uint32_t prescaler)
+{
+	if (spi_prepare(hspi) != 0) {
+		return -1;
+	}
+	(void)HAL_SPI_DeInit(hspi);
+	hspi->Init.CLKPolarity = cpol;
+	hspi->Init.CLKPhase = cpha;
+	hspi->Init.BaudRatePrescaler = prescaler;
+	if (HAL_SPI_Init(hspi) != HAL_OK) {
+		return -1;
+	}
+	return 0;
+}
 
 static void cs_assert(icm45686_t *dev)
 {
@@ -39,20 +92,36 @@ static void cs_deassert(icm45686_t *dev)
 	HAL_GPIO_WritePin((GPIO_TypeDef *)dev->hal.spi.cs_port, dev->hal.spi.cs_pin, GPIO_PIN_SET);
 }
 
-static int reg_read(icm45686_t *dev, uint8_t reg, uint8_t *buf, uint16_t len)
+static int reg_read_spi(icm45686_t *dev, uint8_t reg, uint8_t *buf, uint16_t len)
 {
 	SPI_HandleTypeDef *hspi = (SPI_HandleTypeDef *)dev->hal.spi.spi;
+	uint8_t tx[32];
+	uint8_t rx[32];
+	const uint16_t total = (uint16_t)(1u + len);
+
+	if (total > sizeof(tx)) {
+		return -1;
+	}
+
+	tx[0] = (uint8_t)(reg | ICM45686_SPI_READ_BIT);
+	memset(tx + 1, 0, len);
+
+	(void)spi_prepare(hspi);
+	cs_assert(dev);
+	HAL_StatusTypeDef s = HAL_SPI_TransmitReceive(hspi, tx, rx, total, IMU_HAL_TIMEOUT_MS);
+	cs_deassert(dev);
+	if (s != HAL_OK) {
+		return -1;
+	}
+
+	memcpy(buf, rx + 1, len);
+	return 0;
+}
+
+static int reg_read(icm45686_t *dev, uint8_t reg, uint8_t *buf, uint16_t len)
+{
 	if (dev->iface == ICM45686_IFACE_SPI) {
-		cs_assert(dev);
-		uint8_t tx = reg | ICM45686_SPI_READ_BIT;
-		HAL_StatusTypeDef s = HAL_SPI_Transmit(hspi, &tx, 1, IMU_HAL_TIMEOUT_MS);
-		if (s != HAL_OK) {
-			cs_deassert(dev);
-			return -1;
-		}
-		s = HAL_SPI_Receive(hspi, buf, len, IMU_HAL_TIMEOUT_MS);
-		cs_deassert(dev);
-		return (s == HAL_OK) ? 0 : -1;
+		return reg_read_spi(dev, reg, buf, len);
 	}
 	if (dev->iface == ICM45686_IFACE_I2C) {
 		I2C_HandleTypeDef *hi2c = (I2C_HandleTypeDef *)dev->hal.i2c.i2c;
@@ -91,36 +160,6 @@ static int write_reg8(icm45686_t *dev, uint8_t reg, uint8_t val)
 	return reg_write(dev, reg, &val, 1);
 }
 
-/* LSB per g for accel: 32768 / (2 * full_scale_g) */
-static float accel_lsb_per_g(icm45686_accel_scale_t fs)
-{
-	static const float lsb[] = {
-		[ICM45686_ACCEL_32G]  = 512.0f,
-		[ICM45686_ACCEL_16G]  = 2048.0f,
-		[ICM45686_ACCEL_8G]   = 4096.0f,
-		[ICM45686_ACCEL_4G]   = 8192.0f,
-		[ICM45686_ACCEL_2G]   = 16384.0f,
-	};
-	return lsb[fs];
-}
-
-/* LSB per dps for gyro (typical values from datasheet) */
-static float gyro_lsb_per_dps(icm45686_gyro_scale_t fs)
-{
-	static const float lsb[] = {
-		[ICM45686_GYRO_4000_DPS]   = 8.0f,
-		[ICM45686_GYRO_2000_DPS]   = 16.0f,
-		[ICM45686_GYRO_1000_DPS]   = 32.0f,
-		[ICM45686_GYRO_500_DPS]    = 65.0f,
-		[ICM45686_GYRO_250_DPS]    = 131.0f,
-		[ICM45686_GYRO_125_DPS]    = 262.0f,
-		[ICM45686_GYRO_62_5_DPS]   = 524.0f,
-		[ICM45686_GYRO_31_25_DPS]  = 1048.0f,
-		[ICM45686_GYRO_15_625_DPS] = 2096.0f,
-	};
-	return lsb[fs];
-}
-
 int icm45686_init_spi(icm45686_t *dev, void *hspi, void *cs_port, uint16_t cs_pin,
                       icm45686_accel_scale_t accel_fs, icm45686_gyro_scale_t gyro_fs)
 {
@@ -132,10 +171,41 @@ int icm45686_init_spi(icm45686_t *dev, void *hspi, void *cs_port, uint16_t cs_pi
 	dev->hal.spi.cs_port = cs_port;
 	dev->hal.spi.cs_pin  = cs_pin;
 
-	uint8_t who;
-	int r = reg_read(dev, ICM45686_REG_WHO_AM_I, &who, 1);
+	cs_gpio_init(dev);
+	HAL_Delay(50);
+
+	SPI_HandleTypeDef *bus = (SPI_HandleTypeDef *)hspi;
+	uint8_t who = 0;
+	int r = -1;
+
+	icm45686_who_am_i_mode0 = 0xFFu;
+	icm45686_who_am_i_mode3 = 0xFFu;
+
+	if (spi_apply_mode(bus, SPI_POLARITY_HIGH, SPI_PHASE_2EDGE, SPI_BAUDRATEPRESCALER_32) == 0) {
+		r = reg_read(dev, ICM45686_REG_WHO_AM_I, &who, 1);
+		icm45686_who_am_i_mode3 = who;
+	}
+	if (r != 0 || who != ICM45686_WHO_AM_I_VAL) {
+		if (spi_apply_mode(bus, SPI_POLARITY_LOW, SPI_PHASE_1EDGE, SPI_BAUDRATEPRESCALER_32) == 0) {
+			r = reg_read(dev, ICM45686_REG_WHO_AM_I, &who, 1);
+			icm45686_who_am_i_mode0 = who;
+		}
+	}
+	icm45686_last_who_am_i = who;
+	if (r != 0) {
+		return r;
+	}
+	if (who != ICM45686_WHO_AM_I_VAL) {
+		return -2;
+	}
+
+	(void)spi_apply_mode(bus, bus->Init.CLKPolarity, bus->Init.CLKPhase, SPI_BAUDRATEPRESCALER_8);
+
+	uint8_t who_check;
+	r = reg_read(dev, ICM45686_REG_WHO_AM_I, &who_check, 1);
+	icm45686_last_who_am_i = who_check;
 	if (r) return r;
-	if (who != ICM45686_WHO_AM_I_VAL)
+	if (who_check != ICM45686_WHO_AM_I_VAL)
 		return -2;
 	/* PWR_MGMT0: accel_mode=LN(3), gyro_mode=LN(3) -> 0x0F */
 	r = write_reg8(dev, ICM45686_REG_PWR_MGMT0, 0x0F);
@@ -149,9 +219,11 @@ int icm45686_init_spi(icm45686_t *dev, void *hspi, void *cs_port, uint16_t cs_pi
 	              (uint8_t)((ICM45686_GYRO_ODR_800HZ & 0x0F) | ((gyro_fs & 0x0F) << 4)));
 	if (r) return r;
 
-	dev->accel_scale = 9.80665f / accel_lsb_per_g(accel_fs);
-	dev->gyro_scale  = (3.14159265f / 180.0f) / gyro_lsb_per_dps(gyro_fs);
-	dev->temp_scale  = 1.0f / ICM45686_TEMP_LSB_PER_C;
+	icm45686_scales_t scales;
+	icm45686_scales_for_config(accel_fs, gyro_fs, &scales);
+	dev->accel_scale = scales.accel_scale;
+	dev->gyro_scale = scales.gyro_scale;
+	dev->temp_scale = scales.temp_scale;
 	return 0;
 }
 
@@ -167,6 +239,7 @@ int icm45686_init_i2c(icm45686_t *dev, void *hi2c, uint8_t i2c_addr,
 
 	uint8_t who;
 	int r = reg_read(dev, ICM45686_REG_WHO_AM_I, &who, 1);
+	icm45686_last_who_am_i = who;
 	if (r) return r;
 	if (who != ICM45686_WHO_AM_I_VAL)
 		return -2;
@@ -179,15 +252,12 @@ int icm45686_init_i2c(icm45686_t *dev, void *hi2c, uint8_t i2c_addr,
 	               (uint8_t)((ICM45686_GYRO_ODR_800HZ & 0x0F) | ((gyro_fs & 0x0F) << 4)));
 	if (r) return r;
 
-	dev->accel_scale = 9.80665f / accel_lsb_per_g(accel_fs);
-	dev->gyro_scale  = (3.14159265f / 180.0f) / gyro_lsb_per_dps(gyro_fs);
-	dev->temp_scale  = 1.0f / ICM45686_TEMP_LSB_PER_C;
+	icm45686_scales_t scales;
+	icm45686_scales_for_config(accel_fs, gyro_fs, &scales);
+	dev->accel_scale = scales.accel_scale;
+	dev->gyro_scale = scales.gyro_scale;
+	dev->temp_scale = scales.temp_scale;
 	return 0;
-}
-
-static int16_t read16_le(const uint8_t *p)
-{
-	return (int16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
 }
 
 int icm45686_read(icm45686_t *dev, imu_data_t *data)
@@ -199,12 +269,10 @@ int icm45686_read(icm45686_t *dev, imu_data_t *data)
 	int r = reg_read(dev, ICM45686_REG_ACCEL_DATA_X, buf, sizeof(buf));
 	if (r) return r;
 
-	data->accel_mps2[0] = (float)read16_le(buf + 0) * dev->accel_scale;
-	data->accel_mps2[1] = (float)read16_le(buf + 2) * dev->accel_scale;
-	data->accel_mps2[2] = (float)read16_le(buf + 4) * dev->accel_scale;
-	data->gyro_rads[0]  = (float)read16_le(buf + 6) * dev->gyro_scale;
-	data->gyro_rads[1]  = (float)read16_le(buf + 8) * dev->gyro_scale;
-	data->gyro_rads[2]  = (float)read16_le(buf + 10) * dev->gyro_scale;
-	data->temp_celsius  = ICM45686_TEMP_OFFSET_C + (float)read16_le(buf + 12) * dev->temp_scale;
-	return 0;
+	icm45686_scales_t scales = {
+		.accel_scale = dev->accel_scale,
+		.gyro_scale = dev->gyro_scale,
+		.temp_scale = dev->temp_scale,
+	};
+	return icm45686_parse_raw14(buf, &scales, data) ? 0 : -1;
 }
