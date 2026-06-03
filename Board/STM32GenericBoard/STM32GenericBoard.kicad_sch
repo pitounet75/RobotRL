@@ -5577,6 +5577,12 @@
 		(uuid "2eff7cc8-a1a3-464e-9883-5dc5d0012535")
 	)
 	(junction
+		(at 58.42 20.32)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "33337b02-e0a6-47d5-8e32-bff44eac7860")
+	)
+	(junction
 		(at 44.45 27.94)
 		(diameter 0)
 		(color 0 0 0 0)
@@ -6020,6 +6026,16 @@
 	)
 	(wire
 		(pts
+			(xy 114.3 140.97) (xy 121.92 140.97)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "1a2f997c-05b6-4389-9af5-0dd67558faf9")
+	)
+	(wire
+		(pts
 			(xy 33.02 179.07) (xy 30.48 179.07)
 		)
 		(stroke
@@ -6030,7 +6046,7 @@
 	)
 	(wire
 		(pts
-			(xy 60.96 20.32) (xy 54.61 20.32)
+			(xy 60.96 20.32) (xy 58.42 20.32)
 		)
 		(stroke
 			(width 0)
@@ -6067,6 +6083,16 @@
 			(type default)
 		)
 		(uuid "39cdbf80-1cd8-4149-9d0c-05504fb3432f")
+	)
+	(wire
+		(pts
+			(xy 114.3 119.38) (xy 121.92 119.38)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "3db0a00a-c5f3-4ea0-9d23-79f5a3f61893")
 	)
 	(wire
 		(pts
@@ -6117,6 +6143,16 @@
 			(type default)
 		)
 		(uuid "514d59b2-dd6a-4c65-a327-96adb778d368")
+	)
+	(wire
+		(pts
+			(xy 54.61 27.94) (xy 58.42 27.94)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "5271f3fd-d0d0-4edb-a5bd-568065a90e53")
 	)
 	(wire
 		(pts
@@ -6277,6 +6313,16 @@
 			(type default)
 		)
 		(uuid "92a3bc45-7af5-49b3-b20d-1f9e405c0308")
+	)
+	(wire
+		(pts
+			(xy 58.42 20.32) (xy 54.61 20.32)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "970efa3f-0e9e-46ff-9f52-5d4f7ee1f07f")
 	)
 	(wire
 		(pts
@@ -9702,84 +9748,6 @@
 		)
 	)
 	(symbol
-		(lib_id "power:GND")
-		(at 114.3 119.38 270)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "393018e2-5062-4cad-8fd0-e7ff43e7c6e9")
-		(property "Reference" "#PWR09"
-			(at 107.95 119.38 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "GND"
-			(at 110.49 119.3801 90)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(property "Footprint" ""
-			(at 114.3 119.38 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 114.3 119.38 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
-			(at 114.3 119.38 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "691cfe32-4d9c-487a-9e2b-53dc953ed2ec")
-		)
-		(instances
-			(project "STM32GenericBoard"
-				(path "/55bb8da0-81e5-46ef-8fd3-f4a6b9d14d56"
-					(reference "#PWR09")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
 		(lib_id "Device:FerriteBead")
 		(at 88.9 20.32 90)
 		(unit 1)
@@ -10490,6 +10458,87 @@
 		)
 	)
 	(symbol
+		(lib_id "Device:C")
+		(at 58.42 24.13 0)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "5b74cc4d-6655-4078-9c89-2e5ed8a819f5")
+		(property "Reference" "C17"
+			(at 56.896 16.51 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Value" "100n"
+			(at 56.388 18.796 0)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" "Capacitor_SMD:C_0402_1005Metric_Pad0.74x0.62mm_HandSolder"
+			(at 59.3852 27.94 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 58.42 24.13 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Unpolarized capacitor"
+			(at 58.42 24.13 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "2"
+			(uuid "c7ccd826-5a26-4079-b19d-a4130660f526")
+		)
+		(pin "1"
+			(uuid "c8eb49d0-5cc6-48eb-99d5-d5e5d0d4d35e")
+		)
+		(instances
+			(project "STM32GenericBoard"
+				(path "/55bb8da0-81e5-46ef-8fd3-f4a6b9d14d56"
+					(reference "C17")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "Device:LED")
 		(at 139.7 40.64 180)
 		(unit 1)
@@ -10656,86 +10705,6 @@
 			(project "STM32GenericBoard"
 				(path "/55bb8da0-81e5-46ef-8fd3-f4a6b9d14d56"
 					(reference "Reset1")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:R")
-		(at 118.11 119.38 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "65395bd1-c4c3-498a-b3c4-b4200e508fb0")
-		(property "Reference" "R1"
-			(at 118.11 113.03 90)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "10k"
-			(at 118.11 115.57 90)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0402_1005Metric_Pad0.72x0.64mm_HandSolder"
-			(at 118.11 121.158 90)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 118.11 119.38 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor"
-			(at 118.11 119.38 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "3e14e455-1441-45e8-a4c9-03ff77929d11")
-		)
-		(pin "2"
-			(uuid "ba7f32bc-372d-4660-b207-e6b1f82c8bf8")
-		)
-		(instances
-			(project "STM32GenericBoard"
-				(path "/55bb8da0-81e5-46ef-8fd3-f4a6b9d14d56"
-					(reference "R1")
 					(unit 1)
 				)
 			)
@@ -11925,7 +11894,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "SN65HVD230"
+		(property "Value" "SN65HVD234"
 			(at 134.2233 128.27 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -12084,84 +12053,6 @@
 		)
 	)
 	(symbol
-		(lib_id "power:GND")
-		(at 114.3 140.97 270)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(uuid "80b2c279-ef3e-4293-99b9-bd9d71e0b7c0")
-		(property "Reference" "#PWR010"
-			(at 107.95 140.97 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "GND"
-			(at 110.49 140.9701 90)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-			)
-		)
-		(property "Footprint" ""
-			(at 114.3 140.97 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 114.3 140.97 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
-			(at 114.3 140.97 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "3e469481-faef-4914-be48-79f7f616a6c6")
-		)
-		(instances
-			(project "STM32GenericBoard"
-				(path "/55bb8da0-81e5-46ef-8fd3-f4a6b9d14d56"
-					(reference "#PWR010")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
 		(lib_id "Interface_CAN_LIN:SN65HVD230")
 		(at 132.08 114.3 0)
 		(unit 1)
@@ -12184,7 +12075,7 @@
 				(justify left)
 			)
 		)
-		(property "Value" "SN65HVD230"
+		(property "Value" "SN65HVD234"
 			(at 134.2233 106.68 0)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13380,6 +13271,85 @@
 		)
 	)
 	(symbol
+		(lib_id "power:+3V3")
+		(at 114.3 119.38 90)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "c1a76274-87e3-4d34-81e5-ca170c57007d")
+		(property "Reference" "#PWR059"
+			(at 118.11 119.38 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "+3V3"
+			(at 110.49 119.3799 90)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" ""
+			(at 114.3 119.38 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 114.3 119.38 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"+3V3\""
+			(at 114.3 119.38 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "ebd563f3-21fa-4b3b-b428-2a2d6512e36e")
+		)
+		(instances
+			(project "STM32GenericBoard"
+				(path "/55bb8da0-81e5-46ef-8fd3-f4a6b9d14d56"
+					(reference "#PWR059")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "Mechanical:MountingHole")
 		(at 80.01 185.42 0)
 		(unit 1)
@@ -13691,6 +13661,85 @@
 			(project "STM32GenericBoard"
 				(path "/55bb8da0-81e5-46ef-8fd3-f4a6b9d14d56"
 					(reference "C12")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:+3V3")
+		(at 114.3 140.97 90)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "cff131fa-c93a-40dd-b8a4-24612d866c2f")
+		(property "Reference" "#PWR060"
+			(at 118.11 140.97 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "+3V3"
+			(at 110.49 140.9699 90)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" ""
+			(at 114.3 140.97 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 114.3 140.97 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"+3V3\""
+			(at 114.3 140.97 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "696c0568-e547-42c6-94c2-0d3e8bba48f0")
+		)
+		(instances
+			(project "STM32GenericBoard"
+				(path "/55bb8da0-81e5-46ef-8fd3-f4a6b9d14d56"
+					(reference "#PWR060")
 					(unit 1)
 				)
 			)
@@ -14246,86 +14295,6 @@
 			(project "STM32GenericBoard"
 				(path "/55bb8da0-81e5-46ef-8fd3-f4a6b9d14d56"
 					(reference "#PWR030")
-					(unit 1)
-				)
-			)
-		)
-	)
-	(symbol
-		(lib_id "Device:R")
-		(at 118.11 140.97 90)
-		(unit 1)
-		(body_style 1)
-		(exclude_from_sim no)
-		(in_bom yes)
-		(on_board yes)
-		(in_pos_files yes)
-		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "e414a94c-0bf9-4655-9a35-071e092f12ca")
-		(property "Reference" "R2"
-			(at 118.11 134.62 90)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Value" "10k"
-			(at 118.11 137.16 90)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Footprint" "Resistor_SMD:R_0402_1005Metric_Pad0.72x0.64mm_HandSolder"
-			(at 118.11 142.748 90)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Datasheet" ""
-			(at 118.11 140.97 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(property "Description" "Resistor"
-			(at 118.11 140.97 0)
-			(hide yes)
-			(show_name no)
-			(do_not_autoplace no)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-			)
-		)
-		(pin "1"
-			(uuid "8bc98677-91e0-4aa1-8ba7-601f3808f3e3")
-		)
-		(pin "2"
-			(uuid "987f89da-7fcf-4136-ae15-b138c9319927")
-		)
-		(instances
-			(project "STM32GenericBoard"
-				(path "/55bb8da0-81e5-46ef-8fd3-f4a6b9d14d56"
-					(reference "R2")
 					(unit 1)
 				)
 			)
