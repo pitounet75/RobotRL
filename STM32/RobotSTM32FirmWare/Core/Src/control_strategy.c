@@ -5,6 +5,7 @@
 #include "control_strategy.h"
 
 #include "app_config.h"
+#include "app_ctrl_params.h"
 
 #include <stddef.h>
 
@@ -25,6 +26,9 @@ void control_strategy_linear_update(const control_strategy_input_t *in, control_
 void control_strategy_cascade_reset(void);
 void control_strategy_cascade_update(const control_strategy_input_t *in, control_strategy_output_t *out);
 
+void control_strategy_ff_cascade_reset(void);
+void control_strategy_ff_cascade_update(const control_strategy_input_t *in, control_strategy_output_t *out);
+
 static const control_strategy_ops_t s_ops[CTRL_STRATEGY_COUNT] = {
     [CTRL_STRATEGY_DUAL_PID] = {
         .name = "dual_pid",
@@ -41,6 +45,11 @@ static const control_strategy_ops_t s_ops[CTRL_STRATEGY_COUNT] = {
         .reset = control_strategy_cascade_reset,
         .update = control_strategy_cascade_update,
     },
+    [CTRL_STRATEGY_FF_CASCADE] = {
+        .name = "ff_cascade",
+        .reset = control_strategy_ff_cascade_reset,
+        .update = control_strategy_ff_cascade_update,
+    },
 };
 
 static control_strategy_id_t s_active = (control_strategy_id_t)APP_CTRL_STRATEGY_DEFAULT;
@@ -52,12 +61,17 @@ static bool strategy_id_valid(control_strategy_id_t id)
 
 void control_strategy_init(void)
 {
+    app_ctrl_params_init();
+
     for (unsigned i = 0u; i < (unsigned)CTRL_STRATEGY_COUNT; i++) {
         if (s_ops[i].reset != NULL) {
             s_ops[i].reset();
         }
     }
-    s_active = (control_strategy_id_t)APP_CTRL_STRATEGY_DEFAULT;
+    s_active = (control_strategy_id_t)app_ctrl_params_snapshot()->strategy_id;
+    if (!strategy_id_valid(s_active)) {
+        s_active = (control_strategy_id_t)APP_CTRL_STRATEGY_DEFAULT;
+    }
     g_ctrl_strategy = s_active;
 }
 

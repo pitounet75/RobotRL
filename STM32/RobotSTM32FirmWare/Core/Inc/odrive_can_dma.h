@@ -145,12 +145,19 @@ void odrive_can_dma_on_rx_fifo0(ODriveCanHalHandle *hcan);
  */
 
 void odrive_can_dma_on_rx_frame(uint32_t std_id, const uint8_t *data, uint8_t dlc);
+void odrive_can_dma_on_rx_frame_for_bus(ODriveCanHalHandle *hcan, uint32_t std_id,
+                                        const uint8_t *data, uint8_t dlc);
 
 
 
 bool odrive_can_dma_set_input_vel(uint32_t node_id, float vel_turns_s, float torque_ff_nm);
+bool odrive_can_dma_set_input_vel_on_bus(ODriveCanHalHandle *hcan, uint32_t node_id,
+                                         float vel_turns_s, float torque_ff_nm);
 
 bool odrive_can_dma_set_input_pos(uint32_t node_id, float pos_turns, float vel_ff_turns_s, float torque_ff_nm);
+
+bool odrive_can_dma_set_input_torque_on_bus(ODriveCanHalHandle *hcan, uint32_t node_id,
+                                            float torque_nm);
 
 bool odrive_can_dma_set_input_torque(uint32_t node_id, float torque_nm);
 
@@ -163,12 +170,15 @@ bool odrive_can_dma_set_requested_state(uint32_t node_id, ODriveAxisState state)
 bool odrive_can_dma_clear_errors(uint32_t node_id);
 
 bool odrive_can_dma_request_encoder_estimates(uint32_t node_id);
+bool odrive_can_dma_request_encoder_estimates_on_bus(ODriveCanHalHandle *hcan, uint32_t node_id);
 
 
 
 bool odrive_can_dma_get_encoder_snapshot(uint32_t node_id, ODriveCanDmaEncoderSnapshot *out);
+bool odrive_can_dma_get_encoder_snapshot_for_drive(uint32_t drive_idx, ODriveCanDmaEncoderSnapshot *out);
 
 bool odrive_can_dma_is_encoder_fresh(uint32_t node_id, uint32_t max_age_ms);
+bool odrive_can_dma_is_encoder_fresh_for_drive(uint32_t drive_idx, uint32_t max_age_ms);
 
 
 

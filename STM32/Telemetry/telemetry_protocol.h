@@ -61,7 +61,7 @@ typedef enum {
 } telemetry_builtin_msg_t;
 
 #define TELEMETRY_DICTIONARY_CATALOG \
-    "GlobalError : 0, Dictionary : 1, MessageDescription : 2, TelemetryFrame : 3, GetConfig : 4, SetEncoderSpeeds : 5"
+    "GlobalError : 0, Dictionary : 1, MessageDescription : 2, TelemetryFrame : 3, GetConfig : 4, SetEncoderSpeeds : 5, BalanceFrame : 256"
 
 #define TELEMETRY_KEY_GLOBAL_ERROR "GlobalError"
 #define TELEMETRY_KEY_DICTIONARY "Dictionary"

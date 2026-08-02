@@ -36,22 +36,6 @@
 
 
 
-#ifndef APP_IMU_COMPLEMENTARY_ALPHA
-
-#define APP_IMU_COMPLEMENTARY_ALPHA  0.98f
-
-#endif
-
-
-
-#ifndef APP_IMU_PITCH_GYRO_AXIS
-
-#define APP_IMU_PITCH_GYRO_AXIS      1
-
-#endif
-
-
-
 static TaskHandle_t s_task;
 
 static imu_sample_t s_raw_sample;
@@ -88,9 +72,17 @@ static void imu_read_done(void *user_ctx, const imu_sample_t *sample, bool ok)
 
     if (s_task != NULL) {
 
-        vTaskNotifyGiveFromISR(s_task, &wake);
+        if (xPortIsInsideInterrupt() != pdFALSE) {
 
-        portYIELD_FROM_ISR(wake);
+            vTaskNotifyGiveFromISR(s_task, &wake);
+
+            portYIELD_FROM_ISR(wake);
+
+        } else {
+
+            xTaskNotifyGive(s_task);
+
+        }
 
     }
 
@@ -120,7 +112,11 @@ static void publish_fused_sample(const imu_sample_t *raw)
 
                            APP_IMU_COMPLEMENTARY_ALPHA,
 
+                           APP_IMU_PITCH_ACCEL_FORWARD_AXIS,
+                           APP_IMU_PITCH_ACCEL_UP_AXIS,
                            APP_IMU_PITCH_GYRO_AXIS,
+
+                           APP_IMU_PITCH_GYRO_SIGN,
 
                            &fused)) {
 
@@ -167,6 +163,7 @@ void task_imu(void *argument)
     TickType_t wake = xTaskGetTickCount();
 
     const TickType_t period = pdMS_TO_TICKS(APP_IMU_PERIOD_MS);
+    TickType_t next_init_retry = wake;
 
 
 
@@ -176,6 +173,11 @@ void task_imu(void *argument)
 
 
         if (!app_imu_is_ready()) {
+            const TickType_t now = xTaskGetTickCount();
+            if ((TickType_t)(now - next_init_retry) < (TickType_t)0x80000000UL) {
+                (void)app_imu_init();
+                next_init_retry = now + pdMS_TO_TICKS(APP_IMU_INIT_RETRY_MS);
+            }
 
             continue;
 

@@ -6,10 +6,15 @@ odrv0.axis0.requested_state = AXIS_STATE_IDLE
 odrv0.axis0.clear_errors()
 odrv0.axis1.clear_errors()
 dump_errors(odrv0, True)
-odrv0.axis0.controller.config.pos_gain = 20.0 
+#odrv0.axis0.controller.config.pos_gain = 20.0 
 #odrv0.axis0.controller.config.vel_gain = 0.1666666716337204 #5065
-odrv0.axis0.controller.config.vel_gain =  0.08 #2836
-odrv0.axis0.controller.config.vel_integrator_gain = 0.3199999928474426
+#odrv0.axis0.controller.config.vel_gain =  0.08 #2836
+#odrv0.axis0.controller.config.vel_integrator_gain = 0.3199999928474426
+
+#2836 working config for autocogging  calibration
+odrv0.axis0.controller.config.pos_gain = 20.0 
+odrv0.axis0.controller.config.vel_gain =  0.035 
+odrv0.axis0.controller.config.vel_integrator_gain = 0.3
 
 
 
@@ -45,8 +50,8 @@ odrv0.axis0.controller.config.anticogging.calib_vel_threshold = 0.1 * float(odrv
 odrv0.axis0.controller.input_pos=0
 
 #2836
-odrv0.axis0.controller.config.pos_gain = 100
-odrv0.axis0.controller.config.vel_integrator_gain = 2
+odrv0.axis0.controller.config.pos_gain = 40.0 
+odrv0.axis0.controller.config.vel_integrator_gain = 0.5
 #5065
 #odrv0.axis0.controller.config.pos_gain = 200
 #odrv0.axis0.controller.config.vel_integrator_gain = 8
@@ -74,18 +79,24 @@ odrv0.axis0.controller.start_anticogging_calibration()
 #   calib_anticogging == True  while the sweep is running; False when the routine exits.
 #   anticogging_valid == True  after a successful single-pass cal (3600 bins).
 # Check any time:
-# odrv0.axis0.controller.config.anticogging.index
-# odrv0.axis0.controller.config.anticogging.calib_anticogging
-# odrv0.axis0.controller.anticogging_valid
+odrv0.axis0.controller.config.anticogging.index
+odrv0.axis0.controller.config.anticogging.calib_anticogging
+odrv0.axis0.controller.anticogging_valid
 # One-liner:
 # print("index", odrv0.axis0.controller.config.anticogging.index, "calib_anticogging", odrv0.axis0.controller.config.anticogging.calib_anticogging, "anticogging_valid", odrv0.axis0.controller.anticogging_valid)
 
 # After successful cal, enable and save:
 # 
 
+#5065???
 odrv0.axis0.controller.config.pos_gain = 20.0
 odrv0.axis0.controller.config.vel_gain = 0.1
 odrv0.axis0.controller.config.vel_integrator_gain = 0.3199999928474426
+
+#2836
+odrv0.axis0.controller.config.pos_gain = 20.0 
+odrv0.axis0.controller.config.vel_gain =  0.035 
+odrv0.axis0.controller.config.vel_integrator_gain = 0.3
 
 
 odrv0.axis0.controller.config.anticogging.pre_calibrated = True

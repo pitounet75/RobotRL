@@ -32,6 +32,31 @@ volatile uint8_t icm45686_last_who_am_i;
 volatile uint8_t icm45686_who_am_i_mode0;
 volatile uint8_t icm45686_who_am_i_mode3;
 
+static void cs_deassert(icm45686_t *dev);
+
+static void icm45686_delay_ms(uint32_t delay_ms)
+{
+#if defined(DWT) && defined(CoreDebug) && defined(DWT_CTRL_CYCCNTENA_Msk)
+	uint32_t cycles_per_ms = SystemCoreClock / 1000u;
+	if (cycles_per_ms == 0u) {
+		cycles_per_ms = 1000u;
+	}
+
+	CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+	DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+
+	while (delay_ms-- > 0u) {
+		const uint32_t start = DWT->CYCCNT;
+		while ((uint32_t)(DWT->CYCCNT - start) < cycles_per_ms) {
+		}
+	}
+#else
+	volatile uint32_t loops = delay_ms * 10000u;
+	while (loops-- > 0u) {
+	}
+#endif
+}
+
 static void cs_gpio_enable_clock(GPIO_TypeDef *port)
 {
 	if (port == GPIOA) {
@@ -42,6 +67,8 @@ static void cs_gpio_enable_clock(GPIO_TypeDef *port)
 		__HAL_RCC_GPIOC_CLK_ENABLE();
 	} else if (port == GPIOD) {
 		__HAL_RCC_GPIOD_CLK_ENABLE();
+	} else if (port == GPIOE) {
+		__HAL_RCC_GPIOE_CLK_ENABLE();
 	}
 }
 
@@ -172,7 +199,8 @@ int icm45686_init_spi(icm45686_t *dev, void *hspi, void *cs_port, uint16_t cs_pi
 	dev->hal.spi.cs_pin  = cs_pin;
 
 	cs_gpio_init(dev);
-	HAL_Delay(50);
+	icm45686_delay_ms(50);
+
 
 	SPI_HandleTypeDef *bus = (SPI_HandleTypeDef *)hspi;
 	uint8_t who = 0;

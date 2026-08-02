@@ -6,7 +6,7 @@
  *   g_halt_magic == 1213412420 (0x48414C54)
  *   g_halt_step  == 2 (ODrive startup)
  *   g_halt_startup_error == 3 (no HB), 2 (TX fail), ...
- *   g_halt_startup_fail_line == source line in odrive_velocity_mode_startup.c (~291+)
+ *   g_halt_startup_fail_line == source line in odrive_torque_mode_startup.c
  *
  * Also compare raw globals: g_odrive_startup_last_error, g_odrive_startup_fail_line,
  * g_odrive_startup_rx_std_frames.

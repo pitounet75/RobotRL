@@ -4,6 +4,7 @@
 
 #include "imu_async.h"
 #include "app_time_us.h"
+#include "app_dma_buffers.h"
 #include "imu_spi_async.h"
 #include "spi.h"
 
@@ -28,9 +29,10 @@
 static icm45686_t s_icm45686;
 static bmi323_t s_bmi323;
 static mpu6050_t s_mpu6050;
+static bool s_hw_probed_ok;
 
-static uint8_t s_spi_tx[1u + IMU_SPI_READ_LEN];
-static uint8_t s_spi_rx[1u + IMU_SPI_READ_LEN];
+static uint8_t s_spi_tx[1u + IMU_SPI_READ_LEN] APP_DMA_BUFFER_SECTION;
+static uint8_t s_spi_rx[1u + IMU_SPI_READ_LEN] APP_DMA_BUFFER_SECTION;
 
 static imu_async_done_cb s_user_cb;
 static void *s_user_ctx;
@@ -106,6 +108,31 @@ static void spi_done(void *user_ctx, bool ok)
 
 #endif /* SPI IMUs */
 
+#if APP_IMU_SELECTED == APP_IMU_ICM45686
+static void icm45686_apply_runtime_scales(void)
+{
+    icm45686_scales_t scales;
+    icm45686_scales_for_config(ICM45686_ACCEL_16G, ICM45686_GYRO_2000_DPS, &scales);
+    s_icm45686.accel_scale = scales.accel_scale;
+    s_icm45686.gyro_scale = scales.gyro_scale;
+    s_icm45686.temp_scale = scales.temp_scale;
+}
+#endif
+
+void imu_async_note_hw_probed_ok(uint8_t who_am_i)
+{
+#if APP_IMU_SELECTED == APP_IMU_ICM45686
+    if (who_am_i == 0xE9u) {
+        s_hw_probed_ok = true;
+        g_imu_init_err = 0;
+        g_imu_who_am_i = who_am_i;
+        icm45686_apply_runtime_scales();
+    }
+#else
+    (void)who_am_i;
+#endif
+}
+
 bool imu_async_init(void)
 {
     memset(&s_sample, 0, sizeof(s_sample));
@@ -116,9 +143,13 @@ bool imu_async_init(void)
 
 #if APP_IMU_SELECTED == APP_IMU_ICM45686
     imu_spi_async_init();
-    g_imu_miso_idle = (uint8_t)HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_6);
+    if (s_hw_probed_ok) {
+        icm45686_apply_runtime_scales();
+        return true;
+    }
+    g_imu_miso_idle = (uint8_t)HAL_GPIO_ReadPin(APP_IMU_SPI_MISO_PORT, APP_IMU_SPI_MISO_PIN);
     {
-        const int rc = icm45686_init_spi(&s_icm45686, &hspi1, APP_IMU_SPI_CS_PORT, APP_IMU_SPI_CS_PIN,
+        const int rc = icm45686_init_spi(&s_icm45686, &hspi3, APP_IMU_SPI_CS_PORT, APP_IMU_SPI_CS_PIN,
                                          ICM45686_ACCEL_16G, ICM45686_GYRO_2000_DPS);
         if (rc != 0) {
             g_imu_init_err = rc;
@@ -130,7 +161,7 @@ bool imu_async_init(void)
 #elif APP_IMU_SELECTED == APP_IMU_BMI323
     imu_spi_async_init();
     {
-        const int rc = bmi323_init_spi(&s_bmi323, &hspi1, APP_IMU_SPI_CS_PORT, APP_IMU_SPI_CS_PIN,
+        const int rc = bmi323_init_spi(&s_bmi323, &hspi3, APP_IMU_SPI_CS_PORT, APP_IMU_SPI_CS_PIN,
                                        BMI323_ACCEL_16G, BMI323_GYRO_2000_DPS);
         if (rc != 0) {
             g_imu_init_err = rc;

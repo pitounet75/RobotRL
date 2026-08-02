@@ -23,8 +23,12 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "fdcan.h"
+#include "app_freertos_diag.h"
+#include "app_telemetry.h"
+#include "app_config.h"
 #include "odrive_can_async.h"
 #include "spi.h"
+#include "usart.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -58,6 +62,11 @@
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
+extern DMA_HandleTypeDef hdma_spi3_tx;
+extern DMA_HandleTypeDef hdma_spi3_rx;
+extern SPI_HandleTypeDef hspi3;
+extern DMA_HandleTypeDef hdma_uart4_tx;
+extern UART_HandleTypeDef huart4;
 extern TIM_HandleTypeDef htim1;
 
 /* USER CODE BEGIN EV */
@@ -163,6 +172,48 @@ void DebugMon_Handler(void)
 /******************************************************************************/
 
 /**
+  * @brief This function handles DMA1 stream0 global interrupt.
+  */
+void DMA1_Stream0_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA1_Stream0_IRQn 0 */
+
+  /* USER CODE END DMA1_Stream0_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_spi3_tx);
+  /* USER CODE BEGIN DMA1_Stream0_IRQn 1 */
+
+  /* USER CODE END DMA1_Stream0_IRQn 1 */
+}
+
+/**
+  * @brief This function handles DMA1 stream1 global interrupt.
+  */
+void DMA1_Stream1_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA1_Stream1_IRQn 0 */
+
+  /* USER CODE END DMA1_Stream1_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_spi3_rx);
+  /* USER CODE BEGIN DMA1_Stream1_IRQn 1 */
+
+  /* USER CODE END DMA1_Stream1_IRQn 1 */
+}
+
+/**
+  * @brief This function handles DMA1 stream2 global interrupt.
+  */
+void DMA1_Stream2_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA1_Stream2_IRQn 0 */
+
+  /* USER CODE END DMA1_Stream2_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_uart4_tx);
+  /* USER CODE BEGIN DMA1_Stream2_IRQn 1 */
+
+  /* USER CODE END DMA1_Stream2_IRQn 1 */
+}
+
+/**
   * @brief This function handles TIM1 update interrupt.
   */
 void TIM1_UP_IRQHandler(void)
@@ -176,6 +227,40 @@ void TIM1_UP_IRQHandler(void)
   /* USER CODE END TIM1_UP_IRQn 1 */
 }
 
+/**
+  * @brief This function handles SPI3 global interrupt.
+  */
+void SPI3_IRQHandler(void)
+{
+  /* USER CODE BEGIN SPI3_IRQn 0 */
+
+  /* USER CODE END SPI3_IRQn 0 */
+  HAL_SPI_IRQHandler(&hspi3);
+  /* USER CODE BEGIN SPI3_IRQn 1 */
+
+  /* USER CODE END SPI3_IRQn 1 */
+}
+
+/**
+  * @brief This function handles UART4 global interrupt.
+  */
+void UART4_IRQHandler(void)
+{
+  /* USER CODE BEGIN UART4_IRQn 0 */
+  app_telemetry_uart4_rx_isr();
+#if APP_TELEMETRY_UART4_USE_DMA
+  /* HAL DMA TX completion enables TCIE; HAL_UART_IRQHandler clears it and calls TxCplt. */
+  if ((huart4.Instance->CR1 & USART_CR1_TCIE) != 0U) {
+    HAL_UART_IRQHandler(&huart4);
+  }
+#endif
+  /* USER CODE END UART4_IRQn 0 */
+  HAL_UART_IRQHandler(&huart4);
+  /* USER CODE BEGIN UART4_IRQn 1 */
+
+  /* USER CODE END UART4_IRQn 1 */
+}
+
 /* USER CODE BEGIN 1 */
 
 void FDCAN1_IT0_IRQHandler(void)
@@ -185,6 +270,18 @@ void FDCAN1_IT0_IRQHandler(void)
 
 void FDCAN2_IT0_IRQHandler(void)
 {
+  HAL_FDCAN_IRQHandler(&hfdcan2);
+}
+
+void FDCAN1_IT1_IRQHandler(void)
+{
+  g_fdcan1_it1_count++;
+  HAL_FDCAN_IRQHandler(&hfdcan1);
+}
+
+void FDCAN2_IT1_IRQHandler(void)
+{
+  g_fdcan2_it1_count++;
   HAL_FDCAN_IRQHandler(&hfdcan2);
 }
 

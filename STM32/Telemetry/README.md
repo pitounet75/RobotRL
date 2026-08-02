@@ -5,7 +5,11 @@ Framed binary protocol over UART. Works with the [ESP32 serial UDP bridge](../..
 - Concepts: [MessageModel.md](MessageModel.md)
 - Sample: `telemetry_example.c` (define `TELEMETRY_EXAMPLE_ENABLE`)
 
-**Python client:** planned after firmware is stable on hardware.
+**Python client:** [TelemetryServer](../../TelemetryServer/README.md) — UDP via ESP32Telemetry bridge.
+
+### BalanceFrame (type 0x0100)
+
+Unsolicited @ 100 Hz from STM32 `task_telemetry`. Payload 48 B — see [telemetry_balance_frame.h](telemetry_balance_frame.h).
 
 ## Frame layout (little-endian, protocol v1)
 

@@ -4,6 +4,7 @@
  */
 
 #include "app_tasks.h"
+#include "app_config.h"
 #include "tasks/tasks.h"
 
 #include "cmsis_os.h"
@@ -58,7 +59,7 @@ static const osThreadAttr_t attr_jetson = {
 
 static const osThreadAttr_t attr_telemetry = {
     .name = "telemetry",
-    .stack_size = 256u * 4u,
+    .stack_size = APP_TELEMETRY_TASK_STACK_WORDS * 4u,
     .priority = osPriorityLow,
 };
 

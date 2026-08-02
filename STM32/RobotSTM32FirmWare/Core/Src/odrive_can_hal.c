@@ -314,11 +314,16 @@ bool odrive_can_hal_wait_tx_fifo_empty(ODriveCanHalHandle *hcan, uint32_t timeou
 static void fdcan_nvic_enable(ODriveCanHalHandle *hfdcan)
 {
     if (hfdcan->Instance == FDCAN1) {
-        HAL_NVIC_SetPriority(FDCAN1_IT0_IRQn, 5, 0);
+        /* Must be > configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY (5) for FromISR. */
+        HAL_NVIC_SetPriority(FDCAN1_IT0_IRQn, 6, 0);
+        HAL_NVIC_SetPriority(FDCAN1_IT1_IRQn, 6, 0);
         HAL_NVIC_EnableIRQ(FDCAN1_IT0_IRQn);
+        HAL_NVIC_EnableIRQ(FDCAN1_IT1_IRQn);
     } else if (hfdcan->Instance == FDCAN2) {
-        HAL_NVIC_SetPriority(FDCAN2_IT0_IRQn, 5, 0);
+        HAL_NVIC_SetPriority(FDCAN2_IT0_IRQn, 6, 0);
+        HAL_NVIC_SetPriority(FDCAN2_IT1_IRQn, 6, 0);
         HAL_NVIC_EnableIRQ(FDCAN2_IT0_IRQn);
+        HAL_NVIC_EnableIRQ(FDCAN2_IT1_IRQn);
     }
 }
 

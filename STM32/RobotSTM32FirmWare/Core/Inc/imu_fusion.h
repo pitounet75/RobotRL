@@ -29,9 +29,16 @@ bool imu_fusion_update(imu_fusion_state_t *state,
                        uint32_t t_us,
                        float dt_default_s,
                        float alpha,
+                       int pitch_accel_forward_axis,
+                       int pitch_accel_up_axis,
                        int pitch_gyro_axis,
+                       float pitch_gyro_sign,
                        imu_fusion_out_t *out);
 
+/** pitch = atan2f(-accel[forward_axis], accel[up_axis]) when chip axes match robot frame. */
 float imu_fusion_pitch_from_accel(const float accel_mps2[3]);
+float imu_fusion_pitch_from_accel_axes(const float accel_mps2[3],
+                                       int forward_axis,
+                                       int up_axis);
 
 #endif /* IMU_FUSION_H */

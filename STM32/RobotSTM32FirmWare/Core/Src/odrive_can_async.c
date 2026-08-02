@@ -187,7 +187,6 @@ bool odrive_can_async_init(ODriveCanHalHandle *hcan)
         return false;
     }
 
-    odrive_can_hal_rx_irq_enable(hcan);
     return true;
 }
 
@@ -240,7 +239,7 @@ void odrive_can_async_stop(void)
 
 void odrive_can_async_on_rx_fifo0_isr(ODriveCanHalHandle *hcan)
 {
-    if (hcan != s_hcan || s_rx_queue == NULL) {
+    if (hcan == NULL || s_rx_queue == NULL) {
         return;
     }
 
@@ -258,7 +257,7 @@ void odrive_can_async_on_rx_fifo0_isr(ODriveCanHalHandle *hcan)
             continue;
         }
 
-        odrive_can_dma_on_rx_frame(std_id, data, dlc);
+        odrive_can_dma_on_rx_frame_for_bus(hcan, std_id, data, dlc);
 
         can_rx_item_t item = {0};
         item.std_id = std_id & 0x7FFU;

@@ -1,16 +1,17 @@
 /**
- * @file odrive_velocity_mode_startup.c
- * @see ODrive/OdriveTool/Commands/velocity_mode.txt
+ * @file odrive_torque_mode_startup.c
+ * @see ODrive/OdriveTool/Commands/torque_mode.txt
  * @see ODrive/OdriveTool/Commands/Configs/283_anticogging_calibrated.txt
  */
 
-#include "odrive_velocity_mode_startup.h"
+#include "odrive_torque_mode_startup.h"
+#include "app_config.h"
 #include "odrive_can_protocol.h"
 #include "odrive_can_stm32.h"
 
 #include <string.h>
 
-volatile uint32_t g_odrive_startup_last_error = (uint32_t)ODRIVE_STARTUP_IN_PROGRESS;
+volatile uint32_t g_odrive_startup_last_error = (uint32_t)ODRIVE_TORQUE_STARTUP_IN_PROGRESS;
 volatile uint32_t g_odrive_startup_fail_line = 0u;
 
 #define ODRIVE_STARTUP_FAIL(err)                     \
@@ -39,7 +40,7 @@ typedef enum {
 } ODriveAxisState;
 
 typedef enum {
-    ODRIVE_CONTROL_MODE_VELOCITY = 2,
+    ODRIVE_CONTROL_MODE_TORQUE = 1,
     ODRIVE_INPUT_MODE_PASSTHROUGH = 1,
 } ODriveControlModeInput;
 
@@ -58,6 +59,7 @@ typedef enum {
 
 volatile uint32_t g_odrive_startup_tx_fail_op = 0u;
 volatile uint32_t g_odrive_startup_tx_fifo_free = 0u;
+volatile uint32_t g_odrive_anticogging_enabled_cfg = 0u;
 
 static void odrive_startup_record_tx_fail(ODriveCanHalHandle *hcan, uint32_t op)
 {
@@ -148,16 +150,16 @@ static bool heartbeat_for_node(uint32_t std_id, uint32_t node_id)
 /** Axis0 heartbeat id=1, axis1 id=33 (node<<5 | ODRIVE_HEARTBEAT). */
 static bool is_odrive_heartbeat_std_id(uint32_t std_id)
 {
-    return std_id == odrive_can_std_id(ODRIVE_VELOCITY_MODE_AXIS0_NODE_ID, ODRIVE_MSG_ODRIVE_HEARTBEAT) ||
-           std_id == odrive_can_std_id(ODRIVE_VELOCITY_MODE_AXIS1_NODE_ID, ODRIVE_MSG_ODRIVE_HEARTBEAT) ||
+    return std_id == odrive_can_std_id(ODRIVE_TORQUE_MODE_AXIS0_NODE_ID, ODRIVE_MSG_ODRIVE_HEARTBEAT) ||
+           std_id == odrive_can_std_id(ODRIVE_TORQUE_MODE_AXIS1_NODE_ID, ODRIVE_MSG_ODRIVE_HEARTBEAT) ||
            odrive_can_cmd_from_id(std_id) == (uint8_t)(ODRIVE_MSG_ODRIVE_HEARTBEAT & 0x1Fu);
 }
 
 static bool is_configured_axis_std_id(uint32_t std_id)
 {
     const uint32_t node = odrive_can_node_from_id(std_id);
-    return node == (ODRIVE_VELOCITY_MODE_AXIS0_NODE_ID & ODRIVE_CAN_NODE_ID_MAX) ||
-           node == (ODRIVE_VELOCITY_MODE_AXIS1_NODE_ID & ODRIVE_CAN_NODE_ID_MAX);
+    return node == (ODRIVE_TORQUE_MODE_AXIS0_NODE_ID & ODRIVE_CAN_NODE_ID_MAX) ||
+           node == (ODRIVE_TORQUE_MODE_AXIS1_NODE_ID & ODRIVE_CAN_NODE_ID_MAX);
 }
 
 /** ODrive is on the bus: heartbeat or any frame from configured node IDs. */
@@ -220,7 +222,7 @@ static bool poll_axis_state(ODriveCanHalHandle *hcan, uint32_t node_id, uint32_t
     }
 }
 
-#if !ODRIVE_VELOCITY_MODE_SKIP_CALIBRATION
+#if !ODRIVE_TORQUE_MODE_SKIP_CALIBRATION
 static bool state_not_cal_busy(int32_t state, void *ctx)
 {
     (void)ctx;
@@ -298,17 +300,17 @@ static bool wait_any_odrive_heartbeat(ODriveCanHalHandle *hcan, uint32_t timeout
     }
 }
 
-bool odrive_velocity_mode_startup(ODriveCanHalHandle *hcan)
+bool odrive_torque_mode_startup(ODriveCanHalHandle *hcan)
 {
-    ODRIVE_STARTUP_FAIL(ODRIVE_STARTUP_IN_PROGRESS);
+    ODRIVE_STARTUP_FAIL(ODRIVE_TORQUE_STARTUP_IN_PROGRESS);
 
     if (hcan == NULL) {
-        ODRIVE_STARTUP_FAIL(ODRIVE_STARTUP_ERR_NULL);
+        ODRIVE_STARTUP_FAIL(ODRIVE_TORQUE_STARTUP_ERR_NULL);
         return false;
     }
 
-    const uint32_t axis0 = ODRIVE_VELOCITY_MODE_AXIS0_NODE_ID;
-    const uint32_t axis1 = ODRIVE_VELOCITY_MODE_AXIS1_NODE_ID;
+    const uint32_t axis0 = ODRIVE_TORQUE_MODE_AXIS0_NODE_ID;
+    const uint32_t axis1 = ODRIVE_TORQUE_MODE_AXIS1_NODE_ID;
 
 #if ODRIVE_CAN_HAL_FDCAN
     odrive_can_fdcan_recover_bus_off(hcan);
@@ -320,78 +322,85 @@ bool odrive_velocity_mode_startup(ODriveCanHalHandle *hcan)
     /* Listen before TX: failed TX without bus ACK can put FDCAN in bus-off and block RX. */
     {
         bool saw_std_data = false;
-        if (!wait_any_odrive_heartbeat(hcan, ODRIVE_VELOCITY_MODE_HEARTBEAT_TIMEOUT_MS,
+        if (!wait_any_odrive_heartbeat(hcan, ODRIVE_TORQUE_MODE_HEARTBEAT_TIMEOUT_MS,
                                        &saw_std_data)) {
             if (g_odrive_startup_rx_fifo0_peak > 0u && g_odrive_startup_rx_std_frames == 0u) {
-                ODRIVE_STARTUP_FAIL(ODRIVE_STARTUP_ERR_CAN_RX_NON_STD);
+                ODRIVE_STARTUP_FAIL(ODRIVE_TORQUE_STARTUP_ERR_CAN_RX_NON_STD);
             } else if (saw_std_data) {
-                ODRIVE_STARTUP_FAIL(ODRIVE_STARTUP_ERR_CAN_RX_OTHER);
+                ODRIVE_STARTUP_FAIL(ODRIVE_TORQUE_STARTUP_ERR_CAN_RX_OTHER);
             } else {
-                ODRIVE_STARTUP_FAIL(ODRIVE_STARTUP_ERR_NO_HEARTBEAT);
+                ODRIVE_STARTUP_FAIL(ODRIVE_TORQUE_STARTUP_ERR_NO_HEARTBEAT);
             }
             return false;
         }
     }
     drain_rx(hcan);
 
-#if !ODRIVE_VELOCITY_MODE_SKIP_CALIBRATION
-    /* Full cal path (velocity_mode.txt): idle before clear + calibration. */
+#if !ODRIVE_TORQUE_MODE_SKIP_CALIBRATION
+    /* Full cal path (torque_mode.txt): idle before clear + calibration. */
     if (!tx_set_state(hcan, axis0, ODRIVE_AXIS_STATE_IDLE, ODRIVE_TX_OP_SET_IDLE)) {
-        ODRIVE_STARTUP_FAIL(ODRIVE_STARTUP_ERR_TX);
+        ODRIVE_STARTUP_FAIL(ODRIVE_TORQUE_STARTUP_ERR_TX);
         return false;
     }
     HAL_Delay(50);
 #endif
 
     if (!tx_clear_errors(hcan, axis0, ODRIVE_TX_OP_CLEAR_ERR0)) {
-        ODRIVE_STARTUP_FAIL(ODRIVE_STARTUP_ERR_TX);
+        ODRIVE_STARTUP_FAIL(ODRIVE_TORQUE_STARTUP_ERR_TX);
         return false;
     }
     (void)tx_clear_errors(hcan, axis1, ODRIVE_TX_OP_CLEAR_ERR1);
     HAL_Delay(100);
     drain_rx(hcan);
 
-#if !ODRIVE_VELOCITY_MODE_SKIP_CALIBRATION
+#if !ODRIVE_TORQUE_MODE_SKIP_CALIBRATION
     if (!tx_set_state(hcan, axis0, ODRIVE_AXIS_STATE_FULL_CALIBRATION_SEQUENCE, ODRIVE_TX_OP_SET_CAL)) {
-        ODRIVE_STARTUP_FAIL(ODRIVE_STARTUP_ERR_TX);
+        ODRIVE_STARTUP_FAIL(ODRIVE_TORQUE_STARTUP_ERR_TX);
         return false;
     }
 
-    if (!poll_axis_state(hcan, axis0, ODRIVE_VELOCITY_MODE_CALIB_TIMEOUT_MS, state_not_cal_busy,
+    if (!poll_axis_state(hcan, axis0, ODRIVE_TORQUE_MODE_CALIB_TIMEOUT_MS, state_not_cal_busy,
                          NULL)) {
-        ODRIVE_STARTUP_FAIL(ODRIVE_STARTUP_ERR_CALIB_TIMEOUT);
+        ODRIVE_STARTUP_FAIL(ODRIVE_TORQUE_STARTUP_ERR_CALIB_TIMEOUT);
         return false;
     }
 #else
     /* 283 config: startup_closed_loop_control=True — axis may already be in closed loop.
      * Do not force IDLE first (that cancels auto startup and wastes STATE_TIMEOUT_MS).
      * Short listen, then explicitly request closed loop only if needed. */
-    if (!poll_axis_state(hcan, axis0, ODRIVE_VELOCITY_MODE_BOOT_CLOSED_LOOP_WAIT_MS,
+    if (!poll_axis_state(hcan, axis0, ODRIVE_TORQUE_MODE_BOOT_CLOSED_LOOP_WAIT_MS,
                          state_is_closed_loop, NULL)) {
         if (!tx_set_state(hcan, axis0, ODRIVE_AXIS_STATE_CLOSED_LOOP_CONTROL,
                           ODRIVE_TX_OP_SET_CLOSED_LOOP)) {
-            ODRIVE_STARTUP_FAIL(ODRIVE_STARTUP_ERR_TX);
+            ODRIVE_STARTUP_FAIL(ODRIVE_TORQUE_STARTUP_ERR_TX);
             return false;
         }
-        if (!poll_axis_state(hcan, axis0, ODRIVE_VELOCITY_MODE_STATE_TIMEOUT_MS,
+        if (!poll_axis_state(hcan, axis0, ODRIVE_TORQUE_MODE_STATE_TIMEOUT_MS,
                              state_is_closed_loop, NULL)) {
-            ODRIVE_STARTUP_FAIL(ODRIVE_STARTUP_ERR_CLOSED_LOOP_TIMEOUT);
+            ODRIVE_STARTUP_FAIL(ODRIVE_TORQUE_STARTUP_ERR_CLOSED_LOOP_TIMEOUT);
             return false;
         }
     }
 #endif
 
-    if (!tx_controller_modes(hcan, axis0, ODRIVE_CONTROL_MODE_VELOCITY, ODRIVE_INPUT_MODE_PASSTHROUGH)) {
-        ODRIVE_STARTUP_FAIL(ODRIVE_STARTUP_ERR_TX);
+    if (!tx_controller_modes(hcan, axis0, ODRIVE_CONTROL_MODE_TORQUE, ODRIVE_INPUT_MODE_PASSTHROUGH)) {
+        ODRIVE_STARTUP_FAIL(ODRIVE_TORQUE_STARTUP_ERR_TX);
         return false;
     }
 
-    if (!tx_input_vel(hcan, axis0, 0.2f, 0.0f) || !tx_input_torque(hcan, axis0, 0.0f)) {
-        ODRIVE_STARTUP_FAIL(ODRIVE_STARTUP_ERR_TX);
+    if (!tx_input_torque(hcan, axis0, 0.0f) || !tx_input_vel(hcan, axis0, 0.0f, 0.0f)) {
+        ODRIVE_STARTUP_FAIL(ODRIVE_TORQUE_STARTUP_ERR_TX);
         return false;
     }
 
-    g_odrive_startup_last_error = (uint32_t)ODRIVE_STARTUP_OK;
+#if APP_ODRIVE_ANTICOGGING_ENABLED
+    g_odrive_anticogging_enabled_cfg = 1u;
+    /* Map must already be in ODrive flash (pre_calibrated). No CAN enable on stock fw. */
+#else
+    g_odrive_anticogging_enabled_cfg = 0u;
+#endif
+
+    g_odrive_startup_last_error = (uint32_t)ODRIVE_TORQUE_STARTUP_OK;
     g_odrive_startup_fail_line = 0u;
     g_odrive_startup_tx_fail_op = 0u;
     return true;

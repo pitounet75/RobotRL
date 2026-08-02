@@ -57,6 +57,8 @@
 /* External variables --------------------------------------------------------*/
 
 /* USER CODE BEGIN EV */
+extern UART_HandleTypeDef huart4;
+extern UART_HandleTypeDef huart5;
 
 /* USER CODE END EV */
 

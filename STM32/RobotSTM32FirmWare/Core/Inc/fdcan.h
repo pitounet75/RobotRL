@@ -37,8 +37,11 @@ extern FDCAN_HandleTypeDef hfdcan1;
 extern FDCAN_HandleTypeDef hfdcan2;
 
 /* USER CODE BEGIN Private defines */
-/** Active ODrive CAN peripheral (PB12 RX / PB13 TX on this board). */
-#define ODRIVE_CAN_HANDLE hfdcan2
+/** ODrive CAN buses: left wheel on FDCAN1, right wheel on FDCAN2. */
+#define ODRIVE_CAN_LEFT_HANDLE hfdcan1
+#define ODRIVE_CAN_RIGHT_HANDLE hfdcan2
+/** Legacy alias for older code paths; prefer LEFT/RIGHT handles in new code. */
+#define ODRIVE_CAN_HANDLE ODRIVE_CAN_RIGHT_HANDLE
 /* USER CODE END Private defines */
 
 void MX_FDCAN1_Init(void);

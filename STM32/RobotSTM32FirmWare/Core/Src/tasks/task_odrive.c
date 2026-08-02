@@ -30,7 +30,7 @@
 
 #include "app_time_us.h"
 
-#include "fdcan.h"
+#include "app_wheel_config.h"
 
 #include "odrive_can_dma.h"
 
@@ -50,31 +50,22 @@ volatile uint32_t g_odrive_drive_valid_mask;
 
 
 
-static const uint32_t s_drive_node_ids[APP_ODRIVE_DRIVE_COUNT] = {
-
-    APP_ODRIVE_DRIVE0_NODE_ID,
-
-    APP_ODRIVE_DRIVE1_NODE_ID,
-
-};
-
-
-
-static void odrive_drive_from_snapshot(uint32_t node_id, const ODriveCanDmaEncoderSnapshot *snap,
+static void odrive_drive_from_snapshot(const app_wheel_config_t *cfg, const ODriveCanDmaEncoderSnapshot *snap,
 
                                        app_odrive_drive_sample_t *out)
 
 {
+    const float sign = (cfg != 0) ? (float)cfg->odrive_feedback_sign : 1.0f;
 
-    out->node_id = node_id;
+    out->node_id = (cfg != 0) ? cfg->odrive_node_id : 0u;
 
     out->valid = snap->valid;
 
-    out->pos_turns = snap->encoder_pos_turns;
+    out->pos_turns = sign * snap->encoder_pos_turns;
 
-    out->vel_turns_s = snap->encoder_vel_turns_s;
+    out->vel_turns_s = sign * snap->encoder_vel_turns_s;
 
-    out->pos_counts = snap->encoder_pos_counts;
+    out->pos_counts = (int32_t)(sign * (float)snap->encoder_pos_counts);
 
     out->last_update_ms = snap->last_update_ms;
 
@@ -122,25 +113,27 @@ void task_odrive(void *argument)
 
         for (uint32_t drive_idx = 0u; drive_idx < APP_ODRIVE_DRIVE_COUNT; drive_idx++) {
 
-            const uint32_t node_id = s_drive_node_ids[drive_idx];
+            const app_wheel_config_t *cfg = app_wheel_config_for_odrive_drive(drive_idx);
 
             ODriveCanDmaEncoderSnapshot snap = {0};
 
 
 
-            (void)odrive_can_dma_get_encoder_snapshot(node_id, &snap);
+            (void)odrive_can_dma_get_encoder_snapshot_for_drive(drive_idx, &snap);
 
 
 
-            if (!odrive_can_dma_is_encoder_fresh(node_id, APP_ODRIVE_ENCODER_STALE_MS)) {
+            if (!odrive_can_dma_is_encoder_fresh_for_drive(drive_idx, APP_ODRIVE_ENCODER_STALE_MS)) {
 
-                (void)odrive_can_dma_request_encoder_estimates(node_id);
+                if (cfg != 0) {
+                    (void)odrive_can_dma_request_encoder_estimates_on_bus(cfg->odrive_can, cfg->odrive_node_id);
+                }
 
             }
 
 
 
-            odrive_drive_from_snapshot(node_id, &snap, &sample.drive[drive_idx]);
+            odrive_drive_from_snapshot(cfg, &snap, &sample.drive[drive_idx]);
 
 
 

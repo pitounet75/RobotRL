@@ -1,6 +1,6 @@
 /**
  * @file app_motor_command.h
- * @brief Wheel velocity commands from control task to motor TX (seqlock).
+ * @brief Wheel torque commands from control task to motor TX (seqlock).
  */
 #ifndef APP_MOTOR_COMMAND_H
 #define APP_MOTOR_COMMAND_H
@@ -13,8 +13,8 @@ typedef struct {
     uint32_t seq;
     bool valid;
     bool estop;
-    float vel_left_turns_s;
-    float vel_right_turns_s;
+    float torque_left_nm;
+    float torque_right_nm;
 } app_motor_command_t;
 
 void app_motor_command_publish(const app_motor_command_t *cmd);

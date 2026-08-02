@@ -2,3 +2,4 @@
 # Included from Debug/makefile via ../makefile.targets (not overwritten by Cube).
 
 -include Debug/sensor_drivers/subdir.mk
+-include Debug/app_extra/subdir.mk

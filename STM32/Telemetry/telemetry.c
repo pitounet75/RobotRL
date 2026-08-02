@@ -724,12 +724,32 @@ int telemetry_send(telemetry_t *tel, uint16_t message_type)
         return -2;
     }
 
-    uint8_t payload[TELEMETRY_MAX_FRAME_SIZE - TELEMETRY_MIN_FRAME_SIZE];
+    uint8_t frame[TELEMETRY_MAX_FRAME_SIZE];
+    const uint16_t max_payload =
+        (uint16_t)(TELEMETRY_MAX_FRAME_SIZE - TELEMETRY_MIN_FRAME_SIZE);
     uint16_t payload_len = 0;
-    if (msg->encode(msg->user_data, payload, (uint16_t)sizeof(payload), &payload_len) != 0) {
+    if (msg->encode(msg->user_data, &frame[TELEMETRY_PAYLOAD_OFFSET], max_payload, &payload_len) != 0) {
         return -3;
     }
 
     const uint16_t seq = tel->next_sequence_id++;
-    return telemetry_send_frame(tel, message_type, seq, TELEMETRY_ERR_NONE, payload, payload_len);
+    const uint16_t body_len = TELEMETRY_BODY_LEN(payload_len);
+    const uint16_t frame_len = TELEMETRY_FRAME_LEN(payload_len);
+    if (frame_len > TELEMETRY_MAX_FRAME_SIZE) {
+        return -4;
+    }
+
+    write_u16_le(&frame[0], TELEMETRY_MAGIC);
+    write_u16_le(&frame[2], body_len);
+    frame[TELEMETRY_OFF_VERSION] = TELEMETRY_PROTOCOL_VERSION;
+    write_u16_le(&frame[TELEMETRY_OFF_SEQUENCE], seq);
+    write_u16_le(&frame[TELEMETRY_OFF_MESSAGE_TYPE], message_type);
+    frame[TELEMETRY_OFF_ERROR_CODE] = (uint8_t)TELEMETRY_ERR_NONE;
+    frame[TELEMETRY_PAYLOAD_OFFSET + payload_len] =
+        telemetry_crc8(frame, (uint16_t)(TELEMETRY_PAYLOAD_OFFSET + payload_len));
+
+    if (telemetry_write_all(tel, frame, frame_len) != 0) {
+        return -5;
+    }
+    return 0;
 }

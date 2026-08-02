@@ -22,6 +22,9 @@ bool imu_async_init(void);
 bool imu_async_busy(void);
 bool imu_async_start_read(imu_async_done_cb cb, void *user_ctx);
 
+/** Call after main() probe when icm45686_init_spi already succeeded (skips HAL_Delay re-init). */
+void imu_async_note_hw_probed_ok(uint8_t who_am_i);
+
 /** 0 = OK; -1 SPI/WHO read fail; -2 WHO_AM_I mismatch (expect 0xE9). */
 extern volatile int32_t g_imu_init_err;
 /** Raw WHO_AM_I from last init attempt (valid when g_imu_init_err != 0). */

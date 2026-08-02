@@ -35,16 +35,48 @@
 /** Configure pins
      PH0-OSC_IN (PH0)   ------> RCC_OSC_IN
      PH1-OSC_OUT (PH1)   ------> RCC_OSC_OUT
+     PA6   ------> ADCx_INP3
+     PA13 (JTMS/SWDIO)   ------> DEBUG_JTMS-SWDIO
+     PA14 (JTCK/SWCLK)   ------> DEBUG_JTCK-SWCLK
+     PA15 (JTDI)   ------> UART7_TX
+     PB3 (JTDO/TRACESWO)   ------> DEBUG_JTDO-SWO
 */
 void MX_GPIO_Init(void)
 {
 
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOE, PE5_SPI2_CS_Pin|PE6_SPI3_CS_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pins : PE5_SPI2_CS_Pin PE6_SPI3_CS_Pin */
+  GPIO_InitStruct.Pin = PE5_SPI2_CS_Pin|PE6_SPI3_CS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PA6 */
+  GPIO_InitStruct.Pin = GPIO_PIN_6;
+  GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PA15 */
+  GPIO_InitStruct.Pin = GPIO_PIN_15;
+  GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  GPIO_InitStruct.Alternate = GPIO_AF11_UART7;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
 }
 

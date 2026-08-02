@@ -38,18 +38,25 @@ typedef struct {
 } ODriveCanDmaTxSlot;
 
 
+typedef struct {
 
-static ODriveCanHalHandle *s_hcan;
+    ODriveCanHalHandle *hcan;
+
+    ODriveCanDmaTxSlot tx_q[ODRIVE_CAN_DMA_TX_QUEUE_DEPTH];
+
+    volatile uint32_t tx_head;
+
+    volatile uint32_t tx_tail;
+
+} ODriveCanDmaBus;
+
+
+
+static ODriveCanDmaBus s_bus[ODRIVE_CAN_DMA_DRIVE_COUNT];
+
+static ODriveCanDmaBus *s_default_bus;
 
 static uint32_t s_default_node_id;
-
-
-
-static ODriveCanDmaTxSlot s_tx_q[ODRIVE_CAN_DMA_TX_QUEUE_DEPTH];
-
-static volatile uint32_t s_tx_head;
-
-static volatile uint32_t s_tx_tail;
 
 
 
@@ -78,66 +85,89 @@ static uint32_t s_hal_ticks_ms(void)
 
 static int odrive_can_dma_node_index(uint32_t node_id)
 {
-    if (node_id == APP_ODRIVE_NODE0_ID) {
+    if (node_id == APP_ODRIVE_DRIVE0_NODE_ID) {
         return 0;
     }
-    if (node_id == APP_ODRIVE_NODE1_ID) {
+    if (node_id == APP_ODRIVE_DRIVE1_NODE_ID && APP_ODRIVE_DRIVE1_NODE_ID != APP_ODRIVE_DRIVE0_NODE_ID) {
         return 1;
+    }
+    return -1;
+}
+
+static ODriveCanDmaBus *bus_from_handle(ODriveCanHalHandle *hcan)
+{
+    for (uint32_t i = 0; i < ODRIVE_CAN_DMA_DRIVE_COUNT; i++) {
+        if (s_bus[i].hcan == hcan) {
+            return &s_bus[i];
+        }
+    }
+    return NULL;
+}
+
+static int drive_index_from_handle(ODriveCanHalHandle *hcan)
+{
+    for (uint32_t i = 0; i < ODRIVE_CAN_DMA_DRIVE_COUNT; i++) {
+        if (s_bus[i].hcan == hcan) {
+            return (int)i;
+        }
     }
     return -1;
 }
 
 
 
-static bool tx_queue_push_locked(const ODriveCanDmaTxSlot *item)
+static bool tx_queue_push_locked(ODriveCanDmaBus *bus, const ODriveCanDmaTxSlot *item)
 {
-    uint32_t next = (s_tx_head + 1u) % ODRIVE_CAN_DMA_TX_QUEUE_DEPTH;
-    if (next == s_tx_tail) {
+    uint32_t next = (bus->tx_head + 1u) % ODRIVE_CAN_DMA_TX_QUEUE_DEPTH;
+    if (next == bus->tx_tail) {
         return false;
     }
-    s_tx_q[s_tx_head] = *item;
-    s_tx_head = next;
+    bus->tx_q[bus->tx_head] = *item;
+    bus->tx_head = next;
     return true;
 }
 
-static bool tx_queue_push(const ODriveCanDmaTxSlot *item)
+static bool tx_queue_push(ODriveCanDmaBus *bus, const ODriveCanDmaTxSlot *item)
 {
+    if (bus == NULL) {
+        return false;
+    }
     if (s_tx_mtx == NULL) {
-        return tx_queue_push_locked(item);
+        return tx_queue_push_locked(bus, item);
     }
     if (xSemaphoreTake(s_tx_mtx, pdMS_TO_TICKS(2u)) != pdTRUE) {
         return false;
     }
-    const bool ok = tx_queue_push_locked(item);
+    const bool ok = tx_queue_push_locked(bus, item);
     (void)xSemaphoreGive(s_tx_mtx);
     return ok;
 }
 
 
 
-static const ODriveCanDmaTxSlot *tx_queue_peek(void)
+static const ODriveCanDmaTxSlot *tx_queue_peek(ODriveCanDmaBus *bus)
 
 {
 
-    if (s_tx_head == s_tx_tail) {
+    if (bus == NULL || bus->tx_head == bus->tx_tail) {
 
         return NULL;
 
     }
 
-    return &s_tx_q[s_tx_tail];
+    return &bus->tx_q[bus->tx_tail];
 
 }
 
 
 
-static void tx_queue_drop_head(void)
+static void tx_queue_drop_head(ODriveCanDmaBus *bus)
 
 {
 
-    if (s_tx_head != s_tx_tail) {
+    if (bus != NULL && bus->tx_head != bus->tx_tail) {
 
-        s_tx_tail = (s_tx_tail + 1u) % ODRIVE_CAN_DMA_TX_QUEUE_DEPTH;
+        bus->tx_tail = (bus->tx_tail + 1u) % ODRIVE_CAN_DMA_TX_QUEUE_DEPTH;
 
     }
 
@@ -155,15 +185,29 @@ bool odrive_can_dma_init(ODriveCanHalHandle *hcan)
 
     }
 
-    s_hcan = hcan;
+    ODriveCanDmaBus *bus = bus_from_handle(hcan);
+    if (bus == NULL) {
+        for (uint32_t i = 0; i < ODRIVE_CAN_DMA_DRIVE_COUNT; i++) {
+            if (s_bus[i].hcan == NULL) {
+                bus = &s_bus[i];
+                bus->hcan = hcan;
+                break;
+            }
+        }
+    }
+    if (bus == NULL) {
+        return false;
+    }
 
-    s_default_node_id = APP_ODRIVE_NODE0_ID;
+    if (s_default_bus == NULL) {
+        s_default_bus = bus;
+        s_default_node_id = APP_ODRIVE_NODE0_ID;
+        g_odrive_can_tx_queue_full = 0u;
+        g_odrive_can_tx_hal_fail = 0u;
+        memset(s_enc_snap, 0, sizeof(s_enc_snap));
+    }
 
-    s_tx_head = s_tx_tail = 0u;
-    g_odrive_can_tx_queue_full = 0u;
-    g_odrive_can_tx_hal_fail = 0u;
-
-    memset(s_enc_snap, 0, sizeof(s_enc_snap));
+    bus->tx_head = bus->tx_tail = 0u;
 
     if (s_tx_mtx == NULL) {
         s_tx_mtx = xSemaphoreCreateMutex();
@@ -200,7 +244,8 @@ uint32_t odrive_can_dma_get_node_id(void)
 
 void odrive_can_dma_process_tx(ODriveCanHalHandle *hcan)
 {
-    if (hcan == NULL || hcan != s_hcan) {
+    ODriveCanDmaBus *bus = bus_from_handle(hcan);
+    if (hcan == NULL || bus == NULL) {
         return;
     }
 
@@ -217,7 +262,7 @@ void odrive_can_dma_process_tx(ODriveCanHalHandle *hcan)
     }
 
     while (odrive_can_hal_tx_ready(hcan)) {
-        const ODriveCanDmaTxSlot *slot = tx_queue_peek();
+        const ODriveCanDmaTxSlot *slot = tx_queue_peek(bus);
         if (slot == NULL) {
             break;
         }
@@ -225,7 +270,7 @@ void odrive_can_dma_process_tx(ODriveCanHalHandle *hcan)
             g_odrive_can_tx_hal_fail++;
             break;
         }
-        tx_queue_drop_head();
+        tx_queue_drop_head(bus);
     }
 
     if (s_tx_mtx != NULL) {
@@ -235,7 +280,7 @@ void odrive_can_dma_process_tx(ODriveCanHalHandle *hcan)
 
 
 
-void odrive_can_dma_on_rx_frame(uint32_t std_id, const uint8_t *data, uint8_t dlc)
+static void odrive_can_dma_on_rx_frame_for_index(int idx, uint32_t std_id, const uint8_t *data, uint8_t dlc)
 
 {
 
@@ -245,11 +290,6 @@ void odrive_can_dma_on_rx_frame(uint32_t std_id, const uint8_t *data, uint8_t dl
 
     }
 
-
-
-    const uint32_t nid = odrive_can_node_from_id(std_id);
-
-    const int idx = odrive_can_dma_node_index(nid);
 
     if (idx < 0) {
 
@@ -303,13 +343,31 @@ void odrive_can_dma_on_rx_frame(uint32_t std_id, const uint8_t *data, uint8_t dl
 
 }
 
+void odrive_can_dma_on_rx_frame(uint32_t std_id, const uint8_t *data, uint8_t dlc)
+
+{
+
+    const uint32_t nid = odrive_can_node_from_id(std_id);
+
+    odrive_can_dma_on_rx_frame_for_index(odrive_can_dma_node_index(nid), std_id, data, dlc);
+
+}
+
+void odrive_can_dma_on_rx_frame_for_bus(ODriveCanHalHandle *hcan, uint32_t std_id, const uint8_t *data, uint8_t dlc)
+
+{
+
+    odrive_can_dma_on_rx_frame_for_index(drive_index_from_handle(hcan), std_id, data, dlc);
+
+}
+
 
 
 void odrive_can_dma_on_rx_fifo0(ODriveCanHalHandle *hcan)
 
 {
 
-    if (hcan == NULL || hcan != s_hcan) {
+    if (hcan == NULL || bus_from_handle(hcan) == NULL) {
 
         return;
 
@@ -343,7 +401,7 @@ void odrive_can_dma_on_rx_fifo0(ODriveCanHalHandle *hcan)
 
         }
 
-        odrive_can_dma_on_rx_frame(std_id, data, dlc);
+        odrive_can_dma_on_rx_frame_for_bus(hcan, std_id, data, dlc);
 
     }
 
@@ -351,7 +409,7 @@ void odrive_can_dma_on_rx_fifo0(ODriveCanHalHandle *hcan)
 
 
 
-static bool enqueue_std(uint32_t std_id, bool rtr, const uint8_t *data, uint8_t dlc)
+static bool enqueue_std_on_bus(ODriveCanDmaBus *bus, uint32_t std_id, bool rtr, const uint8_t *data, uint8_t dlc)
 
 {
 
@@ -373,12 +431,17 @@ static bool enqueue_std(uint32_t std_id, bool rtr, const uint8_t *data, uint8_t 
 
     }
 
-    const bool ok = tx_queue_push(&slot);
+    const bool ok = tx_queue_push(bus, &slot);
     if (!ok) {
         g_odrive_can_tx_queue_full++;
     }
     return ok;
 
+}
+
+static bool enqueue_std(uint32_t std_id, bool rtr, const uint8_t *data, uint8_t dlc)
+{
+    return enqueue_std_on_bus(s_default_bus, std_id, rtr, data, dlc);
 }
 
 
@@ -395,6 +458,18 @@ bool odrive_can_dma_set_input_vel(uint32_t node_id, float vel_turns_s, float tor
 
     return enqueue_std(odrive_can_std_id(node_id, ODRIVE_MSG_SET_INPUT_VEL), false, buf, 8);
 
+}
+
+bool odrive_can_dma_set_input_vel_on_bus(ODriveCanHalHandle *hcan, uint32_t node_id,
+                                         float vel_turns_s, float torque_ff_nm)
+{
+    uint8_t buf[8];
+
+    memcpy(buf, &vel_turns_s, sizeof(float));
+    memcpy(buf + 4, &torque_ff_nm, sizeof(float));
+
+    return enqueue_std_on_bus(bus_from_handle(hcan), odrive_can_std_id(node_id, ODRIVE_MSG_SET_INPUT_VEL),
+                              false, buf, 8);
 }
 
 
@@ -423,6 +498,17 @@ bool odrive_can_dma_set_input_torque(uint32_t node_id, float torque_nm)
 
     return enqueue_std(odrive_can_std_id(node_id, ODRIVE_MSG_SET_INPUT_TORQUE), false, buf, 8);
 
+}
+
+bool odrive_can_dma_set_input_torque_on_bus(ODriveCanHalHandle *hcan, uint32_t node_id,
+                                            float torque_nm)
+{
+    uint8_t buf[8];
+
+    odrive_can_pack_set_input_torque(buf, torque_nm);
+
+    return enqueue_std_on_bus(bus_from_handle(hcan), odrive_can_std_id(node_id, ODRIVE_MSG_SET_INPUT_TORQUE),
+                              false, buf, 8);
 }
 
 
@@ -491,6 +577,12 @@ bool odrive_can_dma_request_encoder_estimates(uint32_t node_id)
 
 }
 
+bool odrive_can_dma_request_encoder_estimates_on_bus(ODriveCanHalHandle *hcan, uint32_t node_id)
+{
+    return enqueue_std_on_bus(bus_from_handle(hcan), odrive_can_std_id(node_id, ODRIVE_MSG_GET_ENCODER_ESTIMATES),
+                              true, NULL, 8);
+}
+
 
 
 bool odrive_can_dma_get_encoder_snapshot(uint32_t node_id, ODriveCanDmaEncoderSnapshot *out)
@@ -529,6 +621,21 @@ bool odrive_can_dma_get_encoder_snapshot(uint32_t node_id, ODriveCanDmaEncoderSn
 
 }
 
+bool odrive_can_dma_get_encoder_snapshot_for_drive(uint32_t drive_idx, ODriveCanDmaEncoderSnapshot *out)
+{
+    if (out == NULL || drive_idx >= ODRIVE_CAN_DMA_DRIVE_COUNT) {
+        return false;
+    }
+
+    uint32_t prim = __get_PRIMASK();
+    __disable_irq();
+    *out = s_enc_snap[drive_idx];
+    if (!prim) {
+        __enable_irq();
+    }
+    return out->valid;
+}
+
 
 
 bool odrive_can_dma_is_encoder_fresh(uint32_t node_id, uint32_t max_age_ms)
@@ -547,6 +654,18 @@ bool odrive_can_dma_is_encoder_fresh(uint32_t node_id, uint32_t max_age_ms)
 
     return (now - snap.last_update_ms) <= max_age_ms;
 
+}
+
+bool odrive_can_dma_is_encoder_fresh_for_drive(uint32_t drive_idx, uint32_t max_age_ms)
+{
+    ODriveCanDmaEncoderSnapshot snap;
+
+    if (!odrive_can_dma_get_encoder_snapshot_for_drive(drive_idx, &snap)) {
+        return false;
+    }
+
+    const uint32_t now = s_hal_ticks_ms();
+    return (now - snap.last_update_ms) <= max_age_ms;
 }
 
 

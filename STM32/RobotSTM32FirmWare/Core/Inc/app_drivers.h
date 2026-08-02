@@ -19,6 +19,9 @@
 
 bool app_drivers_rtos_init(void);
 
+/** Enable CAN RX IRQ after the scheduler is running (FromISR-safe). */
+void app_drivers_irq_enable(void);
+
 bool app_imu_init(void);
 
 bool app_imu_is_ready(void);

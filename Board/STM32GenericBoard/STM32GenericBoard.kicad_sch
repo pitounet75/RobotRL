@@ -5921,10 +5921,6 @@
 		(uuid "dcf209a9-257c-4bc2-ac17-d5aeef3c7635")
 	)
 	(no_connect
-		(at 121.92 116.84)
-		(uuid "e38d7215-ca7b-4a88-b56d-0b3b4e9ce2ce")
-	)
-	(no_connect
 		(at 33.02 128.27)
 		(uuid "e8e2e40d-b3e9-4954-9070-ab8d3c45af56")
 	)
@@ -5935,10 +5931,6 @@
 	(no_connect
 		(at 33.02 130.81)
 		(uuid "ec399ba5-5889-41b8-98e3-5ed3c5abb0b1")
-	)
-	(no_connect
-		(at 121.92 138.43)
-		(uuid "f12933f3-3078-4810-accd-9f8d1a27800e")
 	)
 	(no_connect
 		(at 182.88 96.52)
@@ -6026,16 +6018,6 @@
 	)
 	(wire
 		(pts
-			(xy 114.3 140.97) (xy 121.92 140.97)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "1a2f997c-05b6-4389-9af5-0dd67558faf9")
-	)
-	(wire
-		(pts
 			(xy 33.02 179.07) (xy 30.48 179.07)
 		)
 		(stroke
@@ -6083,16 +6065,6 @@
 			(type default)
 		)
 		(uuid "39cdbf80-1cd8-4149-9d0c-05504fb3432f")
-	)
-	(wire
-		(pts
-			(xy 114.3 119.38) (xy 121.92 119.38)
-		)
-		(stroke
-			(width 0)
-			(type default)
-		)
-		(uuid "3db0a00a-c5f3-4ea0-9d23-79f5a3f61893")
 	)
 	(wire
 		(pts
@@ -12234,6 +12206,84 @@
 		)
 	)
 	(symbol
+		(lib_id "power:GND")
+		(at 121.92 140.97 270)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(uuid "86ee0c9d-b101-4506-8c74-355c8a052b21")
+		(property "Reference" "#PWR061"
+			(at 115.57 140.97 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "GND"
+			(at 118.11 140.9701 90)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+			)
+		)
+		(property "Footprint" ""
+			(at 121.92 140.97 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 121.92 140.97 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
+			(at 121.92 140.97 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "2e047d2a-3e2c-4eab-b8e5-e02338039889")
+		)
+		(instances
+			(project "STM32GenericBoard"
+				(path "/55bb8da0-81e5-46ef-8fd3-f4a6b9d14d56"
+					(reference "#PWR061")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
 		(lib_id "Device:C")
 		(at 54.61 24.13 0)
 		(unit 1)
@@ -13272,7 +13322,7 @@
 	)
 	(symbol
 		(lib_id "power:+3V3")
-		(at 114.3 119.38 90)
+		(at 121.92 116.84 90)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -13283,7 +13333,7 @@
 		(fields_autoplaced yes)
 		(uuid "c1a76274-87e3-4d34-81e5-ca170c57007d")
 		(property "Reference" "#PWR059"
-			(at 118.11 119.38 0)
+			(at 125.73 116.84 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13294,7 +13344,7 @@
 			)
 		)
 		(property "Value" "+3V3"
-			(at 110.49 119.3799 90)
+			(at 118.11 116.8399 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
@@ -13305,7 +13355,7 @@
 			)
 		)
 		(property "Footprint" ""
-			(at 114.3 119.38 0)
+			(at 121.92 116.84 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13316,7 +13366,7 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 114.3 119.38 0)
+			(at 121.92 116.84 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13327,7 +13377,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"+3V3\""
-			(at 114.3 119.38 0)
+			(at 121.92 116.84 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13667,8 +13717,8 @@
 		)
 	)
 	(symbol
-		(lib_id "power:+3V3")
-		(at 114.3 140.97 90)
+		(lib_id "power:GND")
+		(at 121.92 119.38 270)
 		(unit 1)
 		(body_style 1)
 		(exclude_from_sim no)
@@ -13676,10 +13726,9 @@
 		(on_board yes)
 		(in_pos_files yes)
 		(dnp no)
-		(fields_autoplaced yes)
-		(uuid "cff131fa-c93a-40dd-b8a4-24612d866c2f")
-		(property "Reference" "#PWR060"
-			(at 118.11 140.97 0)
+		(uuid "ce1a004a-a325-41c3-9d79-a24c61702447")
+		(property "Reference" "#PWR062"
+			(at 115.57 119.38 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13689,19 +13738,19 @@
 				)
 			)
 		)
-		(property "Value" "+3V3"
-			(at 110.49 140.9699 90)
+		(property "Value" "GND"
+			(at 118.11 119.3801 90)
 			(show_name no)
 			(do_not_autoplace no)
 			(effects
 				(font
 					(size 1.27 1.27)
 				)
-				(justify left)
+				(justify right)
 			)
 		)
 		(property "Footprint" ""
-			(at 114.3 140.97 0)
+			(at 121.92 119.38 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13712,7 +13761,86 @@
 			)
 		)
 		(property "Datasheet" ""
-			(at 114.3 140.97 0)
+			(at 121.92 119.38 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
+			(at 121.92 119.38 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(pin "1"
+			(uuid "b551b3ec-58e9-4ff3-8139-089f91a860ec")
+		)
+		(instances
+			(project "STM32GenericBoard"
+				(path "/55bb8da0-81e5-46ef-8fd3-f4a6b9d14d56"
+					(reference "#PWR062")
+					(unit 1)
+				)
+			)
+		)
+	)
+	(symbol
+		(lib_id "power:+3V3")
+		(at 121.92 138.43 90)
+		(unit 1)
+		(body_style 1)
+		(exclude_from_sim no)
+		(in_bom yes)
+		(on_board yes)
+		(in_pos_files yes)
+		(dnp no)
+		(fields_autoplaced yes)
+		(uuid "cff131fa-c93a-40dd-b8a4-24612d866c2f")
+		(property "Reference" "#PWR060"
+			(at 125.73 138.43 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Value" "+3V3"
+			(at 118.11 138.4299 90)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify left)
+			)
+		)
+		(property "Footprint" ""
+			(at 121.92 138.43 0)
+			(hide yes)
+			(show_name no)
+			(do_not_autoplace no)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+			)
+		)
+		(property "Datasheet" ""
+			(at 121.92 138.43 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)
@@ -13723,7 +13851,7 @@
 			)
 		)
 		(property "Description" "Power symbol creates a global label with name \"+3V3\""
-			(at 114.3 140.97 0)
+			(at 121.92 138.43 0)
 			(hide yes)
 			(show_name no)
 			(do_not_autoplace no)

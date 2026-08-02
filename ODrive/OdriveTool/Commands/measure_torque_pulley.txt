@@ -1,0 +1,21 @@
+# odrivetool: torque ramp with mass on string (wheel r=40mm, ~250g -> ~0.1 Nm).
+# Closed loop required. Watch when mass lifts; note cmd=... Nm at that step.
+# 2 s between steps to limit heating when stalled below lift threshold.
+
+odrv0.axis0.controller.config.control_mode = CONTROL_MODE_TORQUE_CONTROL
+odrv0.axis0.controller.config.input_mode = INPUT_MODE_PASSTHROUGH
+odrv0.axis0.controller.input_torque = 0.0
+odrv0.axis0.controller.input_vel = 0.0
+
+import time
+for t in [0.02, 0.04, 0.06, 0.08, 0.10, 0.12, 0.15]:
+    odrv0.axis0.controller.input_torque = t
+    time.sleep(0.4)
+    iq = odrv0.axis0.motor.current_control.Iq_measured
+    kt = t / abs(iq) if abs(iq) > 0.01 else float("nan")
+    print(f"cmd={t:.2f} Nm  Iq={iq:.2f} A  Kt_eff={kt:.4f} Nm/A")
+    odrv0.axis0.controller.input_torque = 0.0
+    time.sleep(2.0)
+
+odrv0.axis0.controller.input_torque = 0.0
+print("done — torque remis a 0")

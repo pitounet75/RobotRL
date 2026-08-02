@@ -25,7 +25,7 @@ extern "C" {
 #endif
 
 #ifndef TELEMETRY_MAX_FIELDS
-#define TELEMETRY_MAX_FIELDS 24u
+#define TELEMETRY_MAX_FIELDS 32u
 #endif
 
 #ifndef TELEMETRY_MAX_FIELD_NAME_LEN

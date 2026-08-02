@@ -11,7 +11,7 @@
 
 #include <stdint.h>
 
-#ifdef STM32H7xx
+#if defined(STM32H7xx) || defined(STM32H743xx)
 #include "stm32h7xx_hal.h"
 #elif defined(STM32F4xx)
 #include "stm32f4xx_hal.h"

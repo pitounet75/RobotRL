@@ -44,7 +44,7 @@ void MX_FDCAN1_Init(void)
   hfdcan1.Init.AutoRetransmission = DISABLE;
   hfdcan1.Init.TransmitPause = DISABLE;
   hfdcan1.Init.ProtocolException = DISABLE;
-  hfdcan1.Init.NominalPrescaler = 20;
+  hfdcan1.Init.NominalPrescaler = 10;
   hfdcan1.Init.NominalSyncJumpWidth = 2;
   hfdcan1.Init.NominalTimeSeg1 = 13;
   hfdcan1.Init.NominalTimeSeg2 = 2;
@@ -94,7 +94,7 @@ void MX_FDCAN2_Init(void)
   hfdcan2.Init.AutoRetransmission = DISABLE;
   hfdcan2.Init.TransmitPause = DISABLE;
   hfdcan2.Init.ProtocolException = DISABLE;
-  hfdcan2.Init.NominalPrescaler = 20;
+  hfdcan2.Init.NominalPrescaler = 10;
   hfdcan2.Init.NominalSyncJumpWidth = 1;
   hfdcan2.Init.NominalTimeSeg1 = 13;
   hfdcan2.Init.NominalTimeSeg2 = 2;
@@ -134,28 +134,39 @@ void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef* fdcanHandle)
 {
 
   GPIO_InitTypeDef GPIO_InitStruct = {0};
+  RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
   if(fdcanHandle->Instance==FDCAN1)
   {
   /* USER CODE BEGIN FDCAN1_MspInit 0 */
 
   /* USER CODE END FDCAN1_MspInit 0 */
+
+  /** Initializes the peripherals clock
+  */
+    PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_FDCAN;
+    PeriphClkInitStruct.FdcanClockSelection = RCC_FDCANCLKSOURCE_PLL;
+    if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
     /* FDCAN1 clock enable */
     HAL_RCC_FDCAN_CLK_ENABLED++;
     if(HAL_RCC_FDCAN_CLK_ENABLED==1){
       __HAL_RCC_FDCAN_CLK_ENABLE();
     }
 
-    __HAL_RCC_GPIOA_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
     /**FDCAN1 GPIO Configuration
-    PA11     ------> FDCAN1_RX
-    PA12     ------> FDCAN1_TX
+    PB8     ------> FDCAN1_RX
+    PB9     ------> FDCAN1_TX
     */
-    GPIO_InitStruct.Pin = GPIO_PIN_11|GPIO_PIN_12;
+    GPIO_InitStruct.Pin = GPIO_PIN_8|GPIO_PIN_9;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     GPIO_InitStruct.Alternate = GPIO_AF9_FDCAN1;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* USER CODE BEGIN FDCAN1_MspInit 1 */
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
@@ -167,6 +178,16 @@ void HAL_FDCAN_MspInit(FDCAN_HandleTypeDef* fdcanHandle)
   /* USER CODE BEGIN FDCAN2_MspInit 0 */
 
   /* USER CODE END FDCAN2_MspInit 0 */
+
+  /** Initializes the peripherals clock
+  */
+    PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_FDCAN;
+    PeriphClkInitStruct.FdcanClockSelection = RCC_FDCANCLKSOURCE_PLL;
+    if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
     /* FDCAN2 clock enable */
     HAL_RCC_FDCAN_CLK_ENABLED++;
     if(HAL_RCC_FDCAN_CLK_ENABLED==1){
@@ -207,10 +228,10 @@ void HAL_FDCAN_MspDeInit(FDCAN_HandleTypeDef* fdcanHandle)
     }
 
     /**FDCAN1 GPIO Configuration
-    PA11     ------> FDCAN1_RX
-    PA12     ------> FDCAN1_TX
+    PB8     ------> FDCAN1_RX
+    PB9     ------> FDCAN1_TX
     */
-    HAL_GPIO_DeInit(GPIOA, GPIO_PIN_11|GPIO_PIN_12);
+    HAL_GPIO_DeInit(GPIOB, GPIO_PIN_8|GPIO_PIN_9);
 
   /* USER CODE BEGIN FDCAN1_MspDeInit 1 */
 

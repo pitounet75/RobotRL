@@ -12,10 +12,12 @@
 
 typedef enum {
     CTRL_STRATEGY_DUAL_PID = 0,
-    /** F407-style: u = kθ·θ + kω·θ̇ + kv·ẋ with optional output smoothing. */
+    /** State feedback: u = Kθ·f(θ_err) − Kω·θ̇ + Kv·ẋ; f=linear|atan (see APP_CTRL_LINEAR_THETA_FUNC). */
     CTRL_STRATEGY_LINEAR = 1,
     /** Segway-style: velocity error shifts pitch_ref, then pitch PID. */
     CTRL_STRATEGY_CASCADE = 2,
+    /** Cascade + u_ff = -K_ff*sin(pitch) + FB on (pitch_ref_eff - pitch, pitch_rate). */
+    CTRL_STRATEGY_FF_CASCADE = 3,
     CTRL_STRATEGY_COUNT
 } control_strategy_id_t;
 
@@ -31,11 +33,13 @@ typedef struct {
 typedef struct {
     bool ok;
     bool estop;
-    float vel_left_turns_s;
-    float vel_right_turns_s;
+    float torque_left_nm;
+    float torque_right_nm;
     /** Debug taps (strategy-dependent; zero if unused). */
     float u_balance;
     float u_vel;
+    float u_ff;
+    float u_fb;
     float cmd;
 } control_strategy_output_t;
 

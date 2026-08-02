@@ -14,7 +14,8 @@ void test_imu_fusion_level_init(void)
     const float gyro[3] = {0.0f, 0.0f, 0.0f};
 
     imu_fusion_reset(&state);
-    TEST_ASSERT(imu_fusion_update(&state, accel, gyro, 1000u, 0.001f, 0.98f, 1, &out));
+    TEST_ASSERT(imu_fusion_update(&state, accel, gyro, 1000u, 0.001f, 0.98f,
+                                  0, 2, 1, 1.0f, &out));
     TEST_ASSERT_NEAR(0.0f, out.pitch_rad, 0.01f);
     TEST_ASSERT_NEAR(0.0f, out.pitch_rate_rads, 1e-6f);
 }
@@ -27,8 +28,10 @@ void test_imu_fusion_gyro_integrates(void)
     const float gyro_rate[3] = {0.0f, 1.0f, 0.0f}; /* 1 rad/s pitch rate */
 
     imu_fusion_reset(&state);
-    TEST_ASSERT(imu_fusion_update(&state, level, gyro_rate, 1000u, 0.001f, 0.98f, 1, &out));
-    TEST_ASSERT(imu_fusion_update(&state, level, gyro_rate, 2000u, 0.001f, 0.98f, 1, &out));
+    TEST_ASSERT(imu_fusion_update(&state, level, gyro_rate, 1000u, 0.001f, 0.98f,
+                                  0, 2, 1, 1.0f, &out));
+    TEST_ASSERT(imu_fusion_update(&state, level, gyro_rate, 2000u, 0.001f, 0.98f,
+                                  0, 2, 1, 1.0f, &out));
     /* alpha=0.98: pitch ≈ 0.98 * 0.001 rad after second sample */
     TEST_ASSERT(out.pitch_rad > 0.0005f);
     TEST_ASSERT(out.pitch_rad < 0.002f);
