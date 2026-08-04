@@ -150,6 +150,7 @@ int telemetry_send_frame(telemetry_t *tel, uint16_t message_type, uint16_t seque
 
 /**
  * Send ascending telemetry for a registered type (auto sequence id).
+ * The sequence id advances only after the transport accepts the frame.
  */
 int telemetry_send(telemetry_t *tel, uint16_t message_type);
 

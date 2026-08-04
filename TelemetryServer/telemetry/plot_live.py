@@ -29,7 +29,7 @@ class _Series:
 
 
 class LiveBalancePlotter:
-    def __init__(self, history_s: float = 10.0, expected_hz: float = 200.0) -> None:
+    def __init__(self, history_s: float = 10.0, expected_hz: float = 500.0) -> None:
         self.max_points = max(100, int(history_s * expected_hz))
         self.host_t: Deque[float] = deque(maxlen=self.max_points)
         self._t0: Optional[float] = None

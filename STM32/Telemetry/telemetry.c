@@ -471,12 +471,12 @@ static void telemetry_handle_get_dictionary(telemetry_t *tel, uint16_t sequence_
                              (const uint8_t *)TELEMETRY_DICTIONARY_CATALOG, len);
 }
 
-static void telemetry_send_telemetry_frame(telemetry_t *tel, uint16_t sequence_id)
+static int telemetry_send_telemetry_frame(telemetry_t *tel, uint16_t sequence_id)
 {
     uint8_t payload[TELEMETRY_FRAME_PAYLOAD_LEN];
     telemetry_frame_encode(&tel->telemetry_frame, payload);
-    (void)telemetry_send_frame(tel, TELEM_MSG_GET_TELEMETRY_FRAME, sequence_id, TELEMETRY_ERR_NONE, payload,
-                               TELEMETRY_FRAME_PAYLOAD_LEN);
+    return telemetry_send_frame(tel, TELEM_MSG_GET_TELEMETRY_FRAME, sequence_id, TELEMETRY_ERR_NONE, payload,
+                                TELEMETRY_FRAME_PAYLOAD_LEN);
 }
 
 static void telemetry_handle_get_telemetry_frame(telemetry_t *tel, uint16_t sequence_id, const uint8_t *payload,
@@ -492,7 +492,7 @@ static void telemetry_handle_get_telemetry_frame(telemetry_t *tel, uint16_t sequ
     tel->stream_interval_ms = interval_ms;
     tel->stream_elapsed_ms = 0u;
 
-    telemetry_send_telemetry_frame(tel, sequence_id);
+    (void)telemetry_send_telemetry_frame(tel, sequence_id);
 
     if (interval_ms == 0u) {
         tel->stream_interval_ms = 0u;
@@ -535,8 +535,10 @@ void telemetry_tick_1ms(telemetry_t *tel)
     }
 
     tel->stream_elapsed_ms = 0u;
-    const uint16_t seq = tel->next_sequence_id++;
-    telemetry_send_telemetry_frame(tel, seq);
+    const uint16_t seq = tel->next_sequence_id;
+    if (telemetry_send_telemetry_frame(tel, seq) == 0) {
+        tel->next_sequence_id++;
+    }
 }
 
 static void telemetry_handle_get_message_description(telemetry_t *tel, uint16_t sequence_id,
@@ -732,7 +734,7 @@ int telemetry_send(telemetry_t *tel, uint16_t message_type)
         return -3;
     }
 
-    const uint16_t seq = tel->next_sequence_id++;
+    const uint16_t seq = tel->next_sequence_id;
     const uint16_t body_len = TELEMETRY_BODY_LEN(payload_len);
     const uint16_t frame_len = TELEMETRY_FRAME_LEN(payload_len);
     if (frame_len > TELEMETRY_MAX_FRAME_SIZE) {
@@ -751,5 +753,6 @@ int telemetry_send(telemetry_t *tel, uint16_t message_type)
     if (telemetry_write_all(tel, frame, frame_len) != 0) {
         return -5;
     }
+    tel->next_sequence_id++;
     return 0;
 }

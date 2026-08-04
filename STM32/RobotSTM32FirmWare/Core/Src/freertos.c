@@ -28,7 +28,6 @@
 #include "app_drivers.h"
 #include "app_freertos_diag.h"
 #include "app_tasks.h"
-#include "app_telemetry.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -120,9 +119,6 @@ void StartDefaultTask(void *argument)
   for (;;)
   {
     app_freertos_diag_default_task_heartbeat();
-    app_telemetry_tick_1ms();
-    app_telemetry_tx_poll();
-    app_telemetry_poll_rx();
     osDelay(1);
   }
   /* USER CODE END StartDefaultTask */

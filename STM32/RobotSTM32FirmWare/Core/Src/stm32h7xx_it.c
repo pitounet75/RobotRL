@@ -24,8 +24,6 @@
 /* USER CODE BEGIN Includes */
 #include "fdcan.h"
 #include "app_freertos_diag.h"
-#include "app_telemetry.h"
-#include "app_config.h"
 #include "odrive_can_async.h"
 #include "spi.h"
 #include "usart.h"
@@ -66,6 +64,7 @@ extern DMA_HandleTypeDef hdma_spi3_tx;
 extern DMA_HandleTypeDef hdma_spi3_rx;
 extern SPI_HandleTypeDef hspi3;
 extern DMA_HandleTypeDef hdma_uart4_tx;
+extern DMA_HandleTypeDef hdma_uart4_rx;
 extern UART_HandleTypeDef huart4;
 extern TIM_HandleTypeDef htim1;
 
@@ -214,6 +213,20 @@ void DMA1_Stream2_IRQHandler(void)
 }
 
 /**
+  * @brief This function handles DMA1 stream3 global interrupt.
+  */
+void DMA1_Stream3_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA1_Stream3_IRQn 0 */
+
+  /* USER CODE END DMA1_Stream3_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_uart4_rx);
+  /* USER CODE BEGIN DMA1_Stream3_IRQn 1 */
+
+  /* USER CODE END DMA1_Stream3_IRQn 1 */
+}
+
+/**
   * @brief This function handles TIM1 update interrupt.
   */
 void TIM1_UP_IRQHandler(void)
@@ -247,13 +260,7 @@ void SPI3_IRQHandler(void)
 void UART4_IRQHandler(void)
 {
   /* USER CODE BEGIN UART4_IRQn 0 */
-  app_telemetry_uart4_rx_isr();
-#if APP_TELEMETRY_UART4_USE_DMA
-  /* HAL DMA TX completion enables TCIE; HAL_UART_IRQHandler clears it and calls TxCplt. */
-  if ((huart4.Instance->CR1 & USART_CR1_TCIE) != 0U) {
-    HAL_UART_IRQHandler(&huart4);
-  }
-#endif
+
   /* USER CODE END UART4_IRQn 0 */
   HAL_UART_IRQHandler(&huart4);
   /* USER CODE BEGIN UART4_IRQn 1 */

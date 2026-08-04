@@ -20,16 +20,15 @@ static int on_get_control_params(telemetry_t *tel, uint16_t sequence_id, const u
     (void)user_data;
 
     if (payload_len != 0u) {
-        (void)app_telemetry_send_frame_immediate(TELEM_MSG_GET_CONTROL_PARAMS, sequence_id,
-                                                 TELEMETRY_ERR_INVALID_PAYLOAD, NULL, 0);
-        return -1;
+        return app_telemetry_send_frame_immediate(TELEM_MSG_GET_CONTROL_PARAMS, sequence_id,
+                                                  TELEMETRY_ERR_INVALID_PAYLOAD, NULL, 0);
     }
 
     const app_ctrl_params_snapshot_t *snap = app_ctrl_params_snapshot();
     g_telemetry_rpc_dispatch_count++;
-    (void)app_telemetry_send_frame_immediate(TELEM_MSG_GET_CONTROL_PARAMS, sequence_id, TELEMETRY_ERR_NONE,
-                                            (const uint8_t *)snap, (uint16_t)sizeof(app_ctrl_params_snapshot_t));
-    return 0;
+    return app_telemetry_send_frame_immediate(TELEM_MSG_GET_CONTROL_PARAMS, sequence_id, TELEMETRY_ERR_NONE,
+                                              (const uint8_t *)snap,
+                                              (uint16_t)sizeof(app_ctrl_params_snapshot_t));
 }
 
 static int on_set_control_param(telemetry_t *tel, uint16_t sequence_id, const uint8_t *payload,
@@ -38,9 +37,8 @@ static int on_set_control_param(telemetry_t *tel, uint16_t sequence_id, const ui
     (void)user_data;
 
     if (payload_len != TELEMETRY_SET_CONTROL_PARAM_PAYLOAD_LEN) {
-        (void)app_telemetry_send_frame_immediate(TELEM_MSG_SET_CONTROL_PARAM, sequence_id,
-                                                 TELEMETRY_ERR_INVALID_PAYLOAD, NULL, 0);
-        return -1;
+        return app_telemetry_send_frame_immediate(TELEM_MSG_SET_CONTROL_PARAM, sequence_id,
+                                                  TELEMETRY_ERR_INVALID_PAYLOAD, NULL, 0);
     }
 
     telemetry_set_control_param_t req;
@@ -48,18 +46,16 @@ static int on_set_control_param(telemetry_t *tel, uint16_t sequence_id, const ui
 
     float applied = 0.0f;
     if (!app_ctrl_params_set(req.param_id, req.value, &applied)) {
-        (void)app_telemetry_send_frame_immediate(TELEM_MSG_SET_CONTROL_PARAM, sequence_id,
-                                                 TELEMETRY_ERR_INVALID_PAYLOAD, NULL, 0);
-        return -1;
+        return app_telemetry_send_frame_immediate(TELEM_MSG_SET_CONTROL_PARAM, sequence_id,
+                                                  TELEMETRY_ERR_INVALID_PAYLOAD, NULL, 0);
     }
 
     telemetry_set_control_param_t ack = {
         .param_id = req.param_id,
         .value = applied,
     };
-    (void)app_telemetry_send_frame_immediate(TELEM_MSG_SET_CONTROL_PARAM, sequence_id, TELEMETRY_ERR_NONE,
-                                            (const uint8_t *)&ack, (uint16_t)sizeof(ack));
-    return 0;
+    return app_telemetry_send_frame_immediate(TELEM_MSG_SET_CONTROL_PARAM, sequence_id, TELEMETRY_ERR_NONE,
+                                              (const uint8_t *)&ack, (uint16_t)sizeof(ack));
 }
 
 bool app_telemetry_ctrl_register(telemetry_t *tel)

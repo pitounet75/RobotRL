@@ -67,7 +67,21 @@
 #define APP_BIAS_PERIOD_MS           10u
 #define APP_WATCHDOG_PERIOD_MS       50u
 #define APP_JETSON_PERIOD_MS         20u
-#define APP_TELEMETRY_PERIOD_MS      5u    /* 200 Hz BalanceFrame (500 Hz = 2 ms) */
+#define APP_TELEMETRY_PERIOD_MS      2u    /* 500 Hz BalanceFrame (matches control loop) */
+
+/** Wait for ESP32 "READY\n" on UART4 RX before streaming (common PSU boot). */
+#ifndef APP_TELEMETRY_WAIT_BRIDGE_READY
+#define APP_TELEMETRY_WAIT_BRIDGE_READY 1
+#endif
+
+#ifndef APP_TELEMETRY_BRIDGE_READY_TIMEOUT_MS
+#define APP_TELEMETRY_BRIDGE_READY_TIMEOUT_MS 5000u
+#endif
+
+/** Fallback fixed delay if bridge-ready handshake is disabled. */
+#ifndef APP_TELEMETRY_STARTUP_DELAY_MS
+#define APP_TELEMETRY_STARTUP_DELAY_MS 4000u
+#endif
 
 /** telemetry_send() uses ~512 B frame buffers; RX replies can use ~900 B. */
 #ifndef APP_TELEMETRY_TASK_STACK_WORDS
@@ -209,7 +223,7 @@
 #define APP_TELEMETRY_BAUD             921600u
 #endif
 
-/** Set to 1 when UART4 TX DMA is enabled in CubeMX (hdma_uart4_tx linked). Required for 500 Hz. */
+/** 1 = UART4 TX/RX via HAL DMA (hdma_uart4_tx/rx in CubeMX, ReceiveToIdle_DMA + Transmit_DMA). */
 #ifndef APP_TELEMETRY_UART4_USE_DMA
 #define APP_TELEMETRY_UART4_USE_DMA    1
 #endif

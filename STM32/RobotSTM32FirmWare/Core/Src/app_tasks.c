@@ -60,7 +60,8 @@ static const osThreadAttr_t attr_jetson = {
 static const osThreadAttr_t attr_telemetry = {
     .name = "telemetry",
     .stack_size = APP_TELEMETRY_TASK_STACK_WORDS * 4u,
-    .priority = osPriorityLow,
+    /* Services protocol at 1 kHz and publishes at 500 Hz. */
+    .priority = osPriorityAboveNormal,
 };
 
 void app_tasks_create(void)

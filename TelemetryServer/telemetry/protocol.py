@@ -14,6 +14,8 @@ TELEMETRY_BODY_HEADER_SIZE = 6
 TELEMETRY_PAYLOAD_OFFSET = 10
 TELEMETRY_MIN_BODY_LEN = 7
 TELEMETRY_MIN_FRAME_SIZE = 11
+TELEMETRY_MAX_FRAME_SIZE = 512
+TELEMETRY_MAX_BODY_LEN = TELEMETRY_MAX_FRAME_SIZE - TELEMETRY_PREFIX_SIZE
 
 TELEM_MSG_BALANCE_FRAME = 0x0100
 TELEM_MSG_GET_CONTROL_PARAMS = 0x0101
@@ -54,10 +56,26 @@ class TelemetryFrame:
         return self.error_code == TelemetryErrorCode.NONE
 
 
+@dataclass
+class ParserCounters:
+    bytes_discarded: int = 0
+    length_errors: int = 0
+    version_errors: int = 0
+    crc_errors: int = 0
+    valid_frames: int = 0
+
+
 class FrameParser:
     """Incremental parser for TM frames from a byte stream."""
 
-    def __init__(self) -> None:
+    def __init__(self, max_body_len: int = TELEMETRY_MAX_BODY_LEN) -> None:
+        if max_body_len < TELEMETRY_MIN_BODY_LEN or max_body_len > 0xFFFF:
+            raise ValueError(
+                f"max_body_len must be in [{TELEMETRY_MIN_BODY_LEN}, 65535]"
+            )
+        self.max_body_len = max_body_len
+        self.max_frame_len = TELEMETRY_PREFIX_SIZE + max_body_len
+        self.counters = ParserCounters()
         self._buf = bytearray()
 
     def feed(self, data: bytes) -> Iterator[TelemetryFrame]:
@@ -69,36 +87,46 @@ class FrameParser:
             yield frame
 
     def _try_extract(self) -> Optional[TelemetryFrame]:
-        while len(self._buf) >= 2 and struct.unpack_from("<H", self._buf, 0)[0] != TELEMETRY_MAGIC:
-            del self._buf[0]
+        while True:
+            while len(self._buf) >= 2 and struct.unpack_from("<H", self._buf, 0)[0] != TELEMETRY_MAGIC:
+                self._discard_one()
 
-        if len(self._buf) < TELEMETRY_PREFIX_SIZE:
-            return None
+            if len(self._buf) < TELEMETRY_PREFIX_SIZE:
+                return None
 
-        body_len = struct.unpack_from("<H", self._buf, 2)[0]
-        if body_len < TELEMETRY_MIN_BODY_LEN:
-            del self._buf[0]
-            return self._try_extract()
+            body_len = struct.unpack_from("<H", self._buf, 2)[0]
+            if body_len < TELEMETRY_MIN_BODY_LEN or body_len > self.max_body_len:
+                self.counters.length_errors += 1
+                self._discard_one()
+                continue
 
-        frame_len = TELEMETRY_PREFIX_SIZE + body_len
-        if len(self._buf) < frame_len:
-            return None
+            frame_len = TELEMETRY_PREFIX_SIZE + body_len
+            if len(self._buf) < frame_len:
+                return None
 
-        raw = bytes(self._buf[:frame_len])
-        del self._buf[:frame_len]
+            raw = bytes(self._buf[:frame_len])
+            if raw[4] != TELEMETRY_PROTOCOL_VERSION:
+                self.counters.version_errors += 1
+                self._discard_one()
+                continue
 
-        if raw[4] != TELEMETRY_PROTOCOL_VERSION:
-            return None
+            rx_crc = raw[-1]
+            if crc8(raw[:-1]) != rx_crc:
+                self.counters.crc_errors += 1
+                self._discard_one()
+                continue
 
-        rx_crc = raw[-1]
-        if crc8(raw[:-1]) != rx_crc:
-            return None
+            del self._buf[:frame_len]
+            self.counters.valid_frames += 1
+            sequence_id = struct.unpack_from("<H", raw, 5)[0]
+            message_type = struct.unpack_from("<H", raw, 7)[0]
+            error_code = raw[9]
+            payload = raw[TELEMETRY_PAYLOAD_OFFSET:-1]
+            return TelemetryFrame(sequence_id, message_type, error_code, payload)
 
-        sequence_id = struct.unpack_from("<H", raw, 5)[0]
-        message_type = struct.unpack_from("<H", raw, 7)[0]
-        error_code = raw[9]
-        payload = raw[TELEMETRY_PAYLOAD_OFFSET:-1]
-        return TelemetryFrame(sequence_id, message_type, error_code, payload)
+    def _discard_one(self) -> None:
+        del self._buf[0]
+        self.counters.bytes_discarded += 1
 
 
 def build_frame(sequence_id: int, message_type: int, payload: bytes = b"", error_code: int = TelemetryErrorCode.NONE) -> bytes:

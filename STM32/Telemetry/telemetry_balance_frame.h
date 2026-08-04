@@ -2,7 +2,9 @@
  * @file telemetry_balance_frame.h
  * @brief Extended balance control telemetry payload (little-endian).
  *
- * Message type TELEM_MSG_BALANCE_FRAME (0x0100), unsolicited ascending @ 100 Hz.
+ * Message type TELEM_MSG_BALANCE_FRAME (0x0100), unsolicited ascending @ 500 Hz.
+ * frame_number counts frames accepted by the STM32 TX queue, so source-side
+ * generation drops do not appear as wire-loss gaps. The payload remains 56 B.
  */
 #ifndef TELEMETRY_BALANCE_FRAME_H
 #define TELEMETRY_BALANCE_FRAME_H
@@ -35,7 +37,8 @@ typedef struct __attribute__((packed)) {
     uint8_t imu_valid;
     uint8_t estop;
     uint8_t strategy_id;
-    uint8_t reserved;
+    /** Low 8 bits of source samples rejected before STM32 TX queue admission. */
+    uint8_t source_drop_count_mod256;
 } telemetry_balance_frame_t;
 
 static inline void telemetry_balance_frame_encode(const telemetry_balance_frame_t *frame, uint8_t *out)

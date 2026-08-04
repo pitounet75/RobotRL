@@ -32,15 +32,12 @@ extern volatile float g_ctrl_u_ff;
 extern volatile float g_ctrl_u_fb;
 extern volatile control_strategy_id_t g_ctrl_strategy;
 
-#if APP_TELEMETRY_UART4_USE_DMA
-extern DMA_HandleTypeDef hdma_uart4_tx;
-#endif
-
 #define APP_TELEMETRY_TX_QUEUE_DEPTH 16u
 #define APP_TELEMETRY_TX_MAX_BYTES   TELEMETRY_MAX_FRAME_SIZE
 
 typedef struct {
     uint16_t len;
+    uint16_t message_type;
     uint8_t data[APP_TELEMETRY_TX_MAX_BYTES];
 } app_telemetry_tx_slot_t;
 
@@ -51,9 +48,8 @@ static app_telemetry_tx_slot_t s_tx_queue[APP_TELEMETRY_TX_QUEUE_DEPTH];
 static volatile uint8_t s_tx_head;
 static volatile uint8_t s_tx_tail;
 static volatile bool s_tx_dma_busy;
-#if APP_TELEMETRY_UART4_USE_DMA
 static volatile uint32_t s_tx_dma_start_tick;
-#endif
+static volatile bool s_tx_start_retry_pending;
 
 static SemaphoreHandle_t s_tx_mutex;
 static volatile bool s_telemetry_ready;
@@ -68,13 +64,26 @@ volatile uint32_t g_telemetry_rx_ring_drop;
 volatile uint32_t g_telemetry_tx_queue_drop;
 volatile uint32_t g_telemetry_tx_fail_count;
 volatile uint32_t g_telemetry_tx_dma_stuck_recover;
+volatile uint32_t g_telemetry_tx_dma_busy;
 volatile uint32_t g_telemetry_balance_frame_number;
+volatile uint32_t g_telemetry_balance_frames_generated;
+volatile uint32_t g_telemetry_balance_frames_queued;
+volatile uint32_t g_telemetry_balance_frames_dma_completed;
+volatile uint32_t g_telemetry_balance_frames_send_failed;
+volatile uint32_t g_telemetry_tx_mutex_fail;
+volatile uint32_t g_telemetry_tx_write_fail;
+volatile uint32_t g_telemetry_tx_recovery_count;
 
 #define APP_TELEMETRY_RX_RING_SIZE 256u
 
 static volatile uint8_t s_rx_ring[APP_TELEMETRY_RX_RING_SIZE];
 static volatile uint16_t s_rx_ring_head;
 static volatile uint16_t s_rx_ring_tail;
+
+#define APP_TELEMETRY_RX_DMA_BUF_SIZE APP_TELEMETRY_RX_RING_SIZE
+
+static uint8_t s_uart4_rx_dma_buf[APP_TELEMETRY_RX_DMA_BUF_SIZE] __attribute__((aligned(32)));
+static volatile bool s_uart4_rx_dma_active;
 
 static bool tx_queue_empty(void)
 {
@@ -94,23 +103,30 @@ static bool tx_queue_push(const uint8_t *data, uint16_t len)
 
     app_telemetry_tx_slot_t *slot = &s_tx_queue[s_tx_head];
     slot->len = len;
+    slot->message_type =
+        (len > (TELEMETRY_OFF_MESSAGE_TYPE + 1u))
+            ? (uint16_t)data[TELEMETRY_OFF_MESSAGE_TYPE] |
+                  ((uint16_t)data[TELEMETRY_OFF_MESSAGE_TYPE + 1u] << 8)
+            : 0u;
     memcpy(slot->data, data, len);
     s_tx_head = (uint8_t)((s_tx_head + 1u) % APP_TELEMETRY_TX_QUEUE_DEPTH);
+    if (slot->message_type == TELEM_MSG_BALANCE_FRAME) {
+        g_telemetry_balance_frames_queued++;
+        g_telemetry_balance_frame_number = g_telemetry_balance_frames_queued;
+    }
     return true;
 }
 
-static bool tx_queue_pop(app_telemetry_tx_slot_t *out)
+static bool tx_queue_pop(void)
 {
     if (tx_queue_empty()) {
         return false;
     }
 
-    *out = s_tx_queue[s_tx_tail];
     s_tx_tail = (uint8_t)((s_tx_tail + 1u) % APP_TELEMETRY_TX_QUEUE_DEPTH);
     return true;
 }
 
-#if APP_TELEMETRY_UART4_USE_DMA
 static void telemetry_dma_prepare_tx(const uint8_t *data, uint16_t len)
 {
 #if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
@@ -124,7 +140,54 @@ static void telemetry_dma_prepare_tx(const uint8_t *data, uint16_t len)
     (void)len;
 #endif
 }
+
+static void telemetry_dma_invalidate_rx(const uint8_t *data, uint16_t len)
+{
+#if defined(__DCACHE_PRESENT) && (__DCACHE_PRESENT == 1U)
+    if ((SCB->CCR & SCB_CCR_DC_Msk) != 0U) {
+        const uint32_t start = (uint32_t)(uintptr_t)data & ~31U;
+        const uint32_t end = ((uint32_t)(uintptr_t)data + (uint32_t)len + 31U) & ~31U;
+        SCB_InvalidateDCache_by_Addr((uint32_t *)start, (int32_t)(end - start));
+    }
+#else
+    (void)data;
+    (void)len;
 #endif
+}
+
+static void telemetry_uart4_rx_ring_push_byte(uint8_t byte)
+{
+    const uint16_t next = (uint16_t)((s_rx_ring_head + 1u) % APP_TELEMETRY_RX_RING_SIZE);
+    if (next != s_rx_ring_tail) {
+        s_rx_ring[s_rx_ring_head] = byte;
+        s_rx_ring_head = next;
+    } else {
+        g_telemetry_rx_ring_drop++;
+    }
+}
+
+static void telemetry_uart4_rx_ring_push_block(const uint8_t *data, uint16_t len)
+{
+    for (uint16_t i = 0u; i < len; i++) {
+        telemetry_uart4_rx_ring_push_byte(data[i]);
+    }
+}
+
+static HAL_StatusTypeDef telemetry_uart4_rx_dma_start(void)
+{
+    s_uart4_rx_dma_active = true;
+    return HAL_UARTEx_ReceiveToIdle_DMA(&huart4, s_uart4_rx_dma_buf, APP_TELEMETRY_RX_DMA_BUF_SIZE);
+}
+
+static bool tx_queue_peek(app_telemetry_tx_slot_t **out_slot)
+{
+    if (tx_queue_empty() || out_slot == NULL) {
+        return false;
+    }
+
+    *out_slot = &s_tx_queue[s_tx_tail];
+    return true;
+}
 
 static void tx_kick(void)
 {
@@ -132,33 +195,29 @@ static void tx_kick(void)
         return;
     }
 
-    app_telemetry_tx_slot_t slot;
-    if (!tx_queue_pop(&slot)) {
+    app_telemetry_tx_slot_t *slot = NULL;
+    if (!tx_queue_peek(&slot)) {
         return;
     }
 
-#if APP_TELEMETRY_UART4_USE_DMA
-    telemetry_dma_prepare_tx(slot.data, slot.len);
+    telemetry_dma_prepare_tx(slot->data, slot->len);
     s_tx_dma_busy = true;
+    g_telemetry_tx_dma_busy = 1u;
     s_tx_dma_start_tick = HAL_GetTick();
-    if (HAL_UART_Transmit_DMA(&huart4, slot.data, slot.len) == HAL_OK) {
-        g_telemetry_uart_tx_bytes += slot.len;
+    if (HAL_UART_Transmit_DMA(&huart4, slot->data, slot->len) == HAL_OK) {
+        g_telemetry_uart_tx_bytes += slot->len;
+        if (s_tx_start_retry_pending) {
+            s_tx_start_retry_pending = false;
+            g_telemetry_tx_recovery_count++;
+        }
     } else {
         s_tx_dma_busy = false;
+        g_telemetry_tx_dma_busy = 0u;
         s_tx_dma_start_tick = 0u;
-        if (HAL_UART_Transmit(&huart4, slot.data, slot.len, 20u) == HAL_OK) {
-            g_telemetry_uart_tx_bytes += slot.len;
-        } else {
-            g_telemetry_tx_fail_count++;
-        }
-    }
-#else
-    if (HAL_UART_Transmit(&huart4, slot.data, slot.len, 20u) == HAL_OK) {
-        g_telemetry_uart_tx_bytes += slot.len;
-    } else {
+        s_tx_start_retry_pending = true;
+        g_telemetry_tx_write_fail++;
         g_telemetry_tx_fail_count++;
     }
-#endif
 }
 
 static int app_telemetry_uart_write(void *ctx, const uint8_t *data, uint16_t len)
@@ -169,10 +228,12 @@ static int app_telemetry_uart_write(void *ctx, const uint8_t *data, uint16_t len
     }
 
     if (s_tx_mutex == NULL) {
+        g_telemetry_tx_mutex_fail++;
         return -1;
     }
 
     if (xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(2)) != pdTRUE) {
+        g_telemetry_tx_mutex_fail++;
         return -1;
     }
 
@@ -201,15 +262,40 @@ static int balance_frame_encode(void *user, uint8_t *payload, uint16_t capacity,
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
-#if APP_TELEMETRY_UART4_USE_DMA
     if (huart == &huart4) {
+        app_telemetry_tx_slot_t *completed = NULL;
+        if (tx_queue_peek(&completed) && completed->message_type == TELEM_MSG_BALANCE_FRAME) {
+            g_telemetry_balance_frames_dma_completed++;
+        }
+        (void)tx_queue_pop();
         s_tx_dma_busy = false;
+        g_telemetry_tx_dma_busy = 0u;
         s_tx_dma_start_tick = 0u;
         tx_kick();
     }
-#else
-    (void)huart;
-#endif
+}
+
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
+{
+    if (huart != &huart4 || Size == 0u) {
+        if (huart == &huart4) {
+            (void)telemetry_uart4_rx_dma_start();
+        }
+        return;
+    }
+
+    telemetry_dma_invalidate_rx(s_uart4_rx_dma_buf, Size);
+    telemetry_uart4_rx_ring_push_block(s_uart4_rx_dma_buf, Size);
+    g_telemetry_uart_rx_bytes += Size;
+    (void)telemetry_uart4_rx_dma_start();
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if (huart != &huart4 || !s_uart4_rx_dma_active) {
+        return;
+    }
+    (void)telemetry_uart4_rx_dma_start();
 }
 
 bool app_telemetry_init(void)
@@ -245,6 +331,7 @@ bool app_telemetry_init(void)
         {"imu_valid", TELEMETRY_TYPE_UINT32},
         {"estop", TELEMETRY_TYPE_UINT32},
         {"strategy_id", TELEMETRY_TYPE_UINT32},
+        {"source_drop_count_mod256", TELEMETRY_TYPE_UINT32},
     };
 
     static const telemetry_message_def_t balance_def = {
@@ -262,17 +349,18 @@ bool app_telemetry_init(void)
     /* Runtime gain RPC — failure must not block BalanceFrame streaming. */
     (void)app_telemetry_ctrl_register(&s_telemetry);
 
-    s_telemetry_ready = true;
-    initialized = true;
-
     /* Keep FIFO off — CubeMX disables it; re-enabling breaks UART4 DMA TX completion. */
     (void)HAL_UARTEx_DisableFifoMode(&huart4);
 
     app_dma_nvic_apply();
     HAL_NVIC_EnableIRQ(UART4_IRQn);
-    SET_BIT(huart4.Instance->CR1, USART_CR1_RXNEIE);
 
-    /* UART4 already initialized in MX_UART4_Init() — do not HAL_UART_Init again here. */
+    if (telemetry_uart4_rx_dma_start() != HAL_OK) {
+        return false;
+    }
+
+    s_telemetry_ready = true;
+    initialized = true;
 
     return true;
 }
@@ -289,19 +377,17 @@ void app_telemetry_tick_1ms(void)
 
 void app_telemetry_tx_poll(void)
 {
-#if APP_TELEMETRY_UART4_USE_DMA
-    if (s_tx_dma_busy && s_tx_dma_start_tick != 0u) {
-        USART_TypeDef *uart = huart4.Instance;
-        if (((uart->ISR & USART_ISR_TC) != 0U) && ((uart->CR1 & USART_CR1_TCIE) != 0U)) {
-            HAL_UART_IRQHandler(&huart4);
-            return;
+    if (!s_tx_dma_busy) {
+        if (s_tx_mutex != NULL && xSemaphoreTake(s_tx_mutex, 0) == pdTRUE) {
+            tx_kick();
+            xSemaphoreGive(s_tx_mutex);
         }
-    }
-
-    if (!s_tx_dma_busy || s_tx_dma_start_tick == 0u) {
         return;
     }
-    if ((HAL_GetTick() - s_tx_dma_start_tick) < 25u) {
+    if (s_tx_dma_start_tick == 0u) {
+        return;
+    }
+    if ((HAL_GetTick() - s_tx_dma_start_tick) < 5u) {
         return;
     }
     if (s_tx_mutex == NULL || xSemaphoreTake(s_tx_mutex, 0) != pdTRUE) {
@@ -309,36 +395,13 @@ void app_telemetry_tx_poll(void)
     }
 
     g_telemetry_tx_dma_stuck_recover++;
+    g_telemetry_tx_recovery_count++;
     (void)HAL_UART_AbortTransmit(&huart4);
     s_tx_dma_busy = false;
+    g_telemetry_tx_dma_busy = 0u;
     s_tx_dma_start_tick = 0u;
     tx_kick();
     xSemaphoreGive(s_tx_mutex);
-#else
-    (void)0;
-#endif
-}
-
-void app_telemetry_uart4_rx_isr(void)
-{
-    USART_TypeDef *uart = huart4.Instance;
-
-    if ((uart->ISR & USART_ISR_ORE) != 0u) {
-        __HAL_UART_CLEAR_FLAG(&huart4, UART_CLEAR_OREF);
-    }
-
-    while ((uart->ISR & USART_ISR_RXNE_RXFNE) != 0u) {
-        const uint8_t byte = (uint8_t)(uart->RDR & 0xFFu);
-        g_telemetry_uart_rx_bytes++;
-
-        const uint16_t next = (uint16_t)((s_rx_ring_head + 1u) % APP_TELEMETRY_RX_RING_SIZE);
-        if (next != s_rx_ring_tail) {
-            s_rx_ring[s_rx_ring_head] = byte;
-            s_rx_ring_head = next;
-        } else {
-            g_telemetry_rx_ring_drop++;
-        }
-    }
 }
 
 void app_telemetry_poll_rx(void)
@@ -352,6 +415,33 @@ void app_telemetry_poll_rx(void)
         s_rx_ring_tail = (uint16_t)((s_rx_ring_tail + 1u) % APP_TELEMETRY_RX_RING_SIZE);
         telemetry_rx_feed(&s_telemetry, &byte, 1u);
     }
+}
+
+bool app_telemetry_wait_bridge_ready(uint32_t timeout_ms)
+{
+    static const char k_ready[] = "READY\n";
+    size_t matched = 0u;
+    const uint32_t start_ms = HAL_GetTick();
+
+    while ((HAL_GetTick() - start_ms) < timeout_ms) {
+        while (s_rx_ring_tail != s_rx_ring_head) {
+            const uint8_t byte = s_rx_ring[s_rx_ring_tail];
+            s_rx_ring_tail = (uint16_t)((s_rx_ring_tail + 1u) % APP_TELEMETRY_RX_RING_SIZE);
+
+            if (byte == (uint8_t)k_ready[matched]) {
+                matched++;
+                if (k_ready[matched] == '\0') {
+                    return true;
+                }
+            } else {
+                matched = (byte == (uint8_t)k_ready[0]) ? 1u : 0u;
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+
+    return false;
 }
 
 int app_telemetry_send_frame_immediate(uint16_t message_type, uint16_t sequence_id,
@@ -369,9 +459,11 @@ int app_telemetry_send_frame_immediate(uint16_t message_type, uint16_t sequence_
     }
 
     if (s_tx_mutex == NULL) {
+        g_telemetry_tx_mutex_fail++;
         return -4;
     }
     if (xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(50)) != pdTRUE) {
+        g_telemetry_tx_mutex_fail++;
         return -5;
     }
 
@@ -392,34 +484,20 @@ int app_telemetry_send_frame_immediate(uint16_t message_type, uint16_t sequence_
     frame[TELEMETRY_PAYLOAD_OFFSET + payload_len] =
         telemetry_crc8(frame, (uint16_t)(TELEMETRY_PAYLOAD_OFFSET + payload_len));
 
-#if APP_TELEMETRY_UART4_USE_DMA
-    const uint32_t wait_start = HAL_GetTick();
-    while (s_tx_dma_busy) {
-        if ((HAL_GetTick() - wait_start) > 40u) {
-            xSemaphoreGive(s_tx_mutex);
-            return -6;
-        }
-    }
-    /* RPC reply uses blocking TX — abort in-flight DMA BalanceFrame first. */
-    if (huart4.hdmatx != NULL) {
-        (void)HAL_UART_AbortTransmit(&huart4);
-    }
-    s_tx_dma_busy = false;
-#endif
-
-    int rc = -3;
-    if (HAL_UART_Transmit(&huart4, frame, frame_len, 50u) == HAL_OK) {
-        g_telemetry_uart_tx_bytes += frame_len;
-        rc = 0;
+    const bool queued = tx_queue_push(frame, frame_len);
+    if (queued) {
+        tx_kick();
     } else {
-        g_telemetry_tx_fail_count++;
+        g_telemetry_tx_queue_drop++;
     }
     xSemaphoreGive(s_tx_mutex);
-    return rc;
+    return queued ? 0 : -3;
 }
 
 void app_telemetry_publish_balance_frame(void)
 {
+    g_telemetry_balance_frames_generated++;
+
     app_imu_sample_t imu;
     const bool imu_ok = app_samples_imu_read(&imu) && imu.valid;
 
@@ -449,7 +527,12 @@ void app_telemetry_publish_balance_frame(void)
         }
     }
 
-    s_balance_frame.frame_number = ++g_telemetry_balance_frame_number;
+    /*
+     * frame_number is the next queue-admission number, not the generation
+     * attempt number. A failed enqueue reuses this number on the next sample,
+     * so host-visible gaps represent loss after successful queue admission.
+     */
+    s_balance_frame.frame_number = g_telemetry_balance_frames_queued + 1u;
     s_balance_frame.time_us = app_time_us_now();
     s_balance_frame.pitch_rad = imu_ok ? imu.pitch_rad : g_ctrl_pitch_rad;
     s_balance_frame.pitch_rate_rads = imu_ok ? imu.pitch_rate_rads : g_ctrl_pitch_rate;
@@ -465,7 +548,10 @@ void app_telemetry_publish_balance_frame(void)
     s_balance_frame.imu_valid = imu_ok ? 1u : 0u;
     s_balance_frame.estop = estop ? 1u : 0u;
     s_balance_frame.strategy_id = (uint8_t)g_ctrl_strategy;
-    s_balance_frame.reserved = (uint8_t)(g_telemetry_uart_rx_bytes & 0xFFu);
+    s_balance_frame.source_drop_count_mod256 =
+        (uint8_t)(g_telemetry_balance_frames_send_failed & 0xFFu);
 
-    (void)telemetry_send(&s_telemetry, TELEM_MSG_BALANCE_FRAME);
+    if (telemetry_send(&s_telemetry, TELEM_MSG_BALANCE_FRAME) != 0) {
+        g_telemetry_balance_frames_send_failed++;
+    }
 }

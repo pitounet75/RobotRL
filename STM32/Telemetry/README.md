@@ -1,6 +1,6 @@
 # STM32 telemetry (UART binary) — protocol version 1
 
-Framed binary protocol over UART. Works with the [ESP32 serial UDP bridge](../../ESP32/serial_udp_bridge/README.md).
+Framed binary protocol over UART. Works with the [ESP32Telemetry](../../ESP32Telemetry/README.md) UDP bridge.
 
 - Concepts: [MessageModel.md](MessageModel.md)
 - Sample: `telemetry_example.c` (define `TELEMETRY_EXAMPLE_ENABLE`)
@@ -9,7 +9,22 @@ Framed binary protocol over UART. Works with the [ESP32 serial UDP bridge](../..
 
 ### BalanceFrame (type 0x0100)
 
-Unsolicited @ 100 Hz from STM32 `task_telemetry`. Payload 48 B — see [telemetry_balance_frame.h](telemetry_balance_frame.h).
+Unsolicited @ **500 Hz** from STM32 `task_telemetry` (`APP_TELEMETRY_PERIOD_MS=2`). Payload 56 B — see [telemetry_balance_frame.h](telemetry_balance_frame.h). Streaming starts after ESP32 sends `READY\n`; a 5 s timeout starts it anyway so either MCU may boot first (see ESP32Telemetry README).
+`frame_number` advances only when a generated sample is accepted into the STM32 UART4 TX queue. Consequently, host-visible gaps mean loss after queue admission; source generation or queue-admission loss is measured by the firmware counters below without changing the wire payload.
+The former reserved payload byte carries the low 8 bits of
+`g_telemetry_balance_frames_send_failed`, exposed on the PC as
+`source_drop_count_mod256`.
+
+STM32 transport debug counters:
+
+- `g_telemetry_balance_frames_generated`: sample generation attempts.
+- `g_telemetry_balance_frames_queued`: BalanceFrames accepted into the shared TX queue (and the source for `frame_number`).
+- `g_telemetry_balance_frames_dma_completed`: BalanceFrame DMA completion callbacks.
+- `g_telemetry_balance_frames_send_failed`: failed `telemetry_send()` calls before queue admission.
+- `g_telemetry_tx_queue_drop`, `g_telemetry_tx_mutex_fail`, `g_telemetry_tx_write_fail`: queue-full, mutex, and HAL DMA-start failures.
+- `g_telemetry_tx_recovery_count`: successful DMA-start retries plus stuck-DMA recovery attempts.
+
+RPC replies use the same FIFO TX queue as BalanceFrames. They never abort an in-flight DMA transfer or bypass queued frames.
 
 ## Frame layout (little-endian, protocol v1)
 
@@ -130,8 +145,8 @@ Response is `telemetry_config_t` (`config_version` only for now). Extend `teleme
 
 | Call | When |
 |------|------|
-| `telemetry_init()` | Startup — pass **DMA** UART write fn |
-| `telemetry_rx_feed()` | UART RX |
+| `telemetry_init()` | Startup — pass UART **DMA TX** write callback (`app_telemetry_uart_write`) |
+| `telemetry_rx_feed()` | Task context — bytes from UART RX (DMA → ring → poll) |
 | `telemetry_set_frame()` | Control loop — updates snapshot + `frame_number` |
 | `telemetry_tick_1ms()` | 1 ms timer ISR — streaming |
 | `telemetry_set_error()` | Application faults |

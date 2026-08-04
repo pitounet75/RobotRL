@@ -52,6 +52,9 @@ void MX_DMA_Init(void)
   /* DMA1_Stream2_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Stream2_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA1_Stream2_IRQn);
+  /* DMA1_Stream3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream3_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream3_IRQn);
 
 }
 
@@ -59,14 +62,15 @@ void MX_DMA_Init(void)
 
 /**
  * FreeRTOS-safe DMA/UART4 NVIC (priority >= configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY).
- * CubeMX .ioc: DMA1_Stream0/1/2 + UART4_IRQn should all be priority 6.
- * UART4 IRQ is required for DMA TX completion (HAL enables TCIE after DMA TC).
+ * CubeMX .ioc: DMA1_Stream0/1/2/3 + UART4_IRQn should all be priority 6.
+ * UART4 IRQ is required for ReceiveToIdle (IDLE) and DMA TX completion (TCIE).
  */
 void app_dma_nvic_apply(void)
 {
   HAL_NVIC_SetPriority(DMA1_Stream0_IRQn, 6, 0);
   HAL_NVIC_SetPriority(DMA1_Stream1_IRQn, 6, 0);
   HAL_NVIC_SetPriority(DMA1_Stream2_IRQn, 6, 0);
+  HAL_NVIC_SetPriority(DMA1_Stream3_IRQn, 6, 0);
   HAL_NVIC_SetPriority(SPI3_IRQn, 6, 0);
   HAL_NVIC_SetPriority(UART4_IRQn, 6, 0);
 }

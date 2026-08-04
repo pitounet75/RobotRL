@@ -26,6 +26,7 @@ CSV_HEADER = [
     "imu_valid",
     "estop",
     "strategy_id",
+    "source_drop_count_mod256",
 ]
 
 
@@ -64,6 +65,7 @@ class CsvRecorder:
                 frame.imu_valid,
                 frame.estop,
                 frame.strategy_id,
+                frame.source_drop_count_mod256,
             ]
         )
 
