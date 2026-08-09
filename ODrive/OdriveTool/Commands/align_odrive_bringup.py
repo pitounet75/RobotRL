@@ -87,7 +87,9 @@ def apply_align(ax, kv, direction, current_lim):
     c.vel_gain = 0.1
     c.vel_integrator_gain = 0.32
     c.vel_limit = 1200.0
-    c.enable_overspeed_error = True
+    # Torque-mode balance: do NOT derate torque vs speed (else wheels "die" mid-tilt).
+    c.enable_current_mode_vel_limit = False
+    c.enable_overspeed_error = False
 
     ac.anticogging_enabled = False
     ac.pre_calibrated = False
@@ -98,6 +100,7 @@ def apply_align(ax, kv, direction, current_lim):
     print("align: torque_constant={:.6f} Nm/A (KV={})".format(kt, kv))
     print("align: current_lim={} A  direction={}".format(current_lim, direction))
     print("align: vel_gain={}  vel_integrator_gain={}".format(c.vel_gain, c.vel_integrator_gain))
+    print("align: current_mode_vel_limit=False  overspeed_error=False  vel_limit=1200")
 
 
 def apply_limit_torque(ax, motor_torque_lim_nm, kv, current_lim, wheel_torque_lim_nm=None):

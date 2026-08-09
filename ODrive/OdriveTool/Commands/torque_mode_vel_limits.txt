@@ -1,0 +1,20 @@
+# ODrive axis0 — required for STM32 torque-mode balance.
+# Without this, enable_current_mode_vel_limit derates torque as |vel| → vel_limit,
+# and can look like "wheels stop around ~15°" once the motor spins up.
+# Right dump had vel_limit=100 (left=1200) → right dies much earlier.
+#
+# Apply USB one drive at a time, then save + reboot.
+
+odrv0.axis0.controller.config.enable_current_mode_vel_limit = False
+odrv0.axis0.controller.config.enable_overspeed_error = False
+odrv0.axis0.controller.config.vel_limit = 1200.0
+odrv0.axis0.motor.config.torque_lim = 0.05
+odrv0.axis0.motor.config.current_lim = 5.0
+
+odrv0.axis0.clear_errors()
+odrv0.axis0.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+odrv0.axis0.controller.config.control_mode = CONTROL_MODE_TORQUE_CONTROL
+odrv0.axis0.controller.config.input_mode = INPUT_MODE_PASSTHROUGH
+
+odrv0.save_configuration()
+# odrv0.reboot()

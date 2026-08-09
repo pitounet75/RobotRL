@@ -32,6 +32,25 @@ PARAM_NAMES: Dict[str, int] = {
     "ff_fb_k_rate": 22,
     "ff_output_alpha": 23,
     "wheel_encoder_vel_lpf_alpha": 24,
+    "torque_deadband_nm": 25,
+    "torque_deadband_pitch_max_rad": 26,
+    "torque_deadband_rate_max_rads": 27,
+    "alpha_kp": 28,
+    "alpha_max_nm": 29,
+    "motor_J": 30,
+    "motor_friction_c": 31,
+    "alpha_pitch_max_rad": 32,
+    "alpha_rate_max_rads": 33,
+    "alpha_vel_max_turns_s": 34,
+    "alpha_lpf": 35,
+    "pos_kp": 36,
+    "pos_kd": 37,
+    "pos_pitch_kp": 38,
+    "pos_x_ref_m": 39,
+    "pos_v_max_turns_s": 40,
+    "pos_pitch_max_rad": 41,
+    "wheel_radius_m": 42,
+    "pos_reset": 43,
 }
 
 NAME_BY_ID = {v: k for k, v in PARAM_NAMES.items()}
@@ -45,6 +64,9 @@ SNAPSHOT_STRUCT = struct.Struct(
     "ffff"  # cascade vel
     "ffff"  # ff
     "f"  # wheel lpf
+    "fff"  # torque deadband + gates
+    "ffffffff"  # alpha P loop (v3)
+    "ffffffff"  # position hold (v4)
 )
 
 SET_PARAM_STRUCT = struct.Struct("<Hf")
@@ -78,6 +100,25 @@ class ControlParamsSnapshot:
     ff_fb_k_rate: float
     ff_output_alpha: float
     wheel_encoder_vel_lpf_alpha: float
+    torque_deadband_nm: float
+    torque_deadband_pitch_max_rad: float
+    torque_deadband_rate_max_rads: float
+    alpha_kp: float
+    alpha_max_nm: float
+    motor_J: float
+    motor_friction_c: float
+    alpha_pitch_max_rad: float
+    alpha_rate_max_rads: float
+    alpha_vel_max_turns_s: float
+    alpha_lpf: float
+    pos_kp: float
+    pos_kd: float
+    pos_pitch_kp: float
+    pos_x_ref_m: float
+    pos_v_max_turns_s: float
+    pos_pitch_max_rad: float
+    wheel_radius_m: float
+    pos_reset: float
 
     def as_dict(self) -> Dict[str, float | int]:
         return {
@@ -106,6 +147,25 @@ class ControlParamsSnapshot:
             "ff_fb_k_rate": self.ff_fb_k_rate,
             "ff_output_alpha": self.ff_output_alpha,
             "wheel_encoder_vel_lpf_alpha": self.wheel_encoder_vel_lpf_alpha,
+            "torque_deadband_nm": self.torque_deadband_nm,
+            "torque_deadband_pitch_max_rad": self.torque_deadband_pitch_max_rad,
+            "torque_deadband_rate_max_rads": self.torque_deadband_rate_max_rads,
+            "alpha_kp": self.alpha_kp,
+            "alpha_max_nm": self.alpha_max_nm,
+            "motor_J": self.motor_J,
+            "motor_friction_c": self.motor_friction_c,
+            "alpha_pitch_max_rad": self.alpha_pitch_max_rad,
+            "alpha_rate_max_rads": self.alpha_rate_max_rads,
+            "alpha_vel_max_turns_s": self.alpha_vel_max_turns_s,
+            "alpha_lpf": self.alpha_lpf,
+            "pos_kp": self.pos_kp,
+            "pos_kd": self.pos_kd,
+            "pos_pitch_kp": self.pos_pitch_kp,
+            "pos_x_ref_m": self.pos_x_ref_m,
+            "pos_v_max_turns_s": self.pos_v_max_turns_s,
+            "pos_pitch_max_rad": self.pos_pitch_max_rad,
+            "wheel_radius_m": self.wheel_radius_m,
+            "pos_reset": self.pos_reset,
         }
 
 

@@ -7,6 +7,10 @@
 #include <math.h>
 #include <stddef.h>
 
+#ifndef IMU_FUSION_G_MPS2
+#define IMU_FUSION_G_MPS2 9.80665f
+#endif
+
 void imu_fusion_reset(imu_fusion_state_t *state)
 {
 	if (state == NULL) {
@@ -20,6 +24,13 @@ void imu_fusion_reset(imu_fusion_state_t *state)
 static bool axis_valid(int axis)
 {
 	return axis >= 0 && axis <= 2;
+}
+
+static float accel_norm_mps2(const float accel_mps2[3])
+{
+	return sqrtf(accel_mps2[0] * accel_mps2[0] +
+	             accel_mps2[1] * accel_mps2[1] +
+	             accel_mps2[2] * accel_mps2[2]);
 }
 
 float imu_fusion_pitch_from_accel(const float accel_mps2[3])
@@ -51,6 +62,7 @@ bool imu_fusion_update(imu_fusion_state_t *state,
                        int pitch_accel_up_axis,
                        int pitch_gyro_axis,
                        float pitch_gyro_sign,
+                       float accel_norm_tol_mps2,
                        imu_fusion_out_t *out)
 {
 	if (state == NULL || accel_mps2 == NULL || gyro_rads == NULL || out == NULL) {
@@ -74,12 +86,19 @@ bool imu_fusion_update(imu_fusion_state_t *state,
 	                                                          pitch_accel_forward_axis,
 	                                                          pitch_accel_up_axis);
 	const float pitch_rate = pitch_gyro_sign * gyro_rads[pitch_gyro_axis];
+	const bool accel_ok = (accel_norm_tol_mps2 <= 0.0f) ||
+	                      (fabsf(accel_norm_mps2(accel_mps2) - IMU_FUSION_G_MPS2) <=
+	                       accel_norm_tol_mps2);
 
 	if (state->sample_count == 0u) {
-		state->pitch_rad = pitch_accel;
-	} else {
+		/* Prefer gravity tilt at boot; if accel is invalid, start at 0. */
+		state->pitch_rad = accel_ok ? pitch_accel : 0.0f;
+	} else if (accel_ok) {
 		state->pitch_rad = alpha * (state->pitch_rad + pitch_rate * dt_s)
 		                 + (1.0f - alpha) * pitch_accel;
+	} else {
+		/* Linear accel (wheel thrust) corrupts atan2 tilt — integrate gyro only. */
+		state->pitch_rad = state->pitch_rad + pitch_rate * dt_s;
 	}
 	state->sample_count++;
 

@@ -28,6 +28,16 @@ typedef struct {
     float pitch_ref_rad;
     float vel_ref_turns_s;
     float dt_s;
+    /** ODrive motor-shaft vel in robot frame (turn/s); from CAN encoder estimates. */
+    float vel_motor_l_turns_s;
+    float vel_motor_r_turns_s;
+    bool vel_motor_l_valid;
+    bool vel_motor_r_valid;
+    uint32_t vel_motor_l_update_ms;
+    uint32_t vel_motor_r_update_ms;
+    /** Mean local ABZ wheel position (robot-frame turn); for x station-keeping. */
+    float pos_wheel_turns;
+    bool pos_wheel_valid;
 } control_strategy_input_t;
 
 typedef struct {

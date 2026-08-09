@@ -25,7 +25,7 @@ The Jetson is **not** on the ODrive CAN bus. The STM32 owns CAN timing and motor
 - **Transceiver:** SN65HVD230 (or compatible) on **FDCAN2**
 - **Logic levels:** 3.3 V on all UART/SPI/CAN interfaces
 
-Reference ODrive saved config (node IDs, 250 kbit/s, anticogging):
+Reference ODrive saved config (node IDs, 500 kbit/s, anticogging):
 
 - `ODrive/OdriveTool/Commands/Configs/2836_anticogging_calibrated.txt`
 - USB workflow: `ODrive/OdriveTool/Commands/velocity_mode.txt`
@@ -83,7 +83,7 @@ Jetson side (typical 40-pin header): **`/dev/ttyTHS0`** at the same baud as `hua
 | Parameter | Value |
 |-----------|--------|
 | Active peripheral | **FDCAN2** only at runtime |
-| Bit rate | **250 kbit/s** (matches ODrive config) |
+| Bit rate | **500 kbit/s** (matches ODrive config) |
 | Node ID | Axis0 = **0**, Axis1 = **1** |
 | Protocol | ODrive **CAN Simple** (11-bit standard IDs) |
 | Transceiver | SN65HVD230 on PB12/PB13 |

@@ -25,7 +25,8 @@ extern "C" {
 #endif
 
 #ifndef TELEMETRY_MAX_FIELDS
-#define TELEMETRY_MAX_FIELDS 32u
+/** Schema field slots per message (GetControlParams snapshot has 37 fields at v3). */
+#define TELEMETRY_MAX_FIELDS 48u
 #endif
 
 #ifndef TELEMETRY_MAX_FIELD_NAME_LEN

@@ -87,6 +87,25 @@ bool app_telemetry_ctrl_register(telemetry_t *tel)
         {"ff_fb_k_rate", TELEMETRY_TYPE_FLOAT},
         {"ff_output_alpha", TELEMETRY_TYPE_FLOAT},
         {"wheel_encoder_vel_lpf_alpha", TELEMETRY_TYPE_FLOAT},
+        {"torque_deadband_nm", TELEMETRY_TYPE_FLOAT},
+        {"torque_deadband_pitch_max_rad", TELEMETRY_TYPE_FLOAT},
+        {"torque_deadband_rate_max_rads", TELEMETRY_TYPE_FLOAT},
+        {"alpha_kp", TELEMETRY_TYPE_FLOAT},
+        {"alpha_max_nm", TELEMETRY_TYPE_FLOAT},
+        {"motor_J", TELEMETRY_TYPE_FLOAT},
+        {"motor_friction_c", TELEMETRY_TYPE_FLOAT},
+        {"alpha_pitch_max_rad", TELEMETRY_TYPE_FLOAT},
+        {"alpha_rate_max_rads", TELEMETRY_TYPE_FLOAT},
+        {"alpha_vel_max_turns_s", TELEMETRY_TYPE_FLOAT},
+        {"alpha_lpf", TELEMETRY_TYPE_FLOAT},
+        {"pos_kp", TELEMETRY_TYPE_FLOAT},
+        {"pos_kd", TELEMETRY_TYPE_FLOAT},
+        {"pos_pitch_kp", TELEMETRY_TYPE_FLOAT},
+        {"pos_x_ref_m", TELEMETRY_TYPE_FLOAT},
+        {"pos_v_max_turns_s", TELEMETRY_TYPE_FLOAT},
+        {"pos_pitch_max_rad", TELEMETRY_TYPE_FLOAT},
+        {"wheel_radius_m", TELEMETRY_TYPE_FLOAT},
+        {"pos_reset", TELEMETRY_TYPE_FLOAT},
     };
 
     static const telemetry_field_def_t set_request_fields[] = {
@@ -113,11 +132,8 @@ bool app_telemetry_ctrl_register(telemetry_t *tel)
         .descend_payload_len = TELEMETRY_SET_CONTROL_PARAM_PAYLOAD_LEN,
     };
 
-    if (telemetry_register(tel, &get_def) != 0) {
-        return false;
-    }
-    if (telemetry_register(tel, &set_def) != 0) {
-        return false;
-    }
-    return true;
+    /* Register independently: a bloated GET schema must not block SET RPC. */
+    const bool get_ok = (telemetry_register(tel, &get_def) == 0);
+    const bool set_ok = (telemetry_register(tel, &set_def) == 0);
+    return get_ok && set_ok;
 }

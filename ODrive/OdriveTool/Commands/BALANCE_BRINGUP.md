@@ -1,5 +1,7 @@
 # Balance robot — ODrive + STM32 bring-up sequence
 
+**Tuned balance gains (solid baseline):** see [BALANCE_BASELINE.md](BALANCE_BASELINE.md).
+
 Two separate XDrive boards (axis0 each): **left** (FDCAN1), **right** (FDCAN2).  
 USB one drive at a time for configuration.
 
@@ -80,6 +82,23 @@ python align_odrive_bringup.py --serial <SERIAL> --direction <±1> --step limit-
 Default: `--wheel-torque-lim 0.1` → sets `motor.config.torque_lim ≈ 0.01875` Nm and `current_lim ≈ 1.7 A`.
 
 Verify in odrivetool: ramp `input_torque` in torque mode; `Iq` should plateau before violent acceleration.
+
+---
+
+## Measured free-wheel torque deadband (2026-08-08)
+
+Breakaway `input_torque` in **torque / passthrough**, wheels unloaded (stand), both directions:
+
+| Wheel | Motor-shaft breakaway | ≈ at wheel (×80/15) |
+|-------|----------------------:|--------------------:|
+| Left  | **±0.0040 Nm** | ±0.021 Nm |
+| Right | **±0.0043 Nm** | ±0.023 Nm |
+
+Symmetric L/R — good. Relative to `cmd_max = 0.05 Nm` motor ≈ **8 %** of authority.
+
+Near vertical with PD only (`Kθ ≈ 0.28`): command stays under ~0.004 Nm while `|θ| ≲ 0.8°`, so a small static dead-zone around level is expected from friction alone (not a firmware cut).
+
+Re-measure after mechanical changes (belts, bearings, anticogging on/off).
 
 ---
 

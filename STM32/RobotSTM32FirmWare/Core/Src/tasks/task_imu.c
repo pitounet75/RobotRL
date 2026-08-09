@@ -118,6 +118,8 @@ static void publish_fused_sample(const imu_sample_t *raw)
 
                            APP_IMU_PITCH_GYRO_SIGN,
 
+                           APP_IMU_ACCEL_NORM_TOL_MPS2,
+
                            &fused)) {
 
         return;

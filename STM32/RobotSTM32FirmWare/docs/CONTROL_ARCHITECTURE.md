@@ -81,7 +81,7 @@ Configured in `app_config.h`, created in `app_tasks.c`. CMSIS-RTOS v2 / FreeRTOS
 | **Wheel (ABZ)** | **500 Hz–1 kHz**; TIM **encoder mode** (hardware counts edges) | **`v_fast`**; minimal filtering (21-bit → low quantisation noise) |
 | **Wheel (ODrive, other)** | **10–100 Hz** (encoder estimate / feedback) | **Not** directly in PID; feeds **bias** only |
 | **Control loop** | **500 Hz** | — |
-| **Motor CAN TX** | **500 Hz** (same as control) | ~1000 frames/s (`SET_INPUT_VEL` ×2) @ 250 kbit/s — OK with margin |
+| **Motor CAN TX** | **500 Hz** (same as control) | ~1000 frames/s (`SET_INPUT_TORQUE` ×2) @ 500 kbit/s — comfortable margin |
 | **Telemetry** | **25–50 Hz** | Filtered copies OK for ESP32 |
 
 ### IMU filtering policy
@@ -253,7 +253,7 @@ typedef struct {
 
 ## CAN / ODrive notes
 
-- **250 kbit/s**, nodes **0** and **1** (two single-axis XDrive boards).
+- **500 kbit/s**, nodes **0** and **1** (two single-axis XDrive boards, one bus each).
 - Raising `task_odrive` above **100 Hz** is possible for fresher bias; do not scale all tasks ×5 (bus saturation).
 - **`SET_INPUT_VEL`:** `(velocity turn/s, torque_ff Nm)` — torque FF **0** in `task_motor_tx`.
 

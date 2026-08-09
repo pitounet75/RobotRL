@@ -41,6 +41,23 @@ def main() -> int:
     p.add_argument("--max-wheel-turns-s", type=float, default=50.0)
     p.add_argument("--max-strategy-id", type=int, default=32)
     p.add_argument("--verbose", action="store_true", help="Print UDP / parse stats")
+    p.add_argument(
+        "--diag-stall",
+        action="store_true",
+        help="Print when |pitch| is high but motor cmd is ~0 (balance stall hunt)",
+    )
+    p.add_argument(
+        "--stall-pitch-deg",
+        type=float,
+        default=8.0,
+        help="Pitch threshold for --diag-stall (degrees)",
+    )
+    p.add_argument(
+        "--stall-cmd-eps",
+        type=float,
+        default=0.002,
+        help="|cmd| below this counts as stalled for --diag-stall (Nm)",
+    )
     args = p.parse_args()
 
     receiver = UdpTelemetryReceiver(
@@ -61,10 +78,20 @@ def main() -> int:
     plotter = None
     if args.plot:
         try:
+            from telemetry.mpl_backend import backend_is_interactive, configure_matplotlib
+
+            backend = configure_matplotlib()
+            print(f"matplotlib backend: {backend}")
+            if not backend_is_interactive():
+                raise RuntimeError(
+                    f"non-interactive backend '{backend}' — install PyQt5 "
+                    "(pip install PyQt5) or set MPLBACKEND=TkAgg"
+                )
             plotter = LiveBalancePlotter(history_s=args.history_s)
         except Exception as exc:
             print(f"Plot disabled: {exc}")
             print("Tip: pip install PyQt5  OR  use --record only and plot_file.py later")
+            plotter = None
             if not args.record:
                 print("Continuing headless (use --record to capture data).")
 
@@ -100,6 +127,8 @@ def main() -> int:
         last_stats = 0.0
         last_byte_count = 0
         last_frame_count = 0
+        last_stall_print = 0.0
+        stall_pitch_rad = abs(args.stall_pitch_deg) * 3.141592653589793 / 180.0
         t_start = time.time()
         subscribe_interval_s = 5.0
         while not stop.is_set():
@@ -187,10 +216,48 @@ def main() -> int:
                     if frame_count == 1:
                         print(f"first frame #{bf.frame_number} pitch={bf.pitch_rad:.4f}")
                     if frame_count % 100 == 0:
+                        pitch_deg = bf.pitch_rad * 180.0 / 3.141592653589793
                         print(
-                            f"frames={frame_count}  pitch={bf.pitch_rad:.4f}  "
-                            f"cmd={bf.cmd_torque_nm:.5f}"
+                            f"frames={frame_count}  pitch={bf.pitch_rad:.4f}rad "
+                            f"({pitch_deg:+.1f}deg)  rate={bf.pitch_rate_rads:+.3f}  "
+                            f"cmd={bf.cmd_torque_nm:+.5f}  "
+                            f"L/R={bf.cmd_torque_left_nm:+.5f}/"
+                            f"{bf.cmd_torque_right_nm:+.5f}  "
+                            f"u_fb={bf.u_fb_nm:+.5f}  estop={bf.estop}  "
+                            f"imu={bf.imu_valid}"
                         )
+                    if args.diag_stall:
+                        pitch_abs = abs(bf.pitch_rad)
+                        cmd_ctrl = abs(bf.cmd_torque_nm)
+                        cmd_motors = max(
+                            abs(bf.cmd_torque_left_nm), abs(bf.cmd_torque_right_nm)
+                        )
+                        if pitch_abs >= stall_pitch_rad and (
+                            cmd_ctrl <= args.stall_cmd_eps
+                            or cmd_motors <= args.stall_cmd_eps
+                        ):
+                            now_stall = time.time()
+                            if now_stall - last_stall_print >= 0.2:
+                                pitch_deg = bf.pitch_rad * 180.0 / 3.141592653589793
+                                if bf.estop:
+                                    where = "ESTOP (failsafe/imu→motor cmd forced 0)"
+                                elif cmd_ctrl <= args.stall_cmd_eps:
+                                    where = "CTRL (strategy cmd≈0 while pitched)"
+                                else:
+                                    where = (
+                                        "TX_PATH (ctrl cmd≠0 but L/R≈0; "
+                                        "check estop publish path)"
+                                    )
+                                print(
+                                    f"STALL {where}: pitch={pitch_deg:+.1f}deg  "
+                                    f"cmd={bf.cmd_torque_nm:+.5f}  "
+                                    f"L/R={bf.cmd_torque_left_nm:+.5f}/"
+                                    f"{bf.cmd_torque_right_nm:+.5f}  "
+                                    f"u_fb={bf.u_fb_nm:+.5f} u_ff={bf.u_ff_nm:+.5f}  "
+                                    f"vel={bf.vel_wheel_turns_s:+.3f}  "
+                                    f"estop={bf.estop} imu={bf.imu_valid}"
+                                )
+                                last_stall_print = now_stall
 
             now = time.time()
             if args.verbose and now - last_stats >= 5.0:

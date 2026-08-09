@@ -510,7 +510,7 @@ odrv0.axis1.trap_traj.config.vel_limit = 2.0
 
 odrv0.can.error = 0
 
-odrv0.can.config.baud_rate = 250000
+odrv0.can.config.baud_rate = 500000
 odrv0.can.config.protocol = 0
 
 odrv0.config.brake_resistance = 2.0

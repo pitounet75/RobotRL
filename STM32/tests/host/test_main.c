@@ -9,6 +9,7 @@ void test_icm45686_parse_gyro(void);
 void test_icm45686_parse_null(void);
 void test_imu_fusion_level_init(void);
 void test_imu_fusion_gyro_integrates(void);
+void test_imu_fusion_rejects_linear_accel(void);
 void test_imu_fusion_pitch_from_accel(void);
 void test_app_samples_publish_read(void);
 void test_app_samples_invalid_before_publish(void);
@@ -23,6 +24,7 @@ int main(void)
     TEST_RUN(test_icm45686_parse_null);
     TEST_RUN(test_imu_fusion_level_init);
     TEST_RUN(test_imu_fusion_gyro_integrates);
+    TEST_RUN(test_imu_fusion_rejects_linear_accel);
     TEST_RUN(test_imu_fusion_pitch_from_accel);
     TEST_RUN(test_app_samples_publish_read);
     TEST_RUN(test_app_samples_invalid_before_publish);

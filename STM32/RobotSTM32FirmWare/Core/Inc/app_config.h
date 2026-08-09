@@ -20,15 +20,17 @@
  * Also toggle at runtime via g_app_odrive_torque_tx_enabled (debugger).
  */
 #ifndef APP_ODRIVE_TORQUE_TX_ENABLED
-#define APP_ODRIVE_TORQUE_TX_ENABLED 0
+#define APP_ODRIVE_TORQUE_TX_ENABLED 1
 #endif
 
 /**
  * 1 = skip ODrive CAN boot in main() (bench telemetry, motors not required).
  * FreeRTOS + UART4 BalanceFrame still run. Set 0 before on-robot balance tests.
+ * When 1, SET_CONTROLLER_MODES(torque) is never sent — ODrive stays on flash mode
+ * (often velocity), which matches "cmd saturates but wheels brake to stop".
  */
 #ifndef APP_TELEMETRY_BENCH_MODE
-#define APP_TELEMETRY_BENCH_MODE       1
+#define APP_TELEMETRY_BENCH_MODE       0
 #endif
 
 /*
@@ -165,10 +167,15 @@
 #define APP_CTRL_VEL_KD              0.0f
 #endif
 
-/** Max torque (Nm) at motor shaft sent to ODrive (~0.19 Nm at wheel, gear 15/80).
- * Align ODrive torque_lim to this value. */
+/**
+ * Plant (measured): m=1.335 kg, COM h=0.145 m, gear motor:wheel = 3:16 (τ_w/τ_m = 16/3).
+ * Gravity stiffness at axle: m·g·h ≈ 1.90 Nm/rad.
+ * Same cmd on both motors → motor FF for full gravity cancel:
+ *   K_ff_full = m·g·h / (2·16/3) ≈ 0.178 Nm (shaft).
+ * At 5°: ~0.0155 Nm/motor gravity; keep cmd_max ≈ 3× that for catch margin.
+ */
 #ifndef APP_CTRL_CMD_MAX_TORQUE_NM
-#define APP_CTRL_CMD_MAX_TORQUE_NM     0.035f
+#define APP_CTRL_CMD_MAX_TORQUE_NM     0.040f  /* run3: less violent while hunting gains */
 #endif
 
 /* Linear: u = Kθ·f(θ_ref−θ) − Kω·θ̇ + Kv·(v_ref−v), then output low-pass.
@@ -189,34 +196,116 @@
 #define APP_CTRL_LINEAR_OUTPUT_ALPHA     0.0f
 #endif
 
-/* Cascade: outer vel PID output added to pitch_ref (rad). */
+/* Cascade pitch_ref trim: OFF — osc6/7 showed more chatter (flips/s ~21) and
+ * mean(cmd·v) stayed >0. Speed damping is direct torque (FF_FB_K_VEL) instead. */
 #ifndef APP_CTRL_CASCADE_VEL_KP
 #define APP_CTRL_CASCADE_VEL_KP          0.0f
 #endif
 #ifndef APP_CTRL_CASCADE_VEL_KI
-#define APP_CTRL_CASCADE_VEL_KI          0.00f
+#define APP_CTRL_CASCADE_VEL_KI          0.0f
 #endif
 #ifndef APP_CTRL_CASCADE_VEL_KD
 #define APP_CTRL_CASCADE_VEL_KD          0.0f
 #endif
 #ifndef APP_CTRL_CASCADE_PITCH_REF_MAX_RAD
-#define APP_CTRL_CASCADE_PITCH_REF_MAX_RAD  (0.0f)
+#define APP_CTRL_CASCADE_PITCH_REF_MAX_RAD  (0.08f)
 #endif
 
-/* FF + cascade (strategy 3): catch early (|pitch| few deg), not at 15 deg then saturate.
- * v3: at |pitch|<5 deg + |rate|>0.3, mean cmd~0.001 Nm (P and D cancel). */
+/* FF + PD (+ wheel-speed torque damp).
+ * Baseline: ODrive/.../BALANCE_BASELINE.md + logs/krate013_db0017.csv
+ * (k_rate 0.013 + gated deadband 0.0017). */
 #ifndef APP_CTRL_FF_GRAV_K
-#define APP_CTRL_FF_GRAV_K               (-0.06f)
+#define APP_CTRL_FF_GRAV_K               0.14f
 #endif
 #ifndef APP_CTRL_FF_FB_K_PITCH
-#define APP_CTRL_FF_FB_K_PITCH           0.30f
+#define APP_CTRL_FF_FB_K_PITCH           0.055f
 #endif
 #ifndef APP_CTRL_FF_FB_K_RATE
-#define APP_CTRL_FF_FB_K_RATE            0.002f
+#define APP_CTRL_FF_FB_K_RATE            0.013f
 #endif
-/** 0 = no output lag; late catch was partly LPF + D term cancelling P at small angle. */
+/** u += Kv·(v_ref - v); negative Kv brakes in current sign convention. */
+#ifndef APP_CTRL_FF_FB_K_VEL
+#define APP_CTRL_FF_FB_K_VEL             (-0.0005f)
+#endif
+#ifndef APP_CTRL_FF_FB_K_VEL_MAX_NM
+#define APP_CTRL_FF_FB_K_VEL_MAX_NM      0.010f
+#endif
+/** Output LPF: higher = softer (cuts vib chatter). */
 #ifndef APP_CTRL_FF_OUTPUT_ALPHA
-#define APP_CTRL_FF_OUTPUT_ALPHA         0.15f
+#define APP_CTRL_FF_OUTPUT_ALPHA         0.50f
+#endif
+/**
+ * Coulomb: u += sign(u)*D when near upright & slow (tunable over telemetry).
+ */
+#ifndef APP_CTRL_TORQUE_DEADBAND_NM
+#define APP_CTRL_TORQUE_DEADBAND_NM      0.0017f
+#endif
+#ifndef APP_CTRL_TORQUE_DEADBAND_PITCH_MAX_RAD
+#define APP_CTRL_TORQUE_DEADBAND_PITCH_MAX_RAD  0.05f
+#endif
+#ifndef APP_CTRL_TORQUE_DEADBAND_RATE_MAX_RADS
+#define APP_CTRL_TORQUE_DEADBAND_RATE_MAX_RADS  0.30f
+#endif
+
+/**
+ * Motor-shaft accel P (near upright): alpha_ref = (u - c*sign(ω))/J,
+ * dτ = Kα*(α_ref - α_meas), gated. J/c from free-wheel USB ident (avg L/R).
+ * alpha_kp=0 at flash → baseline unchanged until tuned over telemetry.
+ */
+#ifndef APP_CTRL_MOTOR_J_KG_M2
+#define APP_CTRL_MOTOR_J_KG_M2               1.12e-5f
+#endif
+#ifndef APP_CTRL_MOTOR_FRICTION_C_NM
+#define APP_CTRL_MOTOR_FRICTION_C_NM         0.0052f
+#endif
+#ifndef APP_CTRL_ALPHA_KP
+#define APP_CTRL_ALPHA_KP                    0.0f
+#endif
+#ifndef APP_CTRL_ALPHA_MAX_NM
+#define APP_CTRL_ALPHA_MAX_NM                0.002f
+#endif
+#ifndef APP_CTRL_ALPHA_PITCH_MAX_RAD
+#define APP_CTRL_ALPHA_PITCH_MAX_RAD         0.05f
+#endif
+#ifndef APP_CTRL_ALPHA_RATE_MAX_RADS
+#define APP_CTRL_ALPHA_RATE_MAX_RADS         0.30f
+#endif
+/** Gate off when |motor ω| (robot-frame turn/s) exceeds this; 0 = no vel gate. */
+#ifndef APP_CTRL_ALPHA_VEL_MAX_TURNS_S
+#define APP_CTRL_ALPHA_VEL_MAX_TURNS_S       8.0f
+#endif
+/** EMA on α_meas: higher = smoother / more lag (0..1). */
+#ifndef APP_CTRL_ALPHA_LPF
+#define APP_CTRL_ALPHA_LPF                   0.80f
+#endif
+
+/**
+ * Station-keeping on forward axis x (wheel odometry):
+ *   v_ref  = clamp( Kp*(x_ref-x) - Kd*v , ±v_max )
+ *   θ_trim = clamp( Kθx*(x_ref-x) , ±θ_max )   (direct lean; cascade can stay 0)
+ * Gains 0 at flash → no position hold until tuned over telemetry.
+ * SET pos_reset=1 to zero x at current pose.
+ */
+#ifndef APP_WHEEL_RADIUS_M
+#define APP_WHEEL_RADIUS_M                   0.04f
+#endif
+#ifndef APP_CTRL_POS_KP
+#define APP_CTRL_POS_KP                      0.0f   /* (turn/s) / m */
+#endif
+#ifndef APP_CTRL_POS_KD
+#define APP_CTRL_POS_KD                      0.0f   /* (turn/s) / (turn/s) */
+#endif
+#ifndef APP_CTRL_POS_PITCH_KP
+#define APP_CTRL_POS_PITCH_KP                0.0f   /* rad / m */
+#endif
+#ifndef APP_CTRL_POS_X_REF_M
+#define APP_CTRL_POS_X_REF_M                 0.0f
+#endif
+#ifndef APP_CTRL_POS_V_MAX_TURNS_S
+#define APP_CTRL_POS_V_MAX_TURNS_S           0.5f
+#endif
+#ifndef APP_CTRL_POS_PITCH_MAX_RAD
+#define APP_CTRL_POS_PITCH_MAX_RAD           0.04f
 #endif
 
 #ifndef APP_TELEMETRY_BAUD
@@ -249,8 +338,16 @@ typedef enum {
 #endif
 
 /** Complementary filter gyro weight (1.0 = gyro only). Lower = faster accel correction, more lag. */
+/**
+ * Complementary filter: pitch = α·(pitch+ωΔt) + (1-α)·pitch_accel.
+ * 0.999 @ 1 kHz ≈ 0.16 Hz accel. Startup gyro bias cal TODO (after vib tune).
+ */
 #ifndef APP_IMU_COMPLEMENTARY_ALPHA
-#define APP_IMU_COMPLEMENTARY_ALPHA  0.92f
+#define APP_IMU_COMPLEMENTARY_ALPHA  0.999f
+#endif
+/** Reject accel tilt when |‖a‖ − g| exceeds this (m/s²); use gyro-only update. */
+#ifndef APP_IMU_ACCEL_NORM_TOL_MPS2
+#define APP_IMU_ACCEL_NORM_TOL_MPS2  3.0f
 #endif
 
 /** Retry interval when the IMU is not ready at first boot. */

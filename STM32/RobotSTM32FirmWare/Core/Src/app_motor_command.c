@@ -25,7 +25,9 @@ void app_motor_command_publish(const app_motor_command_t *cmd)
 
     uint32_t seq = s_cmd_seq + 1u;
     s_cmd_seq = seq;
+    APP_MOTOR_CMD_DMB();
     s_cmd = *cmd;
+    APP_MOTOR_CMD_DMB();
     s_cmd_seq = seq + 1u;
 }
 
@@ -40,6 +42,7 @@ bool app_motor_command_read(app_motor_command_t *out)
         if ((seq1 & 1u) != 0u) {
             continue;
         }
+        APP_MOTOR_CMD_DMB();
         *out = s_cmd;
         APP_MOTOR_CMD_DMB();
         if (s_cmd_seq == seq1) {

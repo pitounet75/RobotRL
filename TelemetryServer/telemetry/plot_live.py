@@ -36,6 +36,7 @@ class LiveBalancePlotter:
 
         self._series: List[_Series] = [
             _Series("pitch_rad", 0),
+            _Series("pitch_deg", 0),
             _Series("pitch_rate", 0),
             _Series("cmd_torque", 1),
             _Series("cmd_torque_l", 1),
@@ -44,28 +45,35 @@ class LiveBalancePlotter:
             _Series("u_fb", 1),
             _Series("vel_l", 2),
             _Series("vel_r", 2),
+            _Series("estop", 3),
+            _Series("imu_valid", 3),
         ]
         for s in self._series:
             s.data = deque(maxlen=self.max_points)
 
-        self.fig, self.axes = plt.subplots(4, 1, figsize=(11, 8), sharex=True)
+        self.fig, self.axes = plt.subplots(4, 1, figsize=(11, 9), sharex=True)
         self.fig.subplots_adjust(right=0.78)
         self.fig.suptitle("Balance telemetry (live)")
+
+        # Hide pitch_deg by default (same info as pitch_rad); keep for stall reading.
+        self._series[1].visible = False
 
         for s in self._series:
             ax = self.axes[s.axis_idx]
             (s.line,) = ax.plot([], [], label=s.label)
             s.line.set_visible(s.visible)
 
-        self.axes[0].set_ylabel("rad")
+        self.axes[0].set_ylabel("rad / deg")
         self.axes[1].set_ylabel("Nm motor")
         self.axes[2].set_ylabel("turn/s")
+        self.axes[3].set_ylabel("flags")
+        self.axes[3].set_ylim(-0.1, 1.2)
 
-        for ax in self.axes[:3]:
+        for ax in self.axes:
             ax.legend(loc="upper left")
+            ax.grid(True, alpha=0.25)
 
-        self.stats_text = self.axes[3].text(0.01, 0.5, "", transform=self.axes[3].transAxes, va="center")
-        self.axes[3].set_axis_off()
+        self.stats_text = self.fig.text(0.01, 0.01, "", va="bottom")
 
         self._label_to_series: Dict[str, _Series] = {s.label: s for s in self._series}
         check_ax = self.fig.add_axes([0.80, 0.12, 0.18, 0.76])
@@ -120,6 +128,9 @@ class LiveBalancePlotter:
 
             self.host_t.append(t)
             self._series_by_label("pitch_rad").data.append(frame.pitch_rad)
+            self._series_by_label("pitch_deg").data.append(
+                frame.pitch_rad * 180.0 / 3.141592653589793
+            )
             self._series_by_label("pitch_rate").data.append(frame.pitch_rate_rads)
             self._series_by_label("cmd_torque").data.append(frame.cmd_torque_nm)
             self._series_by_label("cmd_torque_l").data.append(frame.cmd_torque_left_nm)
@@ -128,6 +139,8 @@ class LiveBalancePlotter:
             self._series_by_label("u_fb").data.append(frame.u_fb_nm)
             self._series_by_label("vel_l").data.append(frame.vel_wheel_l_turns_s)
             self._series_by_label("vel_r").data.append(frame.vel_wheel_r_turns_s)
+            self._series_by_label("estop").data.append(float(frame.estop))
+            self._series_by_label("imu_valid").data.append(float(frame.imu_valid))
 
     def note_reject(self) -> None:
         with self._lock:
@@ -146,17 +159,26 @@ class LiveBalancePlotter:
                 elapsed = max(0.001, xs[-1] - xs[0])
                 hz = (len(xs) - 1) / elapsed
 
+        n = len(xs)
         for s in self._series:
-            if s.line is not None:
-                s.line.set_data(xs, series_data[s.label])
+            if s.line is None:
+                continue
+            ys = series_data[s.label]
+            if len(ys) != n:
+                # Avoid killing FuncAnimation on length mismatch.
+                continue
+            s.line.set_data(xs, ys)
 
         for ax in self.axes[:3]:
             ax.relim()
             ax.autoscale_view()
-        self.axes[1].set_ylim(-0.5, 0.5)
+        self.axes[3].set_ylim(-0.1, 1.2)
 
+        pitch_deg = series_data["pitch_deg"][-1] if series_data["pitch_deg"] else 0.0
+        cmd = series_data["cmd_torque"][-1] if series_data["cmd_torque"] else 0.0
         self.stats_text.set_text(
-            f"frames={len(xs)}  ~{hz:.0f}Hz  drops={drops}  rejected={rejects}  estop={estop}  imu={imu}"
+            f"frames={len(xs)}  ~{hz:.0f}Hz  drops={drops}  rejected={rejects}  "
+            f"estop={estop}  imu={imu}  pitch={pitch_deg:+.1f}deg  cmd={cmd:+.4f}Nm"
         )
         artists: List = [s.line for s in self._series if s.line is not None]
         artists.append(self.stats_text)
@@ -166,6 +188,13 @@ class LiveBalancePlotter:
         def _anim(_i: int):
             return self._refresh_lines()
 
-        self._animation = FuncAnimation(self.fig, _anim, interval=interval_ms, blit=False)
-        plt.tight_layout(rect=[0, 0, 0.78, 0.96])
+        # Keep a strong ref; some backends GC the animation otherwise.
+        self._animation = FuncAnimation(
+            self.fig,
+            _anim,
+            interval=interval_ms,
+            blit=False,
+            cache_frame_data=False,
+        )
+        plt.tight_layout(rect=[0, 0.03, 0.78, 0.96])
         plt.show()
