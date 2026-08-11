@@ -318,12 +318,12 @@
 #endif
 
 /* --- IMU selection (compile-time) --- */
-typedef enum {
-    APP_IMU_NONE = 0,
-    APP_IMU_ICM45686,
-    APP_IMU_BMI323,
-    APP_IMU_MPU6050,
-} app_imu_type_t;
+/* Plain #define, not an enum: APP_IMU_SELECTED is compared with #if below,
+ * and the preprocessor cannot see enum constants. */
+#define APP_IMU_NONE                  0
+#define APP_IMU_ICM45686              1
+#define APP_IMU_BMI323                2
+#define APP_IMU_MPU6050               3
 
 #ifndef APP_IMU_SELECTED
 #define APP_IMU_SELECTED             APP_IMU_ICM45686

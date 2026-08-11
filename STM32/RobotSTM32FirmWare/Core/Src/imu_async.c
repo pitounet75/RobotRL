@@ -27,8 +27,12 @@
 #endif
 
 static icm45686_t s_icm45686;
+#if APP_IMU_SELECTED == APP_IMU_ICM45686
+#elif APP_IMU_SELECTED == APP_IMU_BMI323
 static bmi323_t s_bmi323;
+#elif APP_IMU_SELECTED == APP_IMU_MPU6050
 static mpu6050_t s_mpu6050;
+#endif
 static bool s_hw_probed_ok;
 
 static uint8_t s_spi_tx[1u + IMU_SPI_READ_LEN] APP_DMA_BUFFER_SECTION;
