@@ -1,31 +1,41 @@
-"""Live plotter for balance telemetry."""
+"""Live plotter for balance telemetry (pyqtgraph / PyQt5).
+
+matplotlib's FuncAnimation redraws the whole figure every tick and can't
+keep up with 500 Hz BalanceFrame arrival across 12 series; pyqtgraph draws
+incrementally (GPU-backed via Qt) and supports per-curve downsampling, so
+it stays smooth at this data rate.
+"""
 
 from __future__ import annotations
 
+import math
+import sys
+import threading
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Deque, Dict, List, Optional
-import threading
 
-from telemetry.mpl_backend import configure_matplotlib
-
-configure_matplotlib()
-
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
-from matplotlib.lines import Line2D
-from matplotlib.widgets import CheckButtons
+import numpy as np
+import pyqtgraph as pg
+from pyqtgraph.Qt import QtCore, QtWidgets
 
 from telemetry.balance_frame import BalanceFrame
+
+_SERIES_COLORS = [
+    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+    "#000000", "#999999",
+]
 
 
 @dataclass
 class _Series:
     label: str
     axis_idx: int
-    data: Deque[float] = field(default_factory=lambda: deque(maxlen=1000))
-    line: Optional[Line2D] = None
+    color: str
     visible: bool = True
+    data: Deque[float] = field(default_factory=lambda: deque(maxlen=1000))
+    curve: Optional[pg.PlotDataItem] = None
 
 
 class LiveBalancePlotter:
@@ -35,55 +45,75 @@ class LiveBalancePlotter:
         self._t0: Optional[float] = None
 
         self._series: List[_Series] = [
-            _Series("pitch_rad", 0),
-            _Series("pitch_deg", 0),
-            _Series("pitch_rate", 0),
-            _Series("cmd_torque", 1),
-            _Series("cmd_torque_l", 1),
-            _Series("cmd_torque_r", 1),
-            _Series("u_ff", 1),
-            _Series("u_fb", 1),
-            _Series("vel_l", 2),
-            _Series("vel_r", 2),
-            _Series("estop", 3),
-            _Series("imu_valid", 3),
+            _Series("pitch_rad", 0, _SERIES_COLORS[0]),
+            _Series("pitch_deg", 0, _SERIES_COLORS[1], visible=False),
+            _Series("pitch_rate", 0, _SERIES_COLORS[2]),
+            _Series("cmd_torque", 1, _SERIES_COLORS[3]),
+            _Series("cmd_torque_l", 1, _SERIES_COLORS[4]),
+            _Series("cmd_torque_r", 1, _SERIES_COLORS[5]),
+            _Series("u_ff", 1, _SERIES_COLORS[6]),
+            _Series("u_fb", 1, _SERIES_COLORS[7]),
+            _Series("vel_l", 2, _SERIES_COLORS[8]),
+            _Series("vel_r", 2, _SERIES_COLORS[9]),
+            _Series("estop", 3, _SERIES_COLORS[10]),
+            _Series("imu_valid", 3, _SERIES_COLORS[11]),
         ]
         for s in self._series:
             s.data = deque(maxlen=self.max_points)
+        self._label_to_series: Dict[str, _Series] = {s.label: s for s in self._series}
 
-        self.fig, self.axes = plt.subplots(4, 1, figsize=(11, 9), sharex=True)
-        self.fig.subplots_adjust(right=0.78)
-        self.fig.suptitle("Balance telemetry (live)")
+        pg.setConfigOptions(antialias=False, background="w", foreground="k")
+        self.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
 
-        # Hide pitch_deg by default (same info as pitch_rad); keep for stall reading.
-        self._series[1].visible = False
+        self.win = QtWidgets.QMainWindow()
+        self.win.setWindowTitle("Balance telemetry (live)")
+        central = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(central)
+        self.win.setCentralWidget(central)
+
+        self.glw = pg.GraphicsLayoutWidget()
+        layout.addWidget(self.glw, 1)
+
+        ylabels = ["rad / deg", "Nm motor", "turn/s", "flags"]
+        self.plots: List[pg.PlotItem] = []
+        prev_plot: Optional[pg.PlotItem] = None
+        for i, ylabel in enumerate(ylabels):
+            plot_item = self.glw.addPlot(row=i, col=0)
+            plot_item.setLabel("left", ylabel)
+            plot_item.showGrid(x=True, y=True, alpha=0.25)
+            plot_item.addLegend(offset=(10, 10))
+            if prev_plot is not None:
+                plot_item.setXLink(prev_plot)
+            prev_plot = plot_item
+            self.plots.append(plot_item)
+        self.plots[3].setYRange(-0.1, 1.2)
+        self.plots[-1].setLabel("bottom", "time [s]")
 
         for s in self._series:
-            ax = self.axes[s.axis_idx]
-            (s.line,) = ax.plot([], [], label=s.label)
-            s.line.set_visible(s.visible)
+            curve = self.plots[s.axis_idx].plot(pen=pg.mkPen(s.color, width=1.5), name=s.label)
+            curve.setDownsampling(auto=True, method="peak")
+            curve.setClipToView(True)
+            curve.setVisible(s.visible)
+            s.curve = curve
 
-        self.axes[0].set_ylabel("rad / deg")
-        self.axes[1].set_ylabel("Nm motor")
-        self.axes[2].set_ylabel("turn/s")
-        self.axes[3].set_ylabel("flags")
-        self.axes[3].set_ylim(-0.1, 1.2)
+        sidebar = QtWidgets.QWidget()
+        sidebar.setFixedWidth(180)
+        side_layout = QtWidgets.QVBoxLayout(sidebar)
+        side_layout.addWidget(QtWidgets.QLabel("<b>Show</b>"))
+        for s in self._series:
+            checkbox = QtWidgets.QCheckBox(s.label)
+            checkbox.setChecked(s.visible)
+            checkbox.stateChanged.connect(
+                lambda state, series=s: self._on_checkbox(series, state)
+            )
+            side_layout.addWidget(checkbox)
+        side_layout.addStretch(1)
+        self.stats_label = QtWidgets.QLabel("")
+        self.stats_label.setWordWrap(True)
+        side_layout.addWidget(self.stats_label)
+        layout.addWidget(sidebar)
 
-        for ax in self.axes:
-            ax.legend(loc="upper left")
-            ax.grid(True, alpha=0.25)
-
-        self.stats_text = self.fig.text(0.01, 0.01, "", va="bottom")
-
-        self._label_to_series: Dict[str, _Series] = {s.label: s for s in self._series}
-        check_ax = self.fig.add_axes([0.80, 0.12, 0.18, 0.76])
-        check_ax.set_title("Show", fontsize=9)
-        check_ax.set_xticks([])
-        check_ax.set_yticks([])
-        labels = [s.label for s in self._series]
-        actives = [s.visible for s in self._series]
-        self._check = CheckButtons(check_ax, labels, actives)
-        self._check.on_clicked(self._on_checkbox)
+        self.win.resize(1200, 900)
 
         self._last_frame_num: Optional[int] = None
         self._drop_count = 0
@@ -93,15 +123,12 @@ class LiveBalancePlotter:
         self._last_estop_flag = 0
         self._last_imu_flag = 0
         self._lock = threading.Lock()
-        self._animation = None
+        self._timer: Optional[QtCore.QTimer] = None
 
-    def _on_checkbox(self, label: str) -> None:
-        series = self._label_to_series.get(label)
-        if series is None or series.line is None:
-            return
-        series.visible = not series.visible
-        series.line.set_visible(series.visible)
-        self.fig.canvas.draw_idle()
+    def _on_checkbox(self, series: _Series, state: int) -> None:
+        series.visible = state == QtCore.Qt.Checked
+        if series.curve is not None:
+            series.curve.setVisible(series.visible)
 
     def _series_by_label(self, label: str) -> _Series:
         return self._label_to_series[label]
@@ -128,9 +155,7 @@ class LiveBalancePlotter:
 
             self.host_t.append(t)
             self._series_by_label("pitch_rad").data.append(frame.pitch_rad)
-            self._series_by_label("pitch_deg").data.append(
-                frame.pitch_rad * 180.0 / 3.141592653589793
-            )
+            self._series_by_label("pitch_deg").data.append(frame.pitch_rad * 180.0 / math.pi)
             self._series_by_label("pitch_rate").data.append(frame.pitch_rate_rads)
             self._series_by_label("cmd_torque").data.append(frame.cmd_torque_nm)
             self._series_by_label("cmd_torque_l").data.append(frame.cmd_torque_left_nm)
@@ -146,55 +171,48 @@ class LiveBalancePlotter:
         with self._lock:
             self._reject_count += 1
 
-    def _refresh_lines(self) -> List:
+    def _refresh(self) -> None:
         with self._lock:
-            xs = list(self.host_t)
-            series_data = {s.label: list(s.data) for s in self._series}
+            xs = np.fromiter(self.host_t, dtype=np.float64, count=len(self.host_t))
+            series_data = {
+                s.label: np.fromiter(s.data, dtype=np.float64, count=len(s.data))
+                for s in self._series
+            }
             drops = self._drop_count
             estop = self._last_estop_flag
             imu = self._last_imu_flag
             rejects = self._reject_count
+            frame_total = self._frame_total
             hz = 0.0
             if len(xs) > 1:
                 elapsed = max(0.001, xs[-1] - xs[0])
                 hz = (len(xs) - 1) / elapsed
 
-        n = len(xs)
         for s in self._series:
-            if s.line is None:
+            if s.curve is None:
                 continue
             ys = series_data[s.label]
-            if len(ys) != n:
-                # Avoid killing FuncAnimation on length mismatch.
+            if len(ys) != len(xs):
+                # Avoid a torn frame while a new series catches up mid-append.
                 continue
-            s.line.set_data(xs, ys)
+            s.curve.setData(xs, ys)
 
-        for ax in self.axes[:3]:
-            ax.relim()
-            ax.autoscale_view()
-        self.axes[3].set_ylim(-0.1, 1.2)
-
-        pitch_deg = series_data["pitch_deg"][-1] if series_data["pitch_deg"] else 0.0
-        cmd = series_data["cmd_torque"][-1] if series_data["cmd_torque"] else 0.0
-        self.stats_text.set_text(
-            f"frames={len(xs)}  ~{hz:.0f}Hz  drops={drops}  rejected={rejects}  "
-            f"estop={estop}  imu={imu}  pitch={pitch_deg:+.1f}deg  cmd={cmd:+.4f}Nm"
+        pitch_deg = series_data["pitch_deg"][-1] if len(series_data["pitch_deg"]) else 0.0
+        cmd = series_data["cmd_torque"][-1] if len(series_data["cmd_torque"]) else 0.0
+        self.stats_label.setText(
+            f"frames={frame_total}\n"
+            f"~{hz:.0f} Hz\n"
+            f"drops={drops}\n"
+            f"rejected={rejects}\n"
+            f"estop={estop}\n"
+            f"imu={imu}\n"
+            f"pitch={pitch_deg:+.1f} deg\n"
+            f"cmd={cmd:+.4f} Nm"
         )
-        artists: List = [s.line for s in self._series if s.line is not None]
-        artists.append(self.stats_text)
-        return artists
 
     def run(self, interval_ms: int = 50) -> None:
-        def _anim(_i: int):
-            return self._refresh_lines()
-
-        # Keep a strong ref; some backends GC the animation otherwise.
-        self._animation = FuncAnimation(
-            self.fig,
-            _anim,
-            interval=interval_ms,
-            blit=False,
-            cache_frame_data=False,
-        )
-        plt.tight_layout(rect=[0, 0.03, 0.78, 0.96])
-        plt.show()
+        self._timer = QtCore.QTimer()
+        self._timer.timeout.connect(self._refresh)
+        self._timer.start(interval_ms)
+        self.win.show()
+        self.app.exec_()

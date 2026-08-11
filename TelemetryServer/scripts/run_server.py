@@ -32,7 +32,7 @@ def main() -> int:
     p.add_argument("--bind-port", type=int, default=5000)
     p.add_argument("--esp32-host", help="ESP32 IP for subscribe ping (learn-remote)")
     p.add_argument("--esp32-port", type=int, default=5000)
-    p.add_argument("--plot", action="store_true", help="Live matplotlib plot")
+    p.add_argument("--plot", action="store_true", help="Live plot (pyqtgraph/PyQt5)")
     p.add_argument("--record", type=Path, help="CSV output path")
     p.add_argument("--history-s", type=float, default=10.0)
     p.add_argument("--receive-buffer", type=int, default=1024 * 1024, help="Requested UDP SO_RCVBUF bytes")
@@ -78,19 +78,10 @@ def main() -> int:
     plotter = None
     if args.plot:
         try:
-            from telemetry.mpl_backend import backend_is_interactive, configure_matplotlib
-
-            backend = configure_matplotlib()
-            print(f"matplotlib backend: {backend}")
-            if not backend_is_interactive():
-                raise RuntimeError(
-                    f"non-interactive backend '{backend}' — install PyQt5 "
-                    "(pip install PyQt5) or set MPLBACKEND=TkAgg"
-                )
             plotter = LiveBalancePlotter(history_s=args.history_s)
         except Exception as exc:
             print(f"Plot disabled: {exc}")
-            print("Tip: pip install PyQt5  OR  use --record only and plot_file.py later")
+            print("Tip: pip install PyQt5 pyqtgraph  OR  use --record only and plot_file.py later")
             plotter = None
             if not args.record:
                 print("Continuing headless (use --record to capture data).")

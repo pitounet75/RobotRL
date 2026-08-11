@@ -8,6 +8,7 @@ __pycache__/
 !.cursor/rules/
 Odrive/venv/
 Odrive/ODrive_S-fw-v0.5.1/venv
+TelemetryServer/venv/
 
 # STM32 CubeIDE / Make build outputs
 STM32/RobotSTM32FirmWare/Debug/
