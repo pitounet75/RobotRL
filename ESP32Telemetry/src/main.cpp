@@ -817,17 +817,16 @@ void ingestUdpToRing() {
 
 
 
-  learnRemote(IPAddress(from.sin_addr.s_addr), ntohs(from.sin_port));
-
-
-
   const size_t total = static_cast<size_t>(len);
 
+  /* Only "subscribe" rebinds the telemetry stream destination. Learning on every
+   * RPC/SET packet steals the stream onto the teleop socket and floods it. */
   if (total == 9 && memcmp(rxChunkBuf, "subscribe", 9) == 0) {
-
+    learnRemote(IPAddress(from.sin_addr.s_addr), ntohs(from.sin_port));
     return;
-
   }
+
+  /* Still accept RPC from any peer; replies follow the subscribed remote. */
 
 
 

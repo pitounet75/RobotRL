@@ -38,6 +38,8 @@ typedef struct {
     /** Mean local ABZ wheel position (robot-frame turn); for x station-keeping. */
     float pos_wheel_turns;
     bool pos_wheel_valid;
+    /** Yaw rate about vertical (rad/s), from IMU gyro. */
+    float yaw_rate_rads;
 } control_strategy_input_t;
 
 typedef struct {

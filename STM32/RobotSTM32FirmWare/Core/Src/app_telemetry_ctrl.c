@@ -106,6 +106,20 @@ bool app_telemetry_ctrl_register(telemetry_t *tel)
         {"pos_pitch_max_rad", TELEMETRY_TYPE_FLOAT},
         {"wheel_radius_m", TELEMETRY_TYPE_FLOAT},
         {"pos_reset", TELEMETRY_TYPE_FLOAT},
+        {"pos_err_ema_alpha", TELEMETRY_TYPE_FLOAT},
+        {"pos_ema_kp", TELEMETRY_TYPE_FLOAT},
+        {"outer_mode", TELEMETRY_TYPE_FLOAT},
+        {"heading_kp", TELEMETRY_TYPE_FLOAT},
+        {"heading_kd", TELEMETRY_TYPE_FLOAT},
+        {"heading_ref_rad", TELEMETRY_TYPE_FLOAT},
+        {"heading_torque_max_nm", TELEMETRY_TYPE_FLOAT},
+        {"heading_reset", TELEMETRY_TYPE_FLOAT},
+        {"cascade_vel_err_ema_alpha", TELEMETRY_TYPE_FLOAT},
+        {"cascade_vel_ema_kp", TELEMETRY_TYPE_FLOAT},
+        {"vel_ref_slew_turns_s2", TELEMETRY_TYPE_FLOAT},
+        {"cascade_vel_accel_kp", TELEMETRY_TYPE_FLOAT},
+        {"heading_inc", TELEMETRY_TYPE_FLOAT},
+        {"heading_dec", TELEMETRY_TYPE_FLOAT},
     };
 
     static const telemetry_field_def_t set_request_fields[] = {

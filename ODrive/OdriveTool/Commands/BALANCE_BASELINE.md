@@ -26,7 +26,12 @@ Strategy: **`3`** (`CTRL_STRATEGY_FF_CASCADE`)
 | `ff_fb_k_rate` | **0.013** | |
 | `ff_output_alpha` | **0.50** | output LPF |
 | `cmd_max_torque_nm` | **0.04** | motor-shaft Nm |
-| `cascade_vel_*` | **0** | off |
+| `outer_mode` | **0** | velocity hold |
+| `cascade_vel_kp` | **0.001** | gentle vel → pitch |
+| `cascade_vel_ki` | **0.004** | |
+| `cascade_vel_kd` | **0.0002** | damp on filtered \(v̇\) |
+| `cascade_pitch_ref_max_rad` | **0.262** | ~15° |
+| `wheel_encoder_vel_lpf_alpha` | **0.75** | |
 | `torque_deadband_nm` | **0.0017** | gated Coulomb |
 | `torque_deadband_pitch_max_rad` | **0.05** | ~3° |
 | `torque_deadband_rate_max_rads` | **0.30** | |
@@ -48,6 +53,11 @@ python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 set ff_ou
 python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 set torque_deadband_nm 0.0017
 python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 set torque_deadband_pitch_max_rad 0.05
 python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 set torque_deadband_rate_max_rads 0.30
+python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 set outer_mode 0
+python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 set cascade_vel_kp 0.001
+python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 set cascade_vel_ki 0.004
+python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 set cascade_vel_kd 0.0002
+python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 set cascade_pitch_ref_max_rad 0.262
 python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 get
 ```
 
@@ -65,4 +75,48 @@ Defaults in `STM32/RobotSTM32FirmWare/Core/Inc/app_config.h` should match this t
 ## Optional next (not baseline)
 
 - Startup gyro bias average
-- Expose / tune `Kv` for station-keeping
+- Tune outer loops: `outer_mode` 0=vel / 1=pos (pos: x→bounded `v_ref` → `cascade_vel_*`; needs `cascade_vel_kp>0`)
+- See **Shelved** below for motor-accel P (do not treat as active work)
+
+---
+
+## Shelved (2026-08): motor accel P vs residual cogging
+
+**Status:** implemented in firmware, **left OFF** (`alpha_kp = 0`). Decision after vacation tests: do **not** pursue STM32-side accel asservissement to fight cogging for now. Prefer ODrive anticogging (custom FW: bidirectional map cal is better). Revisit only if maps still leave low-speed ripple.
+
+### Idea
+
+Near upright / slow motion, free-wheel model:
+
+\[
+\alpha_{\mathrm{ref}} = \frac{u - c\,\mathrm{sign}(\omega)}{J},\quad
+\Delta\tau = K_\alpha\,(\alpha_{\mathrm{ref}} - \alpha_{\mathrm{mes}})
+\]
+
+- \(u\) = balance command **before** \(\Delta\tau\) (avoids algebraic loop)
+- \(\omega,\alpha_{\mathrm{mes}}\) from **ODrive** `vel_estimate` (not ABZ), per wheel
+- Gated on pitch / rate / motor speed; \(\lvert\Delta\tau\rvert \le\) `alpha_max_nm`
+
+Caveat: when the robot pitches, torque also goes into body dynamics — model is only local near \(x\approx0\).
+
+### Identified plant (free wheel, USB, both drives close)
+
+| | Value |
+|---|---|
+| \(J\) (motor shaft) | **\(1.12\times10^{-5}\,\mathrm{kg\cdot m^2}\)** (avg L/R) |
+| \(c\) Coulomb | **0.0052 Nm** |
+| \(b\) viscous | ≈ 0 (negligible) |
+
+Script: `ODrive/OdriveTool/Commands/identify_motor_inertia.py` (step torque + coast, LS fit \(J,b,c\)).
+
+### Code / telemetry (still present)
+
+- Law: `control_strategy_ff_cascade.c`
+- Defaults: `app_config.h` (`APP_CTRL_MOTOR_J_*`, `APP_CTRL_ALPHA_*`)
+- Live params (snapshot ≥ v3): `alpha_kp`, `alpha_max_nm`, `motor_J`, `motor_friction_c`, gates, `alpha_lpf`
+- Keep `alpha_kp = 0` in normal use so baseline is unchanged
+
+### Related (active path for cogging)
+
+- ODrive flash anticogging map (`APP_ODRIVE_ANTICOGGING_ENABLED`)
+- User custom ODrive FW: anticogging calibration passes **both directions** (better map than stock one-way)

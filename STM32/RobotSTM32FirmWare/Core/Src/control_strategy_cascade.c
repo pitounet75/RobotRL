@@ -50,11 +50,11 @@ void control_strategy_cascade_update(const control_strategy_input_t *in, control
 
     const app_ctrl_params_snapshot_t *p = app_ctrl_params_snapshot();
 
-    const float pitch_trim = pid_update(&s_pid_vel,
-                                        in->vel_ref_turns_s,
-                                        in->vel_wheel_turns_s,
-                                        0.0f,
-                                        in->dt_s);
+    const float pitch_trim = -pid_update(&s_pid_vel,
+                                         in->vel_ref_turns_s,
+                                         in->vel_wheel_turns_s,
+                                         0.0f,
+                                         in->dt_s);
 
     const float pitch_ref = clampf(in->pitch_ref_rad + pitch_trim,
                                    -p->cascade_pitch_ref_max_rad,

@@ -38,6 +38,12 @@ class UdpTelemetryReceiver:
             return
         self._sock.sendto(payload, (self.esp32_host, self.esp32_port))
 
+    def send_raw(self, payload: bytes) -> None:
+        """Send a TM frame (or other payload) to the ESP32 bridge."""
+        if not self.esp32_host:
+            raise RuntimeError("esp32_host not set")
+        self._sock.sendto(payload, (self.esp32_host, self.esp32_port))
+
     def recv_chunk(self) -> Optional[bytes]:
         try:
             data, addr = self._sock.recvfrom(MAX_UDP_DATAGRAM_SIZE)

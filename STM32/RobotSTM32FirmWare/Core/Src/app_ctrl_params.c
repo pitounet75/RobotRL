@@ -7,11 +7,30 @@
 #include "app_config.h"
 #include "control_strategy.h"
 
+#include <math.h>
 #include <stddef.h>
 #include <string.h>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+static float wrap_pi_f(float a)
+{
+    const float pi = (float)M_PI;
+    const float twopi = 2.0f * pi;
+    while (a > pi) {
+        a -= twopi;
+    }
+    while (a < -pi) {
+        a += twopi;
+    }
+    return a;
+}
+
 static app_ctrl_params_snapshot_t s_params;
 static volatile bool s_pos_reset_req;
+static volatile bool s_heading_reset_req;
 
 static void load_defaults(void)
 {
@@ -61,7 +80,22 @@ static void load_defaults(void)
     s_params.pos_pitch_max_rad = APP_CTRL_POS_PITCH_MAX_RAD;
     s_params.wheel_radius_m = APP_WHEEL_RADIUS_M;
     s_params.pos_reset = 0.0f;
+    s_params.pos_err_ema_alpha = APP_CTRL_POS_ERR_EMA_ALPHA;
+    s_params.pos_ema_kp = APP_CTRL_POS_EMA_KP;
+    s_params.outer_mode = (float)APP_CTRL_OUTER_MODE_DEFAULT;
+    s_params.heading_kp = APP_CTRL_HEADING_KP;
+    s_params.heading_kd = APP_CTRL_HEADING_KD;
+    s_params.heading_ref_rad = APP_CTRL_HEADING_REF_RAD;
+    s_params.heading_torque_max_nm = APP_CTRL_HEADING_TORQUE_MAX_NM;
+    s_params.heading_reset = 0.0f;
+    s_params.cascade_vel_err_ema_alpha = APP_CTRL_CASCADE_VEL_ERR_EMA_ALPHA;
+    s_params.cascade_vel_ema_kp = APP_CTRL_CASCADE_VEL_EMA_KP;
+    s_params.vel_ref_slew_turns_s2 = APP_CTRL_VEL_REF_SLEW_TURNS_S2;
+    s_params.cascade_vel_accel_kp = APP_CTRL_CASCADE_VEL_ACCEL_KP;
+    s_params.heading_inc = 0.0f;
+    s_params.heading_dec = 0.0f;
     s_pos_reset_req = false;
+    s_heading_reset_req = false;
 }
 
 static void reset_active_strategy(void)
@@ -89,6 +123,12 @@ static void apply_side_effects(uint16_t param_id)
     case APP_CTRL_PARAM_CASCADE_PITCH_REF_MAX_RAD:
         reset_active_strategy();
         return;
+    case APP_CTRL_PARAM_OUTER_MODE:
+        if (s_params.outer_mode >= 0.5f) {
+            s_pos_reset_req = true;
+        }
+        reset_active_strategy();
+        return;
     default:
         return;
     }
@@ -110,6 +150,15 @@ bool app_ctrl_params_consume_pos_reset(void)
         return false;
     }
     s_pos_reset_req = false;
+    return true;
+}
+
+bool app_ctrl_params_consume_heading_reset(void)
+{
+    if (!s_heading_reset_req) {
+        return false;
+    }
+    s_heading_reset_req = false;
     return true;
 }
 
@@ -250,6 +299,46 @@ bool app_ctrl_params_get_value(uint16_t param_id, float *out_value)
         *out_value = s_params.wheel_radius_m;
         return true;
     case APP_CTRL_PARAM_POS_RESET:
+        *out_value = 0.0f;
+        return true;
+    case APP_CTRL_PARAM_POS_ERR_EMA_ALPHA:
+        *out_value = s_params.pos_err_ema_alpha;
+        return true;
+    case APP_CTRL_PARAM_POS_EMA_KP:
+        *out_value = s_params.pos_ema_kp;
+        return true;
+    case APP_CTRL_PARAM_OUTER_MODE:
+        *out_value = s_params.outer_mode;
+        return true;
+    case APP_CTRL_PARAM_HEADING_KP:
+        *out_value = s_params.heading_kp;
+        return true;
+    case APP_CTRL_PARAM_HEADING_KD:
+        *out_value = s_params.heading_kd;
+        return true;
+    case APP_CTRL_PARAM_HEADING_REF_RAD:
+        *out_value = s_params.heading_ref_rad;
+        return true;
+    case APP_CTRL_PARAM_HEADING_TORQUE_MAX_NM:
+        *out_value = s_params.heading_torque_max_nm;
+        return true;
+    case APP_CTRL_PARAM_HEADING_RESET:
+        *out_value = 0.0f;
+        return true;
+    case APP_CTRL_PARAM_CASCADE_VEL_ERR_EMA_ALPHA:
+        *out_value = s_params.cascade_vel_err_ema_alpha;
+        return true;
+    case APP_CTRL_PARAM_CASCADE_VEL_EMA_KP:
+        *out_value = s_params.cascade_vel_ema_kp;
+        return true;
+    case APP_CTRL_PARAM_VEL_REF_SLEW_TURNS_S2:
+        *out_value = s_params.vel_ref_slew_turns_s2;
+        return true;
+    case APP_CTRL_PARAM_CASCADE_VEL_ACCEL_KP:
+        *out_value = s_params.cascade_vel_accel_kp;
+        return true;
+    case APP_CTRL_PARAM_HEADING_INC:
+    case APP_CTRL_PARAM_HEADING_DEC:
         *out_value = 0.0f;
         return true;
     default:
@@ -474,6 +563,82 @@ bool app_ctrl_params_set(uint16_t param_id, float value, float *out_value)
         s_pos_reset_req = true;
         s_params.pos_reset = 0.0f;
         break;
+    case APP_CTRL_PARAM_POS_ERR_EMA_ALPHA:
+        if (value < 0.0f || value >= 1.0f) {
+            return false;
+        }
+        s_params.pos_err_ema_alpha = value;
+        break;
+    case APP_CTRL_PARAM_POS_EMA_KP:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.pos_ema_kp = value;
+        break;
+    case APP_CTRL_PARAM_OUTER_MODE: {
+        const uint32_t mode = (value >= 0.5f) ? APP_CTRL_OUTER_MODE_POS
+                                              : APP_CTRL_OUTER_MODE_VEL;
+        s_params.outer_mode = (float)mode;
+        break;
+    }
+    case APP_CTRL_PARAM_HEADING_KP:
+        s_params.heading_kp = value;
+        break;
+    case APP_CTRL_PARAM_HEADING_KD:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.heading_kd = value;
+        break;
+    case APP_CTRL_PARAM_HEADING_REF_RAD:
+        s_params.heading_ref_rad = value;
+        break;
+    case APP_CTRL_PARAM_HEADING_TORQUE_MAX_NM:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.heading_torque_max_nm = value;
+        break;
+    case APP_CTRL_PARAM_HEADING_RESET:
+        s_heading_reset_req = true;
+        s_params.heading_reset = 0.0f;
+        break;
+    case APP_CTRL_PARAM_CASCADE_VEL_ERR_EMA_ALPHA:
+        if (value < 0.0f || value >= 1.0f) {
+            return false;
+        }
+        s_params.cascade_vel_err_ema_alpha = value;
+        break;
+    case APP_CTRL_PARAM_CASCADE_VEL_EMA_KP:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.cascade_vel_ema_kp = value;
+        break;
+    case APP_CTRL_PARAM_VEL_REF_SLEW_TURNS_S2:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.vel_ref_slew_turns_s2 = value;
+        break;
+    case APP_CTRL_PARAM_CASCADE_VEL_ACCEL_KP:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.cascade_vel_accel_kp = value;
+        break;
+    case APP_CTRL_PARAM_HEADING_INC: {
+        const float d = fabsf(value);
+        s_params.heading_ref_rad = wrap_pi_f(s_params.heading_ref_rad + d);
+        s_params.heading_inc = 0.0f;
+        break;
+    }
+    case APP_CTRL_PARAM_HEADING_DEC: {
+        const float d = fabsf(value);
+        s_params.heading_ref_rad = wrap_pi_f(s_params.heading_ref_rad - d);
+        s_params.heading_dec = 0.0f;
+        break;
+    }
     default:
         return false;
     }
@@ -481,7 +646,12 @@ bool app_ctrl_params_set(uint16_t param_id, float value, float *out_value)
     apply_side_effects(param_id);
 
     if (out_value != NULL) {
-        (void)app_ctrl_params_get_value(param_id, out_value);
+        if (param_id == (uint16_t)APP_CTRL_PARAM_HEADING_INC ||
+            param_id == (uint16_t)APP_CTRL_PARAM_HEADING_DEC) {
+            *out_value = s_params.heading_ref_rad;
+        } else {
+            (void)app_ctrl_params_get_value(param_id, out_value);
+        }
     }
     return true;
 }
@@ -533,6 +703,20 @@ const char *app_ctrl_params_name(uint16_t param_id)
         [APP_CTRL_PARAM_POS_PITCH_MAX_RAD] = "pos_pitch_max_rad",
         [APP_CTRL_PARAM_WHEEL_RADIUS_M] = "wheel_radius_m",
         [APP_CTRL_PARAM_POS_RESET] = "pos_reset",
+        [APP_CTRL_PARAM_POS_ERR_EMA_ALPHA] = "pos_err_ema_alpha",
+        [APP_CTRL_PARAM_POS_EMA_KP] = "pos_ema_kp",
+        [APP_CTRL_PARAM_OUTER_MODE] = "outer_mode",
+        [APP_CTRL_PARAM_HEADING_KP] = "heading_kp",
+        [APP_CTRL_PARAM_HEADING_KD] = "heading_kd",
+        [APP_CTRL_PARAM_HEADING_REF_RAD] = "heading_ref_rad",
+        [APP_CTRL_PARAM_HEADING_TORQUE_MAX_NM] = "heading_torque_max_nm",
+        [APP_CTRL_PARAM_HEADING_RESET] = "heading_reset",
+        [APP_CTRL_PARAM_CASCADE_VEL_ERR_EMA_ALPHA] = "cascade_vel_err_ema_alpha",
+        [APP_CTRL_PARAM_CASCADE_VEL_EMA_KP] = "cascade_vel_ema_kp",
+        [APP_CTRL_PARAM_VEL_REF_SLEW_TURNS_S2] = "vel_ref_slew_turns_s2",
+        [APP_CTRL_PARAM_CASCADE_VEL_ACCEL_KP] = "cascade_vel_accel_kp",
+        [APP_CTRL_PARAM_HEADING_INC] = "heading_inc",
+        [APP_CTRL_PARAM_HEADING_DEC] = "heading_dec",
     };
 
     if (param_id >= (uint16_t)APP_CTRL_PARAM_COUNT) {

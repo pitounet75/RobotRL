@@ -19,7 +19,7 @@ extern "C" {
 #define TELEMETRY_KEY_GET_CONTROL_PARAMS "GetControlParams"
 #define TELEMETRY_KEY_SET_CONTROL_PARAM  "SetControlParam"
 
-#define TELEMETRY_CTRL_PARAMS_VERSION    4u
+#define TELEMETRY_CTRL_PARAMS_VERSION    9u
 
 /** SET request / ack payload length. */
 #define TELEMETRY_SET_CONTROL_PARAM_PAYLOAD_LEN 6u

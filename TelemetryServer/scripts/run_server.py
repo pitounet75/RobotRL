@@ -9,6 +9,7 @@ import threading
 import time
 from collections import Counter
 from pathlib import Path
+from typing import Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -16,8 +17,14 @@ if str(ROOT) not in sys.path:
 
 from telemetry.balance_frame import BalanceFrame, BalanceFrameSanityLimits
 from telemetry.plot_live import LiveBalancePlotter
-from telemetry.protocol import TELEM_MSG_BALANCE_FRAME, FrameParser
+from telemetry.protocol import (
+    TELEM_MSG_BALANCE_FRAME,
+    TELEM_MSG_GET_CONTROL_PARAMS,
+    TELEM_MSG_SET_CONTROL_PARAM,
+    FrameParser,
+)
 from telemetry.recorder import CsvRecorder
+from telemetry.rpc_mux import SharedRpcClient
 from telemetry.udp_envelope import (
     DatagramSequenceTracker,
     UdpEnvelopeError,
@@ -76,6 +83,7 @@ def main() -> int:
     )
     recorder = CsvRecorder(args.record) if args.record else None
     plotter = None
+    rpc: Optional[SharedRpcClient] = None
     if args.plot:
         try:
             from telemetry.mpl_backend import backend_is_interactive, configure_matplotlib
@@ -98,6 +106,8 @@ def main() -> int:
     if args.esp32_host:
         receiver.subscribe()
         print(f"Subscribe ping sent to {args.esp32_host}:{args.esp32_port} (repeats every 5 s)")
+        if plotter is not None:
+            rpc = SharedRpcClient(receiver)
 
     print(
         f"Listening UDP {args.bind_host}:{args.bind_port} "
@@ -158,6 +168,12 @@ def main() -> int:
                 ):
                     udp_frame_count_errors += 1
                 for tf in frames:
+                    if rpc is not None and tf.message_type in (
+                        TELEM_MSG_GET_CONTROL_PARAMS,
+                        TELEM_MSG_SET_CONTROL_PARAM,
+                    ):
+                        if rpc.feed_reply(tf):
+                            continue
                     if not tf.ok:
                         stm32_errors += 1
                         if args.verbose and stm32_errors <= 3:
@@ -294,7 +310,9 @@ def main() -> int:
 
     try:
         if plotter is not None:
-            plotter.run()
+            from telemetry.app_window import run_telemetry_window
+
+            run_telemetry_window(plotter, rpc=rpc)
         else:
             while True:
                 time.sleep(1.0)

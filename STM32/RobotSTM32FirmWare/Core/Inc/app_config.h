@@ -94,7 +94,7 @@
 #define APP_LOCAL_ENCODER_COUNT      2u
 
 #ifndef WHEEL_ENCODER_CPR
-#define WHEEL_ENCODER_CPR            (2500u) /* ABZ on wheel: counts per wheel revolution */
+#define WHEEL_ENCODER_CPR            (2500u) /* ABZ on motor shaft: counts per motor revolution */
 #endif
 
 /** Exponential LPF on per-wheel vel_turns_s (0= off, 0.7-0.9 = light smoothing). */
@@ -196,19 +196,42 @@
 #define APP_CTRL_LINEAR_OUTPUT_ALPHA     0.0f
 #endif
 
-/* Cascade pitch_ref trim: OFF — osc6/7 showed more chatter (flips/s ~21) and
- * mean(cmd·v) stayed >0. Speed damping is direct torque (FF_FB_K_VEL) instead. */
+/* Cascade vel → pitch_ref:
+ *   e = v_ref - v
+ *   e_f = α·e_f + (1-α)·e     (leaky I; lower α = stronger decay)
+ *   pitch_cmd = Kp·e + Kema·e_f + Kd·v̇ - Kacc·v̇_ref
+ *   pitch_trim = -pitch_cmd
+ * cascade_vel_ki kept in snapshot but unused (prefer EMA).
+ *
+ * Checkpoint 2026-08-16 (known-good teleop velocity): keep these as boot defaults.
+ *   kp=0.0025  kd=0.002  ema_α=0.92  ema_kp=0.002
+ *   accel_kp=0.004  slew=80 turn/s²  pitch_ref_max≈15°
+ */
 #ifndef APP_CTRL_CASCADE_VEL_KP
-#define APP_CTRL_CASCADE_VEL_KP          0.0f
+#define APP_CTRL_CASCADE_VEL_KP          0.0025f
 #endif
 #ifndef APP_CTRL_CASCADE_VEL_KI
-#define APP_CTRL_CASCADE_VEL_KI          0.0f
+#define APP_CTRL_CASCADE_VEL_KI          0.0f /* legacy; unused — use cascade_vel_ema_* */
 #endif
 #ifndef APP_CTRL_CASCADE_VEL_KD
-#define APP_CTRL_CASCADE_VEL_KD          0.0f
+#define APP_CTRL_CASCADE_VEL_KD          0.0020f /* damp on filtered v̇ */
+#endif
+#ifndef APP_CTRL_CASCADE_VEL_ERR_EMA_ALPHA
+#define APP_CTRL_CASCADE_VEL_ERR_EMA_ALPHA  0.92f
+#endif
+#ifndef APP_CTRL_CASCADE_VEL_EMA_KP
+#define APP_CTRL_CASCADE_VEL_EMA_KP         0.002f
+#endif
+/** Lean FF from commanded speed ramp: θ ≈ (gear·2π·r/g)·v̇_ref ≈ 0.0048·v̇_ref. */
+#ifndef APP_CTRL_CASCADE_VEL_ACCEL_KP
+#define APP_CTRL_CASCADE_VEL_ACCEL_KP       0.004f /* rad / (turn/s²) */
 #endif
 #ifndef APP_CTRL_CASCADE_PITCH_REF_MAX_RAD
-#define APP_CTRL_CASCADE_PITCH_REF_MAX_RAD  (0.08f)
+#define APP_CTRL_CASCADE_PITCH_REF_MAX_RAD  (0.26f) /* ~15 deg */
+#endif
+/** Slew-limit |d vel_ref / dt| (motor turn/s²). 0 = off. 80 ≈ 0.5 s to 2 m/s. */
+#ifndef APP_CTRL_VEL_REF_SLEW_TURNS_S2
+#define APP_CTRL_VEL_REF_SLEW_TURNS_S2  80.0f
 #endif
 
 /* FF + PD (+ wheel-speed torque damp).
@@ -250,7 +273,8 @@
 /**
  * Motor-shaft accel P (near upright): alpha_ref = (u - c*sign(ω))/J,
  * dτ = Kα*(α_ref - α_meas), gated. J/c from free-wheel USB ident (avg L/R).
- * alpha_kp=0 at flash → baseline unchanged until tuned over telemetry.
+ * SHELVED 2026-08: keep alpha_kp=0 (see ODrive/.../BALANCE_BASELINE.md § Shelved).
+ * Code kept for a possible later revisit; prefer ODrive bidirectional anticogging.
  */
 #ifndef APP_CTRL_MOTOR_J_KG_M2
 #define APP_CTRL_MOTOR_J_KG_M2               1.12e-5f
@@ -280,12 +304,17 @@
 #endif
 
 /**
- * Station-keeping on forward axis x (wheel odometry):
- *   v_ref  = clamp( Kp*(x_ref-x) - Kd*v , ±v_max )
- *   θ_trim = clamp( Kθx*(x_ref-x) , ±θ_max )   (direct lean; cascade can stay 0)
- * Gains 0 at flash → no position hold until tuned over telemetry.
- * SET pos_reset=1 to zero x at current pose.
+ * Outer loop modes (param outer_mode, mutually exclusive):
+ *   0 = velocity: v_ref = vel_ref_turns_s (manual / teleop)
+ *   1 = position: v_ref = clamp( +(Kp·x_err + Kema·e_f) - Kd·v , ±v_max )
+ *                 then cascade_vel → pitch_ref (needs cascade_vel_kp > 0;
+ *                 pitch_trim = -PID so +v_err leans the correcting way)
+ * e_f = α·e_f + (1-α)·x_err. Direct pitch trim from x is retired (pos_pitch_* unused).
+ * SET pos_reset=1 (or enter mode 1) to zero x / e_f at current pose.
  */
+#ifndef APP_CTRL_OUTER_MODE_DEFAULT
+#define APP_CTRL_OUTER_MODE_DEFAULT          0u  /* APP_CTRL_OUTER_MODE_VEL */
+#endif
 #ifndef APP_WHEEL_RADIUS_M
 #define APP_WHEEL_RADIUS_M                   0.04f
 #endif
@@ -295,8 +324,9 @@
 #ifndef APP_CTRL_POS_KD
 #define APP_CTRL_POS_KD                      0.0f   /* (turn/s) / (turn/s) */
 #endif
+/** Legacy (unused in v6 modes); kept for snapshot layout / tools. */
 #ifndef APP_CTRL_POS_PITCH_KP
-#define APP_CTRL_POS_PITCH_KP                0.0f   /* rad / m */
+#define APP_CTRL_POS_PITCH_KP                0.0f   /* rad / m — unused */
 #endif
 #ifndef APP_CTRL_POS_X_REF_M
 #define APP_CTRL_POS_X_REF_M                 0.0f
@@ -305,7 +335,15 @@
 #define APP_CTRL_POS_V_MAX_TURNS_S           0.5f
 #endif
 #ifndef APP_CTRL_POS_PITCH_MAX_RAD
-#define APP_CTRL_POS_PITCH_MAX_RAD           0.04f
+#define APP_CTRL_POS_PITCH_MAX_RAD           0.04f  /* unused — cascade_pitch_ref_max bounds lean */
+#endif
+/** EMA on x_err: higher = longer memory (0 = e_f tracks x_err instantly). */
+#ifndef APP_CTRL_POS_ERR_EMA_ALPHA
+#define APP_CTRL_POS_ERR_EMA_ALPHA           0.99f
+#endif
+/** Position-mode gain on EMA error into v_ref ((turn/s) / m of e_f). 0 = off. */
+#ifndef APP_CTRL_POS_EMA_KP
+#define APP_CTRL_POS_EMA_KP                  0.0f
 #endif
 
 #ifndef APP_TELEMETRY_BAUD
@@ -384,6 +422,35 @@ typedef enum {
 #endif
 #ifndef APP_IMU_PITCH_GYRO_SIGN
 #define APP_IMU_PITCH_GYRO_SIGN           1.0f
+#endif
+/** Yaw rate about vertical (up) axis — used for heading hold. */
+#ifndef APP_IMU_YAW_GYRO_AXIS
+#define APP_IMU_YAW_GYRO_AXIS             0  /* same as PITCH_ACCEL_UP_AXIS */
+#endif
+#ifndef APP_IMU_YAW_GYRO_SIGN
+#define APP_IMU_YAW_GYRO_SIGN             -1.0f
+#endif
+
+/**
+ * Heading hold (ff_cascade): integrate yaw gyro → ψ, then
+ *   u_yaw = clamp( Kp·wrap(ψ_ref−ψ) − Kd·ψ̇ , ±τ_max )
+ *   τ_L = u − u_yaw,  τ_R = u + u_yaw
+ * Gains 0 → off. Defaults: Kp=0.03, Kd=0.005, τ_max=0.01 (hold on at boot).
+ * SET heading_reset=1 to zero ψ at current heading.
+ * SET heading_inc / heading_dec (rad) nudges heading_ref by ±|value| (wrap ±π).
+ * Sign of Kp flips turn direction if L/R sense is wrong.
+ */
+#ifndef APP_CTRL_HEADING_KP
+#define APP_CTRL_HEADING_KP                  0.03f  /* Nm / rad — hold on by default */
+#endif
+#ifndef APP_CTRL_HEADING_KD
+#define APP_CTRL_HEADING_KD                  0.005f /* Nm / (rad/s) */
+#endif
+#ifndef APP_CTRL_HEADING_REF_RAD
+#define APP_CTRL_HEADING_REF_RAD             0.0f
+#endif
+#ifndef APP_CTRL_HEADING_TORQUE_MAX_NM
+#define APP_CTRL_HEADING_TORQUE_MAX_NM       0.01f
 #endif
 
 #endif /* APP_CONFIG_H */

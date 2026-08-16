@@ -17,6 +17,7 @@ python scripts/run_server.py --esp32-host 192.168.x.x --plot --record logs\sessi
 ```
 
 - `--esp32-host`: sends UDP `subscribe` so ESP32 learn-remote forwards STM32 UART data to your PC.
+- With `--plot`: Qt window with **Graphs** (live) and **Gains** (edit all control params; needs `--esp32-host`).
 - Omit `--plot` for headless record only.
 - Omit `--record` for plot only.
 - `--receive-buffer` requests the UDP socket receive buffer (default 1 MiB).
@@ -24,6 +25,17 @@ python scripts/run_server.py --esp32-host 192.168.x.x --plot --record logs\sessi
   `--max-wheel-turns-s`, and `--max-strategy-id`.
 - `--verbose` separates UDP sequence gaps, envelope errors, TM CRC/length/version
   errors, STM32 error responses, decode errors, and physical-limit rejects.
+
+## Remote control (mouse)
+
+```powershell
+python scripts/remote_control.py --esp32-host 192.168.x.x
+```
+
+Mouse stick pad only (no plots): up/down → speed, left/right → heading.
+Sensitivity sliders set max speed (m/s) and max heading (deg) at pad edge.
+Release mouse / STOP → zero commands. Do not run at the same time as `--plot`
+(same UDP port 5000).
 
 ## Offline plot
 

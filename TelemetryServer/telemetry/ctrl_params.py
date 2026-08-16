@@ -51,6 +51,20 @@ PARAM_NAMES: Dict[str, int] = {
     "pos_pitch_max_rad": 41,
     "wheel_radius_m": 42,
     "pos_reset": 43,
+    "pos_err_ema_alpha": 44,
+    "pos_ema_kp": 45,
+    "outer_mode": 46,
+    "heading_kp": 47,
+    "heading_kd": 48,
+    "heading_ref_rad": 49,
+    "heading_torque_max_nm": 50,
+    "heading_reset": 51,
+    "cascade_vel_err_ema_alpha": 52,
+    "cascade_vel_ema_kp": 53,
+    "vel_ref_slew_turns_s2": 54,
+    "cascade_vel_accel_kp": 55,
+    "heading_inc": 56,
+    "heading_dec": 57,
 }
 
 NAME_BY_ID = {v: k for k, v in PARAM_NAMES.items()}
@@ -67,6 +81,12 @@ SNAPSHOT_STRUCT = struct.Struct(
     "fff"  # torque deadband + gates
     "ffffffff"  # alpha P loop (v3)
     "ffffffff"  # position hold (v4)
+    "ff"  # pos EMA (v5)
+    "f"  # outer_mode (v6)
+    "fffff"  # heading (v7)
+    "ff"  # cascade vel EMA (v8)
+    "ff"  # vel_ref slew + accel FF (v9)
+    "ff"  # heading_inc + heading_dec (v10)
 )
 
 SET_PARAM_STRUCT = struct.Struct("<Hf")
@@ -119,6 +139,20 @@ class ControlParamsSnapshot:
     pos_pitch_max_rad: float
     wheel_radius_m: float
     pos_reset: float
+    pos_err_ema_alpha: float
+    pos_ema_kp: float
+    outer_mode: float
+    heading_kp: float
+    heading_kd: float
+    heading_ref_rad: float
+    heading_torque_max_nm: float
+    heading_reset: float
+    cascade_vel_err_ema_alpha: float
+    cascade_vel_ema_kp: float
+    vel_ref_slew_turns_s2: float
+    cascade_vel_accel_kp: float
+    heading_inc: float
+    heading_dec: float
 
     def as_dict(self) -> Dict[str, float | int]:
         return {
@@ -166,6 +200,20 @@ class ControlParamsSnapshot:
             "pos_pitch_max_rad": self.pos_pitch_max_rad,
             "wheel_radius_m": self.wheel_radius_m,
             "pos_reset": self.pos_reset,
+            "pos_err_ema_alpha": self.pos_err_ema_alpha,
+            "pos_ema_kp": self.pos_ema_kp,
+            "outer_mode": self.outer_mode,
+            "heading_kp": self.heading_kp,
+            "heading_kd": self.heading_kd,
+            "heading_ref_rad": self.heading_ref_rad,
+            "heading_torque_max_nm": self.heading_torque_max_nm,
+            "heading_reset": self.heading_reset,
+            "cascade_vel_err_ema_alpha": self.cascade_vel_err_ema_alpha,
+            "cascade_vel_ema_kp": self.cascade_vel_ema_kp,
+            "vel_ref_slew_turns_s2": self.vel_ref_slew_turns_s2,
+            "cascade_vel_accel_kp": self.cascade_vel_accel_kp,
+            "heading_inc": self.heading_inc,
+            "heading_dec": self.heading_dec,
         }
 
 
@@ -181,8 +229,11 @@ def resolve_param(name_or_id: str | int) -> Tuple[int, str]:
 
 
 def decode_snapshot(payload: bytes) -> ControlParamsSnapshot:
+    if len(payload) < 8:
+        raise ValueError(f"snapshot too short: {len(payload)} B (need >= 8)")
     if len(payload) < SNAPSHOT_STRUCT.size:
-        raise ValueError(f"snapshot too short: {len(payload)} < {SNAPSHOT_STRUCT.size}")
+        # Older firmware: pad trailing floats so PC can still Refresh.
+        payload = payload + b"\x00" * (SNAPSHOT_STRUCT.size - len(payload))
     values = SNAPSHOT_STRUCT.unpack_from(payload)
     return ControlParamsSnapshot(*values)
 

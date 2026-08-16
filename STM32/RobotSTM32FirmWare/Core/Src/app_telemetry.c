@@ -13,6 +13,7 @@
 #include "control_strategy.h"
 #include "dma.h"
 #include "telemetry_balance_frame.h"
+#include "telemetry_ctrl_params.h"
 #include "usart.h"
 #include "wheel_encoder_abz.h"
 
@@ -124,6 +125,24 @@ static bool tx_queue_pop(void)
     }
 
     s_tx_tail = (uint8_t)((s_tx_tail + 1u) % APP_TELEMETRY_TX_QUEUE_DEPTH);
+    return true;
+}
+
+/** Drop newest queued BalanceFrame (never the in-flight DMA head). */
+static bool tx_queue_drop_newest_balance(void)
+{
+    if (tx_queue_empty()) {
+        return false;
+    }
+    const uint8_t newest =
+        (uint8_t)((s_tx_head + APP_TELEMETRY_TX_QUEUE_DEPTH - 1u) % APP_TELEMETRY_TX_QUEUE_DEPTH);
+    if (newest == s_tx_tail && s_tx_dma_busy) {
+        return false;
+    }
+    if (s_tx_queue[newest].message_type != TELEM_MSG_BALANCE_FRAME) {
+        return false;
+    }
+    s_tx_head = newest;
     return true;
 }
 
@@ -484,7 +503,16 @@ int app_telemetry_send_frame_immediate(uint16_t message_type, uint16_t sequence_
     frame[TELEMETRY_PAYLOAD_OFFSET + payload_len] =
         telemetry_crc8(frame, (uint16_t)(TELEMETRY_PAYLOAD_OFFSET + payload_len));
 
-    const bool queued = tx_queue_push(frame, frame_len);
+    /* RPC replies outrank BalanceFrame stream: free a slot if the TX queue is full. */
+    bool queued = tx_queue_push(frame, frame_len);
+    if (!queued &&
+        (message_type == TELEM_MSG_GET_CONTROL_PARAMS ||
+         message_type == TELEM_MSG_SET_CONTROL_PARAM)) {
+        while (!queued && tx_queue_drop_newest_balance()) {
+            g_telemetry_tx_queue_drop++;
+            queued = tx_queue_push(frame, frame_len);
+        }
+    }
     if (queued) {
         tx_kick();
     } else {

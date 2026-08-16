@@ -21,6 +21,7 @@ from telemetry.protocol import (
     TelemetryFrame,
     build_frame,
 )
+from telemetry.udp_envelope import UdpEnvelopeError, decode_udp_datagram
 
 
 class ControlParamsClient:
@@ -31,17 +32,25 @@ class ControlParamsClient:
         bind_host: str = "0.0.0.0",
         bind_port: int = 5000,
         timeout_s: float = 1.0,
+        *,
+        subscribe: bool = True,
     ) -> None:
         self.esp32_host = esp32_host
         self.esp32_port = esp32_port
         self.timeout_s = timeout_s
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            # Absorb bursts if something still points the stream at us.
+            self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 20)
+        except OSError:
+            pass
         self._sock.bind((bind_host, bind_port))
         self._sock.settimeout(0.05)
         self._parser = FrameParser()
         self._seq = 1
-        self._subscribe()
+        if subscribe:
+            self._subscribe()
 
     def close(self) -> None:
         self._sock.close()
@@ -59,13 +68,40 @@ class ControlParamsClient:
     def _send(self, frame: bytes) -> None:
         self._sock.sendto(frame, (self.esp32_host, self.esp32_port))
 
+    def drain_rx(self, max_packets: int = 256) -> int:
+        """Drop pending UDP (BalanceFrames / stale ACKs). Returns packets read."""
+        n = 0
+        self._sock.setblocking(False)
+        try:
+            while n < max_packets:
+                try:
+                    data, _addr = self._sock.recvfrom(65535)
+                except BlockingIOError:
+                    break
+                except socket.timeout:
+                    break
+                n += 1
+                for _frame in self._feed_datagram(data):
+                    pass
+        finally:
+            self._sock.settimeout(0.05)
+        return n
+
+    def _feed_datagram(self, data: bytes):
+        try:
+            datagram = decode_udp_datagram(data)
+            payload = datagram.payload
+        except UdpEnvelopeError:
+            payload = data
+        return self._parser.feed(payload)
+
     def _wait_reply(self, seq: int, msg_type: int, deadline: float) -> TelemetryFrame:
         while time.time() < deadline:
             try:
-                data, _addr = self._sock.recvfrom(4096)
+                data, _addr = self._sock.recvfrom(65535)
             except socket.timeout:
                 continue
-            for frame in self._parser.feed(data):
+            for frame in self._feed_datagram(data):
                 if frame.sequence_id == seq and frame.message_type == msg_type:
                     return frame
         raise TimeoutError(f"no reply for seq={seq} type=0x{msg_type:04x}")
@@ -108,3 +144,12 @@ class ControlParamsClient:
             ack_id, applied = decode_set_ack(frame.payload)
             return ack_id, name, applied
         raise TimeoutError(f"no reply for SetControlParam after 5 attempts ({last_err})")
+
+    def set_param_noreply(self, name_or_id: str | int, value: float) -> None:
+        """Fire-and-forget SET (for teleop UI — never blocks on ACK)."""
+        param_id, _name = resolve_param(name_or_id)
+        seq = self._next_seq()
+        self._send(
+            build_frame(seq, TELEM_MSG_SET_CONTROL_PARAM, encode_set_param(param_id, value))
+        )
+        self.drain_rx(64)

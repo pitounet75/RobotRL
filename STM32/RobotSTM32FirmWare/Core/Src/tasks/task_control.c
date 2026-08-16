@@ -146,6 +146,12 @@ void task_control(void *argument)
         odrive_motor_vel_robot(&vel_m_l, &vel_m_r, &vel_m_l_ok, &vel_m_r_ok,
                                &vel_m_l_ms, &vel_m_r_ms);
 
+        float yaw_rate = 0.0f;
+        if (APP_IMU_YAW_GYRO_AXIS >= 0 && APP_IMU_YAW_GYRO_AXIS <= 2) {
+            yaw_rate = (float)APP_IMU_YAW_GYRO_SIGN *
+                       imu.gyro_rads[APP_IMU_YAW_GYRO_AXIS];
+        }
+
         const app_ctrl_params_snapshot_t *p = app_ctrl_params_snapshot();
         control_strategy_input_t in = {
             .pitch_rad = imu.pitch_rad,
@@ -162,6 +168,7 @@ void task_control(void *argument)
             .vel_motor_r_update_ms = vel_m_r_ms,
             .pos_wheel_turns = pos_wheel,
             .pos_wheel_valid = pos_ok,
+            .yaw_rate_rads = yaw_rate,
         };
 
         control_strategy_output_t out = {0};
