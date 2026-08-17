@@ -94,7 +94,10 @@
 #define APP_LOCAL_ENCODER_COUNT      2u
 
 #ifndef WHEEL_ENCODER_CPR
-#define WHEEL_ENCODER_CPR            (2500u) /* ABZ on motor shaft: counts per motor revolution */
+/* TIM2/TIM4 use TIM_ENCODERMODE_TI1 (= x2: count both edges of CH1 only).
+ * Full x4 would be TIM_ENCODERMODE_TI12 → CPR = PPR * 4.
+ * MT6835 ABZ @ 16384 PPR → 16384 * 2 = 32768 counts/rev. */
+#define WHEEL_ENCODER_CPR            (32768u)
 #endif
 
 /** Exponential LPF on per-wheel vel_turns_s (0= off, 0.7-0.9 = light smoothing). */
@@ -203,28 +206,28 @@
  *   pitch_trim = -pitch_cmd
  * cascade_vel_ki kept in snapshot but unused (prefer EMA).
  *
- * Checkpoint 2026-08-16 (known-good teleop velocity): keep these as boot defaults.
- *   kp=0.0025  kd=0.002  ema_α=0.92  ema_kp=0.002
- *   accel_kp=0.004  slew=80 turn/s²  pitch_ref_max≈15°
+ * Checkpoint 2026-08-17 (MT6835 ABZ 16384 PPR, CPR=32768): save_params_cpr_16k.txt
+ *   kp=0.02  kd=0.0015  ema_α=0.92  ema_kp=0.02
+ *   accel_kp=0.008  slew=80 turn/s²  pitch_ref_max≈15°
  */
 #ifndef APP_CTRL_CASCADE_VEL_KP
-#define APP_CTRL_CASCADE_VEL_KP          0.0025f
+#define APP_CTRL_CASCADE_VEL_KP          0.02f
 #endif
 #ifndef APP_CTRL_CASCADE_VEL_KI
 #define APP_CTRL_CASCADE_VEL_KI          0.0f /* legacy; unused — use cascade_vel_ema_* */
 #endif
 #ifndef APP_CTRL_CASCADE_VEL_KD
-#define APP_CTRL_CASCADE_VEL_KD          0.0020f /* damp on filtered v̇ */
+#define APP_CTRL_CASCADE_VEL_KD          0.0015f /* damp on filtered v̇ */
 #endif
 #ifndef APP_CTRL_CASCADE_VEL_ERR_EMA_ALPHA
 #define APP_CTRL_CASCADE_VEL_ERR_EMA_ALPHA  0.92f
 #endif
 #ifndef APP_CTRL_CASCADE_VEL_EMA_KP
-#define APP_CTRL_CASCADE_VEL_EMA_KP         0.002f
+#define APP_CTRL_CASCADE_VEL_EMA_KP         0.02f
 #endif
 /** Lean FF from commanded speed ramp: θ ≈ (gear·2π·r/g)·v̇_ref ≈ 0.0048·v̇_ref. */
 #ifndef APP_CTRL_CASCADE_VEL_ACCEL_KP
-#define APP_CTRL_CASCADE_VEL_ACCEL_KP       0.004f /* rad / (turn/s²) */
+#define APP_CTRL_CASCADE_VEL_ACCEL_KP       0.008f /* rad / (turn/s²) */
 #endif
 #ifndef APP_CTRL_CASCADE_PITCH_REF_MAX_RAD
 #define APP_CTRL_CASCADE_PITCH_REF_MAX_RAD  (0.26f) /* ~15 deg */
