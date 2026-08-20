@@ -206,25 +206,24 @@
  *   pitch_trim = -pitch_cmd
  * cascade_vel_ki kept in snapshot but unused (prefer EMA).
  *
- * Checkpoint 2026-08-20: save_params_cpr_16k2 captured with WHEEL_ENCODER_CPR=16384
- * (vel read 2× physical). Scaled ×2 below for CPR=32768 (16384 PPR × TIM×2).
- *   kp=0.05  kd=0.0036  ema_α=0.99  ema_kp=0.02
- *   accel_kp=0.04 (v̇_ref only, not encoder)  slew=80  pitch_ref_max≈15°
+ * Checkpoint 2026-08-20 (live hold, user restore after neutral tune):
+ *   kp=0.08  kd=0.008  ema_α=0.8  ema_kp=0.03
+ *   accel_kp=0.04  slew=80  pitch_ref_max≈15°
  */
 #ifndef APP_CTRL_CASCADE_VEL_KP
-#define APP_CTRL_CASCADE_VEL_KP          0.05f
+#define APP_CTRL_CASCADE_VEL_KP          0.08f
 #endif
 #ifndef APP_CTRL_CASCADE_VEL_KI
 #define APP_CTRL_CASCADE_VEL_KI          0.0f /* legacy; unused — use cascade_vel_ema_* */
 #endif
 #ifndef APP_CTRL_CASCADE_VEL_KD
-#define APP_CTRL_CASCADE_VEL_KD          0.0036f /* damp on filtered v̇ */
+#define APP_CTRL_CASCADE_VEL_KD          0.008f /* damp on filtered v̇ */
 #endif
 #ifndef APP_CTRL_CASCADE_VEL_ERR_EMA_ALPHA
-#define APP_CTRL_CASCADE_VEL_ERR_EMA_ALPHA  0.99f
+#define APP_CTRL_CASCADE_VEL_ERR_EMA_ALPHA  0.80f
 #endif
 #ifndef APP_CTRL_CASCADE_VEL_EMA_KP
-#define APP_CTRL_CASCADE_VEL_EMA_KP         0.02f
+#define APP_CTRL_CASCADE_VEL_EMA_KP         0.03f
 #endif
 /** Lean FF from commanded speed ramp: θ ≈ (gear·2π·r/g)·v̇_ref ≈ 0.0048·v̇_ref. */
 #ifndef APP_CTRL_CASCADE_VEL_ACCEL_KP
@@ -250,10 +249,9 @@
 #ifndef APP_CTRL_FF_FB_K_RATE
 #define APP_CTRL_FF_FB_K_RATE            0.013f
 #endif
-/** u += Kv·(v_ref - v); negative Kv brakes in current sign convention.
- * Scaled ×2 vs k16k2 capture (CPR 16384→32768). */
+/** u += Kv·(v_ref - v); negative Kv brakes in current sign convention. */
 #ifndef APP_CTRL_FF_FB_K_VEL
-#define APP_CTRL_FF_FB_K_VEL             (-0.001f)
+#define APP_CTRL_FF_FB_K_VEL             (-0.0005f)
 #endif
 #ifndef APP_CTRL_FF_FB_K_VEL_MAX_NM
 #define APP_CTRL_FF_FB_K_VEL_MAX_NM      0.010f
@@ -266,10 +264,10 @@
  * Coulomb: u += sign(u)*D when near upright & slow (tunable over telemetry).
  */
 #ifndef APP_CTRL_TORQUE_DEADBAND_NM
-#define APP_CTRL_TORQUE_DEADBAND_NM      0.0017f
+#define APP_CTRL_TORQUE_DEADBAND_NM      0.004f
 #endif
 #ifndef APP_CTRL_TORQUE_DEADBAND_PITCH_MAX_RAD
-#define APP_CTRL_TORQUE_DEADBAND_PITCH_MAX_RAD  0.05f
+#define APP_CTRL_TORQUE_DEADBAND_PITCH_MAX_RAD  0.0f /* 0=user live; use 0.05 to gate near upright */
 #endif
 #ifndef APP_CTRL_TORQUE_DEADBAND_RATE_MAX_RADS
 #define APP_CTRL_TORQUE_DEADBAND_RATE_MAX_RADS  0.30f
