@@ -261,16 +261,43 @@
 #define APP_CTRL_FF_OUTPUT_ALPHA         0.50f
 #endif
 /**
+ * hypothesis_lab build: experimental friction / debug (see docs/HYPOTHESIS_LAB.md).
+ * Set 0 before merging back to production tune branches.
+ */
+#ifndef APP_HYPOTHESIS_LAB
+#define APP_HYPOTHESIS_LAB               1
+#endif
+
+/**
  * Coulomb: u += sign(u)*D when near upright & slow (tunable over telemetry).
+ * friction_mode=1 replaces this with static/kinetic two-level comp (v11).
  */
 #ifndef APP_CTRL_TORQUE_DEADBAND_NM
 #define APP_CTRL_TORQUE_DEADBAND_NM      0.004f
 #endif
 #ifndef APP_CTRL_TORQUE_DEADBAND_PITCH_MAX_RAD
-#define APP_CTRL_TORQUE_DEADBAND_PITCH_MAX_RAD  0.0f /* 0=user live; use 0.05 to gate near upright */
+#if APP_HYPOTHESIS_LAB
+#define APP_CTRL_TORQUE_DEADBAND_PITCH_MAX_RAD  0.05f /* gate friction near upright */
+#else
+#define APP_CTRL_TORQUE_DEADBAND_PITCH_MAX_RAD  0.0f /* 0=user live; use 0.05 to gate */
+#endif
 #endif
 #ifndef APP_CTRL_TORQUE_DEADBAND_RATE_MAX_RADS
 #define APP_CTRL_TORQUE_DEADBAND_RATE_MAX_RADS  0.30f
+#endif
+
+/** friction_mode: 0=legacy deadband, 1=static (|ω|≤ε) + kinetic (|ω|>ε). */
+#ifndef APP_CTRL_FRICTION_MODE
+#define APP_CTRL_FRICTION_MODE           (APP_HYPOTHESIS_LAB ? 1 : 0)
+#endif
+#ifndef APP_CTRL_FRICTION_STATIC_NM
+#define APP_CTRL_FRICTION_STATIC_NM      0.0045f
+#endif
+#ifndef APP_CTRL_FRICTION_KINETIC_NM
+#define APP_CTRL_FRICTION_KINETIC_NM     0.003f
+#endif
+#ifndef APP_CTRL_FRICTION_VEL_EPS_TURNS_S
+#define APP_CTRL_FRICTION_VEL_EPS_TURNS_S  0.05f
 #endif
 
 /**

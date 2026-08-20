@@ -12,7 +12,7 @@
 extern "C" {
 #endif
 
-#define APP_CTRL_PARAMS_SNAPSHOT_VERSION 10u
+#define APP_CTRL_PARAMS_SNAPSHOT_VERSION 11u
 
 /** Outer loop: 0 = velocity (vel_ref), 1 = position (x → v_ref). Mutually exclusive. */
 #define APP_CTRL_OUTER_MODE_VEL 0u
@@ -77,6 +77,10 @@ typedef enum {
     APP_CTRL_PARAM_CASCADE_VEL_ACCEL_KP,
     APP_CTRL_PARAM_HEADING_INC,
     APP_CTRL_PARAM_HEADING_DEC,
+    APP_CTRL_PARAM_FRICTION_MODE,
+    APP_CTRL_PARAM_FRICTION_STATIC_NM,
+    APP_CTRL_PARAM_FRICTION_KINETIC_NM,
+    APP_CTRL_PARAM_FRICTION_VEL_EPS_TURNS_S,
     APP_CTRL_PARAM_COUNT
 } app_ctrl_param_id_t;
 
@@ -141,6 +145,10 @@ typedef struct __attribute__((packed)) {
     float cascade_vel_accel_kp;      /* lean FF on v̇_ref (v9) */
     float heading_inc;               /* GET 0; SET += |value| to heading_ref (v10) */
     float heading_dec;               /* GET 0; SET -= |value| to heading_ref (v10) */
+    float friction_mode;             /* 0=legacy deadband, 1=two-level (v11) */
+    float friction_static_nm;        /* |ω|≤ε: +sign(u)*static */
+    float friction_kinetic_nm;       /* |ω|>ε: +sign(ω)*kinetic */
+    float friction_vel_eps_turns_s;  /* static/kinetic boundary (wheel ω) */
 } app_ctrl_params_snapshot_t;
 
 void app_ctrl_params_init(void);

@@ -65,6 +65,10 @@ PARAM_NAMES: Dict[str, int] = {
     "cascade_vel_accel_kp": 55,
     "heading_inc": 56,
     "heading_dec": 57,
+    "friction_mode": 58,
+    "friction_static_nm": 59,
+    "friction_kinetic_nm": 60,
+    "friction_vel_eps_turns_s": 61,
 }
 
 NAME_BY_ID = {v: k for k, v in PARAM_NAMES.items()}
@@ -87,6 +91,7 @@ SNAPSHOT_STRUCT = struct.Struct(
     "ff"  # cascade vel EMA (v8)
     "ff"  # vel_ref slew + accel FF (v9)
     "ff"  # heading_inc + heading_dec (v10)
+    "ffff"  # friction two-level (v11)
 )
 
 SET_PARAM_STRUCT = struct.Struct("<Hf")
@@ -153,6 +158,10 @@ class ControlParamsSnapshot:
     cascade_vel_accel_kp: float
     heading_inc: float
     heading_dec: float
+    friction_mode: float
+    friction_static_nm: float
+    friction_kinetic_nm: float
+    friction_vel_eps_turns_s: float
 
     def as_dict(self) -> Dict[str, float | int]:
         return {
@@ -214,6 +223,10 @@ class ControlParamsSnapshot:
             "cascade_vel_accel_kp": self.cascade_vel_accel_kp,
             "heading_inc": self.heading_inc,
             "heading_dec": self.heading_dec,
+            "friction_mode": self.friction_mode,
+            "friction_static_nm": self.friction_static_nm,
+            "friction_kinetic_nm": self.friction_kinetic_nm,
+            "friction_vel_eps_turns_s": self.friction_vel_eps_turns_s,
         }
 
 

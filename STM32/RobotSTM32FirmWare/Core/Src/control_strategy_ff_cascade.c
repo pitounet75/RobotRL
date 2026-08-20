@@ -11,7 +11,7 @@
  *     pitch_trim = -(Kp·e + Kema·e_f + Kd·v̇)
  *   u_ff          = -K_ff * sin(pitch)
  *   u_fb          = Kθ*(pitch_ref_eff - pitch) - Kω*pitch_rate - Kv*(v - v_ref)
- *   u             = low_pass(u_ff + u_fb [+ Coulomb])
+ *   u             = low_pass(u_ff + u_fb [+ friction comp])
  *   α_ref         = (u - c*sign(ω)) / J
  *   Δτ_L/R        = Kα*(α_ref - α_meas)   (gated; ODrive ω)
  *   u_yaw         = clamp(Kp·wrap(ψ_ref−ψ) − Kd·ψ̇, ±τ_yaw)   (ψ from ∫yaw_rate)
@@ -68,6 +68,8 @@ volatile float g_ctrl_pos_pitch_trim_rad;
 volatile float g_ctrl_pos_err_ema_m;
 volatile float g_ctrl_heading_rad;
 volatile float g_ctrl_heading_torque_nm;
+volatile float g_ctrl_friction_comp_nm;
+volatile uint8_t g_ctrl_friction_regime; /* 0=off, 1=static, 2=kinetic */
 
 static float clampf(float x, float lo, float hi)
 {
@@ -89,6 +91,48 @@ static float wrap_pi(float a)
 		a += (float)(2.0 * M_PI);
 	}
 	return a;
+}
+
+static bool friction_gates_ok(const app_ctrl_params_snapshot_t *p, float pitch_rad, float pitch_rate_rads)
+{
+	if (p->torque_deadband_rate_max_rads > 0.0f &&
+	    fabsf(pitch_rate_rads) > p->torque_deadband_rate_max_rads) {
+		return false;
+	}
+	if (p->torque_deadband_pitch_max_rad > 0.0f &&
+	    fabsf(pitch_rad) > p->torque_deadband_pitch_max_rad) {
+		return false;
+	}
+	if (p->torque_deadband_pitch_max_rad <= 0.0f && fabsf(pitch_rad) > 0.0f) {
+		return false;
+	}
+	return true;
+}
+
+static float friction_comp_nm(float omega_turns_s, float u_nm, const app_ctrl_params_snapshot_t *p,
+                              uint8_t *regime_out)
+{
+	*regime_out = 0;
+	if (p->friction_mode >= 0.5f) {
+		const float eps = p->friction_vel_eps_turns_s;
+		if (fabsf(omega_turns_s) <= eps) {
+			if (fabsf(u_nm) < 1.0e-5f) {
+				return 0.0f;
+			}
+			*regime_out = 1;
+			return copysignf(p->friction_static_nm, u_nm);
+		}
+		if (p->friction_kinetic_nm > 0.0f) {
+			*regime_out = 2;
+			return copysignf(p->friction_kinetic_nm, omega_turns_s);
+		}
+		return 0.0f;
+	}
+	if (p->torque_deadband_nm > 0.0f && fabsf(u_nm) > 1.0e-5f) {
+		*regime_out = 1;
+		return copysignf(p->torque_deadband_nm, u_nm);
+	}
+	return 0.0f;
 }
 
 static float grav_ff_sin(float pitch_rad)
@@ -196,6 +240,8 @@ void control_strategy_ff_cascade_reset(void)
 	g_ctrl_pos_err_ema_m = 0.0f;
 	g_ctrl_heading_rad = 0.0f;
 	g_ctrl_heading_torque_nm = 0.0f;
+	g_ctrl_friction_comp_nm = 0.0f;
+	g_ctrl_friction_regime = 0;
 }
 
 void control_strategy_ff_cascade_update(const control_strategy_input_t *in,
@@ -288,7 +334,7 @@ void control_strategy_ff_cascade_update(const control_strategy_input_t *in,
 
 	/*
 	 * Cascade: P + leaky I (EMA) + D on v̇ − accel FF on v̇_ref.
-	 * pitch_trim = -(…)  — same plant sign as former -PID.
+	 * pitch_trim = -(…)  — same plant sign as former -PID (known-good hold).
 	 */
 	const float vel_err = vel_ref - in->vel_wheel_turns_s;
 	{
@@ -318,11 +364,15 @@ void control_strategy_ff_cascade_update(const control_strategy_input_t *in,
 	                 + u_vel;
 
 	float u_raw = u_ff + u_fb;
-	if (p->torque_deadband_nm > 0.0f &&
-	    fabsf(u_raw) > 1.0e-5f &&
-	    fabsf(in->pitch_rad) <= p->torque_deadband_pitch_max_rad &&
-	    fabsf(in->pitch_rate_rads) <= p->torque_deadband_rate_max_rads) {
-		u_raw += copysignf(p->torque_deadband_nm, u_raw);
+	if (friction_gates_ok(p, in->pitch_rad, in->pitch_rate_rads)) {
+		uint8_t regime = 0;
+		const float comp = friction_comp_nm(in->vel_wheel_turns_s, u_raw, p, &regime);
+		u_raw += comp;
+		g_ctrl_friction_comp_nm = comp;
+		g_ctrl_friction_regime = regime;
+	} else {
+		g_ctrl_friction_comp_nm = 0.0f;
+		g_ctrl_friction_regime = 0;
 	}
 	const float alpha_out = p->ff_output_alpha;
 	const float u = alpha_out * s_u_prev + (1.0f - alpha_out) * u_raw;

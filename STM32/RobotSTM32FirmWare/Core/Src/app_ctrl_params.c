@@ -94,6 +94,10 @@ static void load_defaults(void)
     s_params.cascade_vel_accel_kp = APP_CTRL_CASCADE_VEL_ACCEL_KP;
     s_params.heading_inc = 0.0f;
     s_params.heading_dec = 0.0f;
+    s_params.friction_mode = (float)APP_CTRL_FRICTION_MODE;
+    s_params.friction_static_nm = APP_CTRL_FRICTION_STATIC_NM;
+    s_params.friction_kinetic_nm = APP_CTRL_FRICTION_KINETIC_NM;
+    s_params.friction_vel_eps_turns_s = APP_CTRL_FRICTION_VEL_EPS_TURNS_S;
     s_pos_reset_req = false;
     s_heading_reset_req = false;
 }
@@ -639,6 +643,30 @@ bool app_ctrl_params_set(uint16_t param_id, float value, float *out_value)
         s_params.heading_dec = 0.0f;
         break;
     }
+    case APP_CTRL_PARAM_FRICTION_MODE:
+        if (value < 0.0f || value > 1.0f) {
+            return false;
+        }
+        s_params.friction_mode = value;
+        break;
+    case APP_CTRL_PARAM_FRICTION_STATIC_NM:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.friction_static_nm = value;
+        break;
+    case APP_CTRL_PARAM_FRICTION_KINETIC_NM:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.friction_kinetic_nm = value;
+        break;
+    case APP_CTRL_PARAM_FRICTION_VEL_EPS_TURNS_S:
+        if (value <= 0.0f) {
+            return false;
+        }
+        s_params.friction_vel_eps_turns_s = value;
+        break;
     default:
         return false;
     }
@@ -717,6 +745,10 @@ const char *app_ctrl_params_name(uint16_t param_id)
         [APP_CTRL_PARAM_CASCADE_VEL_ACCEL_KP] = "cascade_vel_accel_kp",
         [APP_CTRL_PARAM_HEADING_INC] = "heading_inc",
         [APP_CTRL_PARAM_HEADING_DEC] = "heading_dec",
+        [APP_CTRL_PARAM_FRICTION_MODE] = "friction_mode",
+        [APP_CTRL_PARAM_FRICTION_STATIC_NM] = "friction_static_nm",
+        [APP_CTRL_PARAM_FRICTION_KINETIC_NM] = "friction_kinetic_nm",
+        [APP_CTRL_PARAM_FRICTION_VEL_EPS_TURNS_S] = "friction_vel_eps_turns_s",
     };
 
     if (param_id >= (uint16_t)APP_CTRL_PARAM_COUNT) {

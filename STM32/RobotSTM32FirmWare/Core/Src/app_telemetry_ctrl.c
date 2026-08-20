@@ -120,6 +120,10 @@ bool app_telemetry_ctrl_register(telemetry_t *tel)
         {"cascade_vel_accel_kp", TELEMETRY_TYPE_FLOAT},
         {"heading_inc", TELEMETRY_TYPE_FLOAT},
         {"heading_dec", TELEMETRY_TYPE_FLOAT},
+        {"friction_mode", TELEMETRY_TYPE_FLOAT},
+        {"friction_static_nm", TELEMETRY_TYPE_FLOAT},
+        {"friction_kinetic_nm", TELEMETRY_TYPE_FLOAT},
+        {"friction_vel_eps_turns_s", TELEMETRY_TYPE_FLOAT},
     };
 
     static const telemetry_field_def_t set_request_fields[] = {
