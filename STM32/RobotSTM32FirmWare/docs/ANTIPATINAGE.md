@@ -1,7 +1,7 @@
 # Antipatinage — détection roue en l'air et mode de repli
 
 Spécification **figée** pour le firmware STM32 (`control_strategy_ff_cascade`, `task_control`).  
-**Statut :** design validé, **non implémenté** (2026-08).
+**Statut :** **implémenté** v1 dans `wheel_contact.c` + `ff_cascade` (2026-08).
 
 Voir aussi : [CONTROL_ARCHITECTURE.md](CONTROL_ARCHITECTURE.md), [BALANCE_BASELINE.md](../../../ODrive/OdriveTool/Commands/BALANCE_BASELINE.md), `control_strategy_ff_cascade.c`, `app_config.h`.
 

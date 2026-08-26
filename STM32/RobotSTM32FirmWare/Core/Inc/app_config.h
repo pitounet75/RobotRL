@@ -348,6 +348,81 @@
 #ifndef APP_WHEEL_RADIUS_M
 #define APP_WHEEL_RADIUS_M                   0.04f
 #endif
+/** Motor:wheel gear (same as plant note: τ_w/τ_m = 16/3). */
+#ifndef APP_WHEEL_GEAR_MOTOR
+#define APP_WHEEL_GEAR_MOTOR                 3u
+#endif
+#ifndef APP_WHEEL_GEAR_WHEEL
+#define APP_WHEEL_GEAR_WHEEL                 16u
+#endif
+
+/**
+ * Antipatinage (wheel lift): see docs/ANTIPATINAGE.md.
+ * APP_CTRL_ANTIPATINAGE_ENABLE=0 disables detection (pass-through).
+ */
+#ifndef APP_CTRL_ANTIPATINAGE_ENABLE
+#define APP_CTRL_ANTIPATINAGE_ENABLE         1
+#endif
+#ifndef APP_ANTIPAT_TRACK_WIDTH_M
+#define APP_ANTIPAT_TRACK_WIDTH_M            0.24f  /* measure chassis; tune */
+#endif
+#ifndef APP_ANTIPAT_TAU_MIN_NM
+#define APP_ANTIPAT_TAU_MIN_NM               0.001f
+#endif
+#ifndef APP_ANTIPAT_ETA_ON
+#define APP_ANTIPAT_ETA_ON                   200.0f /* rad/s^2 per Nm; tune bench */
+#endif
+#ifndef APP_ANTIPAT_ETA_OFF
+#define APP_ANTIPAT_ETA_OFF                  120.0f
+#endif
+#ifndef APP_ANTIPAT_K_DOM
+#define APP_ANTIPAT_K_DOM                    1.4f
+#endif
+#ifndef APP_ANTIPAT_EPS_ABS_RADS
+#define APP_ANTIPAT_EPS_ABS_RADS             0.08f  /* |psi_dot - psi_kin| */
+#endif
+#ifndef APP_ANTIPAT_K_REL
+#define APP_ANTIPAT_K_REL                    0.35f
+#endif
+#ifndef APP_ANTIPAT_K_OFF
+#define APP_ANTIPAT_K_OFF                    0.65f
+#endif
+#ifndef APP_ANTIPAT_T_ON_MS
+#define APP_ANTIPAT_T_ON_MS                  60u
+#endif
+#ifndef APP_ANTIPAT_T_OFF_MS
+#define APP_ANTIPAT_T_OFF_MS                 100u
+#endif
+#ifndef APP_ANTIPAT_T_ON_BOTH_MS
+#define APP_ANTIPAT_T_ON_BOTH_MS             15u
+#endif
+#ifndef APP_ANTIPAT_T_OFF_BOTH_MS
+#define APP_ANTIPAT_T_OFF_BOTH_MS            100u
+#endif
+#ifndef APP_ANTIPAT_T_MA_MS
+#define APP_ANTIPAT_T_MA_MS                  100u
+#endif
+#ifndef APP_ANTIPAT_T_RECOVER_MS
+#define APP_ANTIPAT_T_RECOVER_MS             150u
+#endif
+#ifndef APP_ANTIPAT_U_MIN_NM
+#define APP_ANTIPAT_U_MIN_NM                 0.006f
+#endif
+#ifndef APP_ANTIPAT_PITCH_RATE_MIN_RADS
+#define APP_ANTIPAT_PITCH_RATE_MIN_RADS      0.08f
+#endif
+#ifndef APP_ANTIPAT_K_SYNC
+#define APP_ANTIPAT_K_SYNC                   0.0025f /* Nm/(turn/s) */
+#endif
+#ifndef APP_ANTIPAT_TAU_SYNC_MAX_NM
+#define APP_ANTIPAT_TAU_SYNC_MAX_NM          0.015f
+#endif
+#ifndef APP_ANTIPAT_K_BOTH_V
+#define APP_ANTIPAT_K_BOTH_V                 0.003f
+#endif
+#ifndef APP_ANTIPAT_TAU_BOTH_MAX_NM
+#define APP_ANTIPAT_TAU_BOTH_MAX_NM          0.012f
+#endif
 #ifndef APP_CTRL_POS_KP
 #define APP_CTRL_POS_KP                      0.0f   /* (turn/s) / m */
 #endif

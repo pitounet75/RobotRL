@@ -22,6 +22,7 @@
 
 #include "app_config.h"
 #include "app_ctrl_params.h"
+#include "wheel_contact.h"
 
 #include <math.h>
 #include <stdbool.h>
@@ -242,6 +243,7 @@ void control_strategy_ff_cascade_reset(void)
 	g_ctrl_heading_torque_nm = 0.0f;
 	g_ctrl_friction_comp_nm = 0.0f;
 	g_ctrl_friction_regime = 0;
+	wheel_contact_reset();
 }
 
 void control_strategy_ff_cascade_update(const control_strategy_input_t *in,
@@ -252,6 +254,24 @@ void control_strategy_ff_cascade_update(const control_strategy_input_t *in,
 	}
 
 	const app_ctrl_params_snapshot_t *p = app_ctrl_params_snapshot();
+	const wheel_contact_output_t *wcp = wheel_contact_last_output();
+
+	if (wcp->reanchor_pos && in->pos_wheel_valid) {
+		s_pos_offset_turns = wcp->pos_offset_turns_new;
+		s_pos_offset_valid = true;
+		s_x_err_ema = 0.0f;
+	}
+	if (wcp->reset_vel_integrators) {
+		s_vel_err_ema = 0.0f;
+		s_vel_dot_valid = false;
+		s_vel_prev_turns = wcp->vel_wheel_touch_turns_s;
+	}
+	if (wcp->reset_u_lpf) {
+		s_u_prev = wcp->u_lpf_seed_nm;
+	}
+
+	const bool integrator_trust = wcp->integrator_trust;
+	const float recover_ramp = wcp->recover_ramp;
 
 	/* --- Outer loop: velocity mode XOR position mode (x → bounded v_ref) --- */
 	float vel_ref = 0.0f;
@@ -269,7 +289,7 @@ void control_strategy_ff_cascade_update(const control_strategy_input_t *in,
 	}
 
 	if (pos_mode) {
-		if (in->pos_wheel_valid && s_pos_offset_valid && p->wheel_radius_m > 0.0f) {
+		if (integrator_trust && in->pos_wheel_valid && s_pos_offset_valid && p->wheel_radius_m > 0.0f) {
 			const float turns = in->pos_wheel_turns - s_pos_offset_turns;
 			x_m = turns * k_two_pi * p->wheel_radius_m;
 			const float x_err = p->pos_x_ref_m - x_m;
@@ -278,10 +298,12 @@ void control_strategy_ff_cascade_update(const control_strategy_input_t *in,
 			x_err_ema = a * s_x_err_ema + (1.0f - a) * x_err;
 			s_x_err_ema = x_err_ema;
 
-			/* Logical v_ref; cascade applies plant sign (negate PID → pitch). */
 			vel_ref = (p->pos_kp * x_err + p->pos_ema_kp * x_err_ema)
 			        - p->pos_kd * in->vel_wheel_turns_s;
 			vel_ref = clampf(vel_ref, -p->pos_v_max_turns_s, p->pos_v_max_turns_s);
+		} else if (!integrator_trust) {
+			x_m = wcp->x_m_frozen_m;
+			x_err_ema = s_x_err_ema;
 		}
 		/* else: hold v_ref=0 until odometry is valid */
 	} else {
@@ -290,7 +312,7 @@ void control_strategy_ff_cascade_update(const control_strategy_input_t *in,
 
 	/* Slew-limit teleop/pos v_ref so slider steps don't bang the lean loop. */
 	float vel_ref_dot = 0.0f;
-	{
+	if (integrator_trust) {
 		const float slew = p->vel_ref_slew_turns_s2;
 		if (slew > 0.0f && in->dt_s > 1.0e-6f) {
 			const float max_step = slew * in->dt_s;
@@ -311,6 +333,8 @@ void control_strategy_ff_cascade_update(const control_strategy_input_t *in,
 		vel_ref = s_vel_ref_slew;
 		s_vel_ref_prev = vel_ref;
 		s_vel_ref_prev_valid = true;
+	} else {
+		vel_ref = s_vel_ref_slew * recover_ramp;
 	}
 
 	g_ctrl_pos_x_m = x_m;
@@ -319,7 +343,7 @@ void control_strategy_ff_cascade_update(const control_strategy_input_t *in,
 
 	/* Filtered wheel accel for cascade D (pid uses measurement_dot, not d(error)/dt). */
 	float vel_dot = 0.0f;
-	if (in->dt_s > 1.0e-6f) {
+	if (integrator_trust && in->dt_s > 1.0e-6f) {
 		const float raw_dot = (in->vel_wheel_turns_s - s_vel_prev_turns) / in->dt_s;
 		if (s_vel_dot_valid) {
 			s_vel_dot_turns_s2 = k_vel_dot_lpf * s_vel_dot_turns_s2
@@ -332,12 +356,8 @@ void control_strategy_ff_cascade_update(const control_strategy_input_t *in,
 		s_vel_prev_turns = in->vel_wheel_turns_s;
 	}
 
-	/*
-	 * Cascade: P + leaky I (EMA) + D on v̇ − accel FF on v̇_ref.
-	 * pitch_trim = -(…)  — same plant sign as former -PID (known-good hold).
-	 */
 	const float vel_err = vel_ref - in->vel_wheel_turns_s;
-	{
+	if (integrator_trust) {
 		const float a = clampf(p->cascade_vel_err_ema_alpha, 0.0f, 0.9999f);
 		s_vel_err_ema = a * s_vel_err_ema + (1.0f - a) * vel_err;
 	}
@@ -346,7 +366,10 @@ void control_strategy_ff_cascade_update(const control_strategy_input_t *in,
 	                + p->cascade_vel_kd * vel_dot
 	                - p->cascade_vel_accel_kp * vel_ref_dot;
 	pitch_cmd = clampf(pitch_cmd, -p->cascade_pitch_ref_max_rad, p->cascade_pitch_ref_max_rad);
-	const float pitch_trim = -pitch_cmd;
+	float pitch_trim = -pitch_cmd;
+	if (!integrator_trust) {
+		pitch_trim = wcp->pitch_trim_frozen_rad * (1.0f - recover_ramp) + pitch_trim * recover_ramp;
+	}
 	g_ctrl_pos_pitch_trim_rad = pitch_trim;
 
 	const float pitch_ref_eff = clampf(in->pitch_ref_rad + pitch_trim,
@@ -375,8 +398,10 @@ void control_strategy_ff_cascade_update(const control_strategy_input_t *in,
 		g_ctrl_friction_regime = 0;
 	}
 	const float alpha_out = p->ff_output_alpha;
-	const float u = alpha_out * s_u_prev + (1.0f - alpha_out) * u_raw;
-	s_u_prev = u;
+	float u = alpha_out * s_u_prev + (1.0f - alpha_out) * u_raw;
+	if (integrator_trust) {
+		s_u_prev = u;
+	}
 
 	const float alpha_l = alpha_est_update(&s_alpha_l,
 	                                       in->vel_motor_l_valid,
@@ -391,11 +416,12 @@ void control_strategy_ff_cascade_update(const control_strategy_input_t *in,
 
 	float dtau_l = 0.0f;
 	float dtau_r = 0.0f;
-	if (in->vel_motor_l_valid) {
+	const bool both_air_like = wcp->both_active || (wcp->mode == WC_MODE_BOTH_AIR);
+	if (!both_air_like && in->vel_motor_l_valid) {
 		dtau_l = alpha_torque_correction(u, in->vel_motor_l_turns_s, alpha_l,
 		                                 p, in->pitch_rad, in->pitch_rate_rads);
 	}
-	if (in->vel_motor_r_valid) {
+	if (!both_air_like && in->vel_motor_r_valid) {
 		dtau_r = alpha_torque_correction(u, in->vel_motor_r_turns_s, alpha_r,
 		                                 p, in->pitch_rad, in->pitch_rate_rads);
 	}
@@ -412,7 +438,7 @@ void control_strategy_ff_cascade_update(const control_strategy_input_t *in,
 	}
 	const bool heading_on = (p->heading_kp != 0.0f || p->heading_kd > 0.0f) &&
 	                        p->heading_torque_max_nm > 0.0f;
-	if (heading_on) {
+	if (heading_on && wcp->mode != WC_MODE_BOTH_AIR) {
 		const float herr = wrap_pi(p->heading_ref_rad - s_heading_rad);
 		u_yaw = p->heading_kp * herr - p->heading_kd * in->yaw_rate_rads;
 		u_yaw = clampf(u_yaw, -p->heading_torque_max_nm, p->heading_torque_max_nm);
@@ -420,8 +446,53 @@ void control_strategy_ff_cascade_update(const control_strategy_input_t *in,
 	g_ctrl_heading_rad = s_heading_rad;
 	g_ctrl_heading_torque_nm = u_yaw;
 
-	const float cmd_l = clampf(u + dtau_l - u_yaw, -p->cmd_max_torque_nm, p->cmd_max_torque_nm);
-	const float cmd_r = clampf(u + dtau_r + u_yaw, -p->cmd_max_torque_nm, p->cmd_max_torque_nm);
+	const float tau_l_pre = u + dtau_l - u_yaw;
+	const float tau_r_pre = u + dtau_r + u_yaw;
+
+	wheel_contact_input_t wci = {
+		.dt_s = in->dt_s,
+		.u = u,
+		.pitch_rad = in->pitch_rad,
+		.pitch_rate_rads = in->pitch_rate_rads,
+		.pitch_ref_rad = in->pitch_ref_rad,
+		.pitch_trim_rad = pitch_trim,
+		.vel_motor_l_turns_s = in->vel_motor_l_turns_s,
+		.vel_motor_r_turns_s = in->vel_motor_r_turns_s,
+		.vel_motor_l_valid = in->vel_motor_l_valid,
+		.vel_motor_r_valid = in->vel_motor_r_valid,
+		.alpha_l_rads2 = alpha_l,
+		.alpha_r_rads2 = alpha_r,
+		.yaw_rate_rads = in->yaw_rate_rads,
+		.tau_l_pre_nm = tau_l_pre,
+		.tau_r_pre_nm = tau_r_pre,
+		.vel_wheel_turns_s = in->vel_wheel_turns_s,
+		.pos_wheel_turns = in->pos_wheel_turns,
+		.x_m = x_m,
+		.pos_wheel_valid = in->pos_wheel_valid,
+	};
+	wheel_contact_output_t wco;
+	wheel_contact_update(&wci, &wco);
+
+	const float u_eff = wco.u_cmd_nm;
+	float cmd_l;
+	float cmd_r;
+
+	if (wco.both_active) {
+		cmd_l = wco.tau_both_l_nm;
+		cmd_r = wco.tau_both_r_nm;
+	} else if (wco.mode == WC_MODE_SYNC_L) {
+		cmd_l = u_eff + dtau_l + wco.tau_sync_l_nm;
+		cmd_r = u_eff + dtau_r + u_yaw;
+	} else if (wco.mode == WC_MODE_SYNC_R) {
+		cmd_l = u_eff + dtau_l - u_yaw;
+		cmd_r = u_eff + dtau_r + wco.tau_sync_r_nm;
+	} else {
+		cmd_l = u_eff + dtau_l - u_yaw;
+		cmd_r = u_eff + dtau_r + u_yaw;
+	}
+
+	cmd_l = clampf(cmd_l, -p->cmd_max_torque_nm, p->cmd_max_torque_nm);
+	cmd_r = clampf(cmd_r, -p->cmd_max_torque_nm, p->cmd_max_torque_nm);
 	const float cmd = 0.5f * (cmd_l + cmd_r);
 
 	out->u_vel = u_vel;

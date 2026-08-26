@@ -293,7 +293,7 @@ Gains in `app_config.h`. Failsafe: IMU invalid or `|pitch| > APP_CTRL_PITCH_FAIL
 - [x] Motor TX @ 500 Hz, mutex TX queue
 - [x] Estop on IMU fault / pitch limit
 - [ ] Bias task wired to control
-- [ ] **Antipatinage** — lift detect, SYNC unilatéral, BOTH_AIR + `v_good` lookback ([ANTIPATINAGE.md](ANTIPATINAGE.md))
+- [x] **Antipatinage** — lift detect, SYNC / BOTH_AIR / RECOVERY ([ANTIPATINAGE.md](ANTIPATINAGE.md))
 - [ ] Jetson / telemetry protocols
 - [ ] `configENABLE_FPU` = 1 + ARM_CM7 FreeRTOS port (optional hardening)
 

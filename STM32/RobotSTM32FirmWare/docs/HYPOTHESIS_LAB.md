@@ -4,6 +4,14 @@ Experimental control features on branch `hypothesis_lab`. Production tune stays 
 
 Build flag: `APP_HYPOTHESIS_LAB=1` in `app_config.h` (default on this branch).
 
+## Antipatinage (wheel lift)
+
+Spec: [ANTIPATINAGE.md](../RobotSTM32FirmWare/docs/ANTIPATINAGE.md). Enabled: `APP_CTRL_ANTIPATINAGE_ENABLE=1` in `app_config.h`.
+
+Tune via `APP_ANTIPAT_*` compile-time defaults (track width, η thresholds, debounce ms, `K_sync`, `K_both_v`).
+
+Live Expressions: `g_wc_mode`, `g_wc_eta_l/r`, `g_wc_e_psi`, `g_wc_v_good_l/r`, `g_wc_integrator_trust`, `g_wc_recover_ramp`.
+
 ## Snapshot v11 — two-level wheel friction
 
 Replaces the legacy single deadband (`torque_deadband_nm`) when `friction_mode=1`:

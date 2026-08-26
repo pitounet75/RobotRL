@@ -5,6 +5,7 @@
 #include "control_strategy.h"
 
 #include "app_config.h"
+#include "wheel_contact.h"
 #include "app_ctrl_params.h"
 
 #include <stddef.h>
@@ -62,6 +63,7 @@ static bool strategy_id_valid(control_strategy_id_t id)
 void control_strategy_init(void)
 {
     app_ctrl_params_init();
+    wheel_contact_init();
 
     for (unsigned i = 0u; i < (unsigned)CTRL_STRATEGY_COUNT; i++) {
         if (s_ops[i].reset != NULL) {
