@@ -250,7 +250,7 @@ const wheel_contact_output_t *wheel_contact_last_output(void)
     return &s_out;
 }
 
-void wheel_contact_update(const wheel_contact_input_t *in, wheel_contact_output_t *out);
+void wheel_contact_update(const wheel_contact_input_t *in, wheel_contact_output_t *out)
 {
     if (in == NULL || out == NULL) {
         return;
