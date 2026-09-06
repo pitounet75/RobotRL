@@ -12,7 +12,7 @@ Tune via `APP_ANTIPAT_*` compile-time defaults (track width, η thresholds, debo
 
 Live Expressions: `g_wc_mode`, `g_wc_eta_l/r`, `g_wc_e_psi`, `g_wc_v_good_l/r`, `g_wc_integrator_trust`, `g_wc_recover_ramp`.
 
-## Snapshot v11 — two-level wheel friction
+## Snapshot v12 — two-level wheel friction
 
 Replaces the legacy single deadband (`torque_deadband_nm`) when `friction_mode=1`:
 

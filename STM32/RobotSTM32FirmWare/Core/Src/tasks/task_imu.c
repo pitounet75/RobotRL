@@ -16,6 +16,8 @@
 
 #include "app_drivers.h"
 
+#include "app_imu_offset.h"
+
 #include "app_samples.h"
 
 #include "imu_async.h"
@@ -91,61 +93,43 @@ static void imu_read_done(void *user_ctx, const imu_sample_t *sample, bool ok)
 
 
 static void publish_fused_sample(const imu_sample_t *raw)
-
 {
-
     imu_fusion_out_t fused;
-
+    float accel[3];
+    float gyro[3];
     const float dt_default_s = (float)APP_IMU_PERIOD_MS * 1e-3f;
 
-
+    memcpy(accel, raw->data.accel_mps2, sizeof(accel));
+    memcpy(gyro, raw->data.gyro_rads, sizeof(gyro));
+    app_imu_offset_apply(accel, gyro);
+    if (app_imu_offset_take_fusion_reset()) {
+        imu_fusion_reset(&s_fusion);
+    }
 
     if (!imu_fusion_update(&s_fusion,
-
-                           raw->data.accel_mps2,
-
-                           raw->data.gyro_rads,
-
+                           accel,
+                           gyro,
                            raw->t_us,
-
                            dt_default_s,
-
                            APP_IMU_COMPLEMENTARY_ALPHA,
-
                            APP_IMU_PITCH_ACCEL_FORWARD_AXIS,
                            APP_IMU_PITCH_ACCEL_UP_AXIS,
                            APP_IMU_PITCH_GYRO_AXIS,
-
                            APP_IMU_PITCH_GYRO_SIGN,
-
                            APP_IMU_ACCEL_NORM_TOL_MPS2,
-
                            &fused)) {
-
         return;
-
     }
 
-
-
     app_imu_sample_t out = {0};
-
     out.t_us = raw->t_us;
-
     out.seq = ++s_pub_seq;
-
     out.valid = true;
-
     out.pitch_rad = fused.pitch_rad;
-
     out.pitch_rate_rads = fused.pitch_rate_rads;
-
-    memcpy(out.accel_mps2, raw->data.accel_mps2, sizeof(out.accel_mps2));
-
-    memcpy(out.gyro_rads, raw->data.gyro_rads, sizeof(out.gyro_rads));
-
+    memcpy(out.accel_mps2, accel, sizeof(out.accel_mps2));
+    memcpy(out.gyro_rads, gyro, sizeof(out.gyro_rads));
     app_samples_imu_publish(&out);
-
 }
 
 

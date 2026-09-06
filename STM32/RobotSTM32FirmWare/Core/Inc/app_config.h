@@ -67,6 +67,68 @@
 #endif
 
 #define APP_BIAS_PERIOD_MS           10u
+#ifndef APP_IMU_G_MPS2
+#define APP_IMU_G_MPS2               9.80665f
+#endif
+/**
+ * Startup cal: |a_up| < sin(π/12)·g for 3 s (a_up = IMU X) and 8 < ‖a‖ < 11.
+ * Then stand vertical for the 20 s average. A new cal overwrites flash.
+ */
+#ifndef APP_IMU_OFFSET_LIE_SIN
+#define APP_IMU_OFFSET_LIE_SIN       0.258819045f /* sin(π/12) */
+#endif
+#ifndef APP_IMU_OFFSET_NORM_MIN_MPS2
+#define APP_IMU_OFFSET_NORM_MIN_MPS2  8.0f
+#endif
+#ifndef APP_IMU_OFFSET_NORM_MAX_MPS2
+#define APP_IMU_OFFSET_NORM_MAX_MPS2  11.0f
+#endif
+#ifndef APP_IMU_OFFSET_UPRIGHT_COS
+#define APP_IMU_OFFSET_UPRIGHT_COS   0.965925826f /* cos(π/12) */
+#endif
+#ifndef APP_IMU_OFFSET_LIE_HOLD_MS
+#define APP_IMU_OFFSET_LIE_HOLD_MS   3000u
+#endif
+#ifndef APP_IMU_OFFSET_UPRIGHT_SKIP_MS
+#define APP_IMU_OFFSET_UPRIGHT_SKIP_MS 200u
+#endif
+#ifndef APP_IMU_OFFSET_PULSE_NM
+#define APP_IMU_OFFSET_PULSE_NM      0.02f
+#endif
+#ifndef APP_IMU_OFFSET_PULSE_MS
+#define APP_IMU_OFFSET_PULSE_MS      100u
+#endif
+#ifndef APP_IMU_OFFSET_PULSE_GAP_MS
+#define APP_IMU_OFFSET_PULSE_GAP_MS  500u
+#endif
+#ifndef APP_IMU_OFFSET_SETTLE_MS
+#define APP_IMU_OFFSET_SETTLE_MS     2000u
+#endif
+#ifndef APP_IMU_OFFSET_SAMPLE_COUNT
+#define APP_IMU_OFFSET_SAMPLE_COUNT  1000u
+#endif
+#ifndef APP_IMU_OFFSET_SAMPLE_SPAN_MS
+#define APP_IMU_OFFSET_SAMPLE_SPAN_MS 20000u
+#endif
+#define APP_IMU_OFFSET_SAMPLE_PERIOD_MS \
+    (APP_IMU_OFFSET_SAMPLE_SPAN_MS / APP_IMU_OFFSET_SAMPLE_COUNT)
+/** Last 128 KB sector of Bank2 — kept out of the firmware FLASH region. */
+#ifndef APP_IMU_OFFSET_FLASH_ADDR
+#define APP_IMU_OFFSET_FLASH_ADDR    0x081E0000UL
+#endif
+#ifndef APP_IMU_OFFSET_FLASH_SECTOR
+#define APP_IMU_OFFSET_FLASH_SECTOR  7u
+#endif
+/** Reject stored/live offsets outside a real rest-bias range (avoids failsafe). */
+#ifndef APP_IMU_OFFSET_ACCEL_MAX_MPS2
+#define APP_IMU_OFFSET_ACCEL_MAX_MPS2  0.80f
+#endif
+#ifndef APP_IMU_OFFSET_GYRO_MAX_RADS
+#define APP_IMU_OFFSET_GYRO_MAX_RADS   0.15f
+#endif
+#ifndef APP_IMU_OFFSET_CAL_TIMEOUT_MS
+#define APP_IMU_OFFSET_CAL_TIMEOUT_MS  90000u
+#endif
 #define APP_WATCHDOG_PERIOD_MS       50u
 #define APP_JETSON_PERIOD_MS         20u
 #define APP_TELEMETRY_PERIOD_MS      2u    /* 500 Hz BalanceFrame (matches control loop) */
@@ -132,7 +194,7 @@
 
 /* --- Control strategy (see control_strategy.h) --- */
 #ifndef APP_CTRL_STRATEGY_DEFAULT
-#define APP_CTRL_STRATEGY_DEFAULT    3  /* CTRL_STRATEGY_FF_CASCADE */
+#define APP_CTRL_STRATEGY_DEFAULT    0  /* CTRL_STRATEGY_FF_CASCADE */
 #endif
 
 /* --- Control references --- */
@@ -147,29 +209,6 @@
 #define APP_CTRL_PITCH_FAILSAFE_RAD  (0.785398163f)
 #endif
 
-/* Balance: u = Kp*(pitch_ref - pitch) - Kd*pitch_rate (see pid_controller).
- * Positive pitch = nose-down on this IMU mount; Kp/Kd > 0 for our wheel cmd signs. */
-#ifndef APP_CTRL_PITCH_KP
-#define APP_CTRL_PITCH_KP            0.01f
-#endif
-#ifndef APP_CTRL_PITCH_KI
-#define APP_CTRL_PITCH_KI            0.0f
-#endif
-#ifndef APP_CTRL_PITCH_KD
-#define APP_CTRL_PITCH_KD            0.0f
-#endif
-
-/* Forward speed on ABZ wheel velocity */
-#ifndef APP_CTRL_VEL_KP
-#define APP_CTRL_VEL_KP              0.0f
-#endif
-#ifndef APP_CTRL_VEL_KI
-#define APP_CTRL_VEL_KI              0.0f
-#endif
-#ifndef APP_CTRL_VEL_KD
-#define APP_CTRL_VEL_KD              0.0f
-#endif
-
 /**
  * Plant (measured): m=1.335 kg, COM h=0.145 m, gear motor:wheel = 3:16 (τ_w/τ_m = 16/3).
  * Gravity stiffness at axle: m·g·h ≈ 1.90 Nm/rad.
@@ -178,25 +217,7 @@
  * At 5°: ~0.0155 Nm/motor gravity; keep cmd_max ≈ 3× that for catch margin.
  */
 #ifndef APP_CTRL_CMD_MAX_TORQUE_NM
-#define APP_CTRL_CMD_MAX_TORQUE_NM     0.040f  /* run3: less violent while hunting gains */
-#endif
-
-/* Linear: u = Kθ·f(θ_ref−θ) − Kω·θ̇ + Kv·(v_ref−v), then output low-pass.
- * f(err): 0=err (default, torque mode), 1=atan(err). */
-#ifndef APP_CTRL_LINEAR_THETA_FUNC
-#define APP_CTRL_LINEAR_THETA_FUNC         0  /* 0=linear, 1=atan */
-#endif
-#ifndef APP_CTRL_LINEAR_K_PITCH
-#define APP_CTRL_LINEAR_K_PITCH          0.01f
-#endif
-#ifndef APP_CTRL_LINEAR_K_PITCH_RATE
-#define APP_CTRL_LINEAR_K_PITCH_RATE     0.0f
-#endif
-#ifndef APP_CTRL_LINEAR_K_VEL
-#define APP_CTRL_LINEAR_K_VEL            0.0f
-#endif
-#ifndef APP_CTRL_LINEAR_OUTPUT_ALPHA
-#define APP_CTRL_LINEAR_OUTPUT_ALPHA     0.0f
+#define APP_CTRL_CMD_MAX_TORQUE_NM     0.080f  /* run3: less violent while hunting gains */
 #endif
 
 /* Cascade vel → pitch_ref:
@@ -204,7 +225,6 @@
  *   e_f = α·e_f + (1-α)·e     (leaky I; lower α = stronger decay)
  *   pitch_cmd = Kp·e + Kema·e_f + Kd·v̇ - Kacc·v̇_ref
  *   pitch_trim = -pitch_cmd
- * cascade_vel_ki kept in snapshot but unused (prefer EMA).
  *
  * Checkpoint 2026-08-20 (live hold, user restore after neutral tune):
  *   kp=0.08  kd=0.008  ema_α=0.8  ema_kp=0.03
@@ -212,9 +232,6 @@
  */
 #ifndef APP_CTRL_CASCADE_VEL_KP
 #define APP_CTRL_CASCADE_VEL_KP          0.08f
-#endif
-#ifndef APP_CTRL_CASCADE_VEL_KI
-#define APP_CTRL_CASCADE_VEL_KI          0.0f /* legacy; unused — use cascade_vel_ema_* */
 #endif
 #ifndef APP_CTRL_CASCADE_VEL_KD
 #define APP_CTRL_CASCADE_VEL_KD          0.008f /* damp on filtered v̇ */
@@ -361,19 +378,34 @@
  * APP_CTRL_ANTIPATINAGE_ENABLE=0 disables detection (pass-through).
  */
 #ifndef APP_CTRL_ANTIPATINAGE_ENABLE
-#define APP_CTRL_ANTIPATINAGE_ENABLE         1
+#define APP_CTRL_ANTIPATINAGE_ENABLE         0
+#endif
+/** 0 = disable SYNC_L/R (single-wheel lift) only; BOTH_AIR stays active. */
+#ifndef APP_ANTIPAT_SYNC_ENABLE
+#define APP_ANTIPAT_SYNC_ENABLE              0
 #endif
 #ifndef APP_ANTIPAT_TRACK_WIDTH_M
-#define APP_ANTIPAT_TRACK_WIDTH_M            0.24f  /* measure chassis; tune */
+#define APP_ANTIPAT_TRACK_WIDTH_M            0.16f  /* 16 cm empattement */
 #endif
 #ifndef APP_ANTIPAT_TAU_MIN_NM
 #define APP_ANTIPAT_TAU_MIN_NM               0.001f
 #endif
 #ifndef APP_ANTIPAT_ETA_ON
-#define APP_ANTIPAT_ETA_ON                   200.0f /* rad/s^2 per Nm; tune bench */
+#define APP_ANTIPAT_ETA_ON                   8000.0f /* rad/s^2 per Nm; tune bench */
 #endif
 #ifndef APP_ANTIPAT_ETA_OFF
-#define APP_ANTIPAT_ETA_OFF                  120.0f
+#define APP_ANTIPAT_ETA_OFF                  1000.0f
+#endif
+/** BOTH_AIR exit fallback when |α| drops (loaded contact); 0 = η-only exit. */
+#ifndef APP_ANTIPAT_ALPHA_CONTACT_MAX_RADS2
+#define APP_ANTIPAT_ALPHA_CONTACT_MAX_RADS2  500.0f
+#endif
+/** In BOTH_AIR: small τ_both + spinning ω ⇒ still airborne (block false recontact). */
+#ifndef APP_ANTIPAT_TAU_BOTH_STEADY_AIR_NM
+#define APP_ANTIPAT_TAU_BOTH_STEADY_AIR_NM   0.004f
+#endif
+#ifndef APP_ANTIPAT_OMEGA_AIR_MIN_TURNS_S
+#define APP_ANTIPAT_OMEGA_AIR_MIN_TURNS_S    0.25f
 #endif
 #ifndef APP_ANTIPAT_K_DOM
 #define APP_ANTIPAT_K_DOM                    1.4f
@@ -429,18 +461,11 @@
 #ifndef APP_CTRL_POS_KD
 #define APP_CTRL_POS_KD                      0.0f   /* (turn/s) / (turn/s) */
 #endif
-/** Legacy (unused in v6 modes); kept for snapshot layout / tools. */
-#ifndef APP_CTRL_POS_PITCH_KP
-#define APP_CTRL_POS_PITCH_KP                0.0f   /* rad / m — unused */
-#endif
 #ifndef APP_CTRL_POS_X_REF_M
 #define APP_CTRL_POS_X_REF_M                 0.0f
 #endif
 #ifndef APP_CTRL_POS_V_MAX_TURNS_S
 #define APP_CTRL_POS_V_MAX_TURNS_S           0.5f
-#endif
-#ifndef APP_CTRL_POS_PITCH_MAX_RAD
-#define APP_CTRL_POS_PITCH_MAX_RAD           0.04f  /* unused — cascade_pitch_ref_max bounds lean */
 #endif
 /** EMA on x_err: higher = longer memory (0 = e_f tracks x_err instantly). */
 #ifndef APP_CTRL_POS_ERR_EMA_ALPHA
@@ -483,7 +508,7 @@ typedef enum {
 /** Complementary filter gyro weight (1.0 = gyro only). Lower = faster accel correction, more lag. */
 /**
  * Complementary filter: pitch = α·(pitch+ωΔt) + (1-α)·pitch_accel.
- * 0.999 @ 1 kHz ≈ 0.16 Hz accel. Startup gyro bias cal TODO (after vib tune).
+ * 0.999 @ 1 kHz ≈ 0.16 Hz accel. Gyro/accel rest bias: lie-down cal in task_bias.
  */
 #ifndef APP_IMU_COMPLEMENTARY_ALPHA
 #define APP_IMU_COMPLEMENTARY_ALPHA  0.999f
@@ -520,7 +545,7 @@ typedef enum {
 #define APP_IMU_PITCH_ACCEL_FORWARD_AXIS  1
 #endif
 #ifndef APP_IMU_PITCH_ACCEL_UP_AXIS
-#define APP_IMU_PITCH_ACCEL_UP_AXIS       0
+#define APP_IMU_PITCH_ACCEL_UP_AXIS       0  /* also lying-cal |a_up| test */
 #endif
 #ifndef APP_IMU_PITCH_GYRO_AXIS
 #define APP_IMU_PITCH_GYRO_AXIS           2
@@ -528,7 +553,7 @@ typedef enum {
 #ifndef APP_IMU_PITCH_GYRO_SIGN
 #define APP_IMU_PITCH_GYRO_SIGN           1.0f
 #endif
-/** Yaw rate about vertical (up) axis — used for heading hold. */
+/** Yaw rate about vertical (up) axis — yaw rate loop feedback. */
 #ifndef APP_IMU_YAW_GYRO_AXIS
 #define APP_IMU_YAW_GYRO_AXIS             0  /* same as PITCH_ACCEL_UP_AXIS */
 #endif
@@ -537,25 +562,33 @@ typedef enum {
 #endif
 
 /**
- * Heading hold (ff_cascade): integrate yaw gyro → ψ, then
- *   u_yaw = clamp( Kp·wrap(ψ_ref−ψ) − Kd·ψ̇ , ±τ_max )
+ * Yaw rate hold (ff_cascade): track gyro yaw rate (not heading angle).
+ *   u_yaw = clamp( Kp·(ψ̇_ref − ψ̇) − Kd·dψ̇/dt , ±τ_max )
  *   τ_L = u − u_yaw,  τ_R = u + u_yaw
- * Gains 0 → off. Defaults: Kp=0.03, Kd=0.005, τ_max=0.01 (hold on at boot).
- * SET heading_reset=1 to zero ψ at current heading.
- * SET heading_inc / heading_dec (rad) nudges heading_ref by ±|value| (wrap ±π).
- * Sign of Kp flips turn direction if L/R sense is wrong.
+ * Telemetry names kept for compat: heading_ref_rad = ψ̇_ref (rad/s).
+ * Gains: Kp Nm/(rad/s), Kd Nm/(rad/s²). Defaults: Kp=0.03, Kd=0.005, τ_max=0.01.
+ * SET heading_reset=1 → ψ̇_ref ← 0 (integrated ψ display also zeroed).
+ * heading_inc: ψ̇_ref = value (signed, rad/s, clamp ±YAW_RATE_REF_MAX).
+ * heading_dec: ψ̇_ref = −value (old UI). heading_ref_rad is the same store.
  */
+#ifndef APP_CTRL_YAW_RATE_REF_MAX_RADS
+#define APP_CTRL_YAW_RATE_REF_MAX_RADS     2.0f
+#endif
 #ifndef APP_CTRL_HEADING_KP
-#define APP_CTRL_HEADING_KP                  0.03f  /* Nm / rad — hold on by default */
+#define APP_CTRL_HEADING_KP                  0.000f  /* Nm / (rad/s) */
 #endif
 #ifndef APP_CTRL_HEADING_KD
-#define APP_CTRL_HEADING_KD                  0.005f /* Nm / (rad/s) */
+#define APP_CTRL_HEADING_KD                  0.0000f /* Nm / (rad/s²) on dψ̇/dt */
 #endif
 #ifndef APP_CTRL_HEADING_REF_RAD
-#define APP_CTRL_HEADING_REF_RAD             0.0f
+#define APP_CTRL_HEADING_REF_RAD             0.0f   /* ψ̇_ref rad/s */
 #endif
 #ifndef APP_CTRL_HEADING_TORQUE_MAX_NM
 #define APP_CTRL_HEADING_TORQUE_MAX_NM       0.01f
+#endif
+/** EMA on ψ̇ before yaw loop: y = α·y + (1−α)·ψ̇_raw ; 0 = off, higher = smoother. */
+#ifndef APP_CTRL_YAW_RATE_LPF_ALPHA
+#define APP_CTRL_YAW_RATE_LPF_ALPHA          0.99f
 #endif
 
 #endif /* APP_CONFIG_H */

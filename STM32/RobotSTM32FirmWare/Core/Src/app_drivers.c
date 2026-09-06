@@ -5,6 +5,7 @@
 #include "app_drivers.h"
 #include "app_config.h"
 #include "app_halt.h"
+#include "app_imu_offset.h"
 #include "app_time_us.h"
 #include "dma.h"
 #include "fdcan.h"
@@ -78,6 +79,7 @@ bool app_drivers_rtos_init(void)
 
     /* IMU hw init runs in task_imu (main probe may already have configured the chip). */
     imu_spi_async_init();
+    app_imu_offset_init();
     return true;
 }
 

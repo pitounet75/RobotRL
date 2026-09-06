@@ -11,13 +11,8 @@
 #include <stdint.h>
 
 typedef enum {
-    CTRL_STRATEGY_DUAL_PID = 0,
-    /** State feedback: u = Kθ·f(θ_err) − Kω·θ̇ + Kv·ẋ; f=linear|atan (see APP_CTRL_LINEAR_THETA_FUNC). */
-    CTRL_STRATEGY_LINEAR = 1,
-    /** Segway-style: velocity error shifts pitch_ref, then pitch PID. */
-    CTRL_STRATEGY_CASCADE = 2,
-    /** Cascade + u_ff = -K_ff*sin(pitch) + FB on (pitch_ref_eff - pitch, pitch_rate). */
-    CTRL_STRATEGY_FF_CASCADE = 3,
+    /** Cascade vel → pitch_ref + u_ff = −K_ff·sin(pitch) + FB on (pitch_ref_eff − pitch, pitch_rate). */
+    CTRL_STRATEGY_FF_CASCADE = 0,
     CTRL_STRATEGY_COUNT
 } control_strategy_id_t;
 

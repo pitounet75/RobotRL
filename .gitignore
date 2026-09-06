@@ -2,6 +2,11 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+**/venv/
+**/.venv/
+
+# PlatformIO
+**/.pio/
 
 # IDE (keep .cursor/rules for shared Cursor rules)
 .cursor/*
@@ -10,6 +15,7 @@ Odrive/venv/
 Odrive/ODrive_S-fw-v0.5.1/venv
 
 # STM32 CubeIDE / Make build outputs
+**/Debug/
 STM32/RobotSTM32FirmWare/Debug/
 *.o
 *.elf
@@ -19,11 +25,20 @@ STM32/RobotSTM32FirmWare/Debug/
 *.cyclo
 *.d
 
-# KiCad locks / auto backups
+# Local logs / captures
+logs/
+**/logs/*.csv
+
+# Generated MT6835 restore map (from a live dump — do not commit a chip's EEPROM)
+ESP32MT6835Setup/include/mt6835_restore_map.h
+
+# KiCad locks / auto backups / manufacturing dumps
 ~*.lck
 **/~*.lck
 **/*-backups/
 **/*.kicad_prl
+Board/**/Manufacturing/
+Board/**/Manufacturing.zip
 
 # ODrive / tooling artifacts (do not commit)
 ODrive/gcc-arm-none-eabi*/
@@ -33,3 +48,4 @@ ODrive/tup/
 ODrive/**/build*/
 ODrive/**/*.npy
 ODrive/**/*.csv
+ODrive/**/*.png

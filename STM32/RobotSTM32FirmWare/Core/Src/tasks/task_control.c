@@ -7,6 +7,7 @@
 
 #include "app_config.h"
 #include "app_ctrl_params.h"
+#include "app_imu_offset.h"
 #include "app_motor_command.h"
 #include "app_samples.h"
 #include "app_time_us.h"
@@ -82,12 +83,13 @@ static void odrive_motor_vel_robot(float *vel_l, float *vel_r,
         return;
     }
     if (od.drive[0].valid) {
-        *vel_l = (float)app_wheel_odrive_feedback_sign(0u) * od.drive[0].vel_turns_s;
+        /* task_odrive already applies odrive_feedback_sign → robot frame */
+        *vel_l = od.drive[0].vel_turns_s;
         *ok_l = true;
         *t_l_ms = od.drive[0].last_update_ms;
     }
     if (od.drive[1].valid) {
-        *vel_r = (float)app_wheel_odrive_feedback_sign(1u) * od.drive[1].vel_turns_s;
+        *vel_r = od.drive[1].vel_turns_s;
         *ok_r = true;
         *t_r_ms = od.drive[1].last_update_ms;
     }
@@ -118,6 +120,19 @@ void task_control(void *argument)
 
         app_imu_sample_t imu;
         const bool imu_ok = app_samples_imu_read(&imu) && imu.valid;
+
+        if (app_imu_offset_owns_motors()) {
+            if (imu_ok) {
+                g_ctrl_pitch_rad = imu.pitch_rad;
+                g_ctrl_pitch_rate = imu.pitch_rate_rads;
+            }
+            cmd.valid = true;
+            cmd.estop = false;
+            app_imu_offset_motor_torque(&cmd.torque_left_nm, &cmd.torque_right_nm);
+            g_ctrl_cmd_torque_nm = cmd.torque_left_nm;
+            app_motor_command_publish(&cmd);
+            continue;
+        }
 
         if (!imu_ok) {
             cmd.valid = true;

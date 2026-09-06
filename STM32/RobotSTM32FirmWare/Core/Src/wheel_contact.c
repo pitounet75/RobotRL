@@ -88,6 +88,15 @@ static bool antipat_enabled(void)
 #endif
 }
 
+static bool sync_unilateral_enabled(void)
+{
+#if APP_ANTIPAT_SYNC_ENABLE
+    return true;
+#else
+    return false;
+#endif
+}
+
 static float ms_to_alpha(float dt_s, float tau_ms)
 {
     if (tau_ms <= 1.0f) {
@@ -198,6 +207,39 @@ static void enter_lift_common(const wheel_contact_input_t *in)
     s_pitch_trim_frozen = in->pitch_trim_rad;
 }
 
+static void compute_tau_both(const wheel_contact_input_t *in, float *tau_l, float *tau_r)
+{
+    float tl = APP_ANTIPAT_K_BOTH_V * (s_v_good_l - in->vel_motor_l_turns_s);
+    float tr = APP_ANTIPAT_K_BOTH_V * (s_v_good_r - in->vel_motor_r_turns_s);
+    *tau_l = clampf(tl, -APP_ANTIPAT_TAU_BOTH_MAX_NM, APP_ANTIPAT_TAU_BOTH_MAX_NM);
+    *tau_r = clampf(tr, -APP_ANTIPAT_TAU_BOTH_MAX_NM, APP_ANTIPAT_TAU_BOTH_MAX_NM);
+}
+
+static bool both_air_still_flying(float omega_l, float omega_r, float tau_both_l, float tau_both_r)
+{
+    return (fabsf(tau_both_l) < APP_ANTIPAT_TAU_BOTH_STEADY_AIR_NM) &&
+           (fabsf(tau_both_r) < APP_ANTIPAT_TAU_BOTH_STEADY_AIR_NM) &&
+           (fabsf(omega_l) > APP_ANTIPAT_OMEGA_AIR_MIN_TURNS_S ||
+            fabsf(omega_r) > APP_ANTIPAT_OMEGA_AIR_MIN_TURNS_S);
+}
+
+static bool both_air_contact_ok(float eta_l, float eta_r, float alpha_l, float alpha_r,
+                                float tau_both_l, float tau_both_r,
+                                float omega_l, float omega_r)
+{
+    if (both_air_still_flying(omega_l, omega_r, tau_both_l, tau_both_r)) {
+        return false;
+    }
+    if (eta_l < APP_ANTIPAT_ETA_OFF && eta_r < APP_ANTIPAT_ETA_OFF) {
+        return true;
+    }
+    if (APP_ANTIPAT_ALPHA_CONTACT_MAX_RADS2 > 0.0f) {
+        return (fabsf(alpha_l) < APP_ANTIPAT_ALPHA_CONTACT_MAX_RADS2) &&
+               (fabsf(alpha_r) < APP_ANTIPAT_ALPHA_CONTACT_MAX_RADS2);
+    }
+    return false;
+}
+
 static void begin_recovery(void)
 {
     s_mode = WC_MODE_RECOVERY;
@@ -299,12 +341,23 @@ void wheel_contact_update(const wheel_contact_input_t *in, wheel_contact_output_
 
     const float eta_r_floor = maxf2(eta_r, 1.0f);
     const float eta_l_floor = maxf2(eta_l, 1.0f);
-    const bool cand_l = decorrelated && (eta_l > APP_ANTIPAT_ETA_ON) &&
-                        (eta_l > APP_ANTIPAT_K_DOM * eta_r_floor);
-    const bool cand_r = decorrelated && (eta_r > APP_ANTIPAT_ETA_ON) &&
-                        (eta_r > APP_ANTIPAT_K_DOM * eta_l_floor);
+    const bool cand_l_raw = decorrelated && (eta_l > APP_ANTIPAT_ETA_ON) &&
+                            (eta_l > APP_ANTIPAT_K_DOM * eta_r_floor);
+    const bool cand_r_raw = decorrelated && (eta_r > APP_ANTIPAT_ETA_ON) &&
+                            (eta_r > APP_ANTIPAT_K_DOM * eta_l_floor);
+    const bool cand_l = sync_unilateral_enabled() && cand_l_raw;
+    const bool cand_r = sync_unilateral_enabled() && cand_r_raw;
+    const bool unilateral = sync_unilateral_enabled() && (cand_l_raw || cand_r_raw);
     const bool both_cand = (eta_l > APP_ANTIPAT_ETA_ON) && (eta_r > APP_ANTIPAT_ETA_ON) &&
-                           !cand_l && !cand_r && pitch_mismatch;
+                           !unilateral && pitch_mismatch;
+    const bool both_overlay = (s_mode == WC_MODE_BOTH_AIR) ||
+                              (s_mode == WC_MODE_NORMAL && both_cand);
+
+    float tau_both_l = 0.0f;
+    float tau_both_r = 0.0f;
+    if (s_mode == WC_MODE_BOTH_AIR) {
+        compute_tau_both(in, &tau_both_l, &tau_both_r);
+    }
 
     if (s_mode == WC_MODE_NORMAL && in->vel_motor_l_valid && in->vel_motor_r_valid) {
         const float a = ms_to_alpha(in->dt_s, APP_ANTIPAT_T_MA_MS);
@@ -370,7 +423,10 @@ void wheel_contact_update(const wheel_contact_input_t *in, wheel_contact_output_
             s_off_r_ms = 0.0f;
         }
     } else if (s_mode == WC_MODE_BOTH_AIR) {
-        if (eta_l < APP_ANTIPAT_ETA_OFF && eta_r < APP_ANTIPAT_ETA_OFF && !pitch_mismatch) {
+        /* Exit on η only: pitch_mismatch still uses balance u while u is cut → deadlock. */
+        if (both_air_contact_ok(eta_l, eta_r, in->alpha_l_rads2, in->alpha_r_rads2,
+                                tau_both_l, tau_both_r,
+                                in->vel_motor_l_turns_s, in->vel_motor_r_turns_s)) {
             s_off_both_ms += dt_ms;
             if (s_off_both_ms >= (float)APP_ANTIPAT_T_OFF_BOTH_MS) {
                 begin_recovery();
@@ -399,14 +455,16 @@ void wheel_contact_update(const wheel_contact_input_t *in, wheel_contact_output_
     g_wc_integrator_trust = integrator_trust ? 1.0f : 0.0f;
 
     float u_cmd = in->u;
-    if (s_mode == WC_MODE_BOTH_AIR || both_cand) {
+    if (both_overlay) {
         u_cmd = 0.0f;
     }
 
     float tau_sync_l = 0.0f;
     float tau_sync_r = 0.0f;
-    float tau_both_l = 0.0f;
-    float tau_both_r = 0.0f;
+    if (!both_overlay) {
+        tau_both_l = 0.0f;
+        tau_both_r = 0.0f;
+    }
 
     if (s_mode == WC_MODE_SYNC_L && in->vel_motor_l_valid && in->vel_motor_r_valid) {
         tau_sync_l = APP_ANTIPAT_K_SYNC * (in->vel_motor_r_turns_s - in->vel_motor_l_turns_s);
@@ -414,17 +472,16 @@ void wheel_contact_update(const wheel_contact_input_t *in, wheel_contact_output_
     } else if (s_mode == WC_MODE_SYNC_R && in->vel_motor_l_valid && in->vel_motor_r_valid) {
         tau_sync_r = APP_ANTIPAT_K_SYNC * (in->vel_motor_l_turns_s - in->vel_motor_r_turns_s);
         tau_sync_r = clampf(tau_sync_r, -APP_ANTIPAT_TAU_SYNC_MAX_NM, APP_ANTIPAT_TAU_SYNC_MAX_NM);
-    } else if (s_mode == WC_MODE_BOTH_AIR || both_cand) {
+    } else if (both_overlay) {
         if (s_mode == WC_MODE_BOTH_AIR && s_v_good_l == 0.0f && s_v_good_r == 0.0f) {
             snapshot_v_good();
         }
         if (both_cand && s_mode == WC_MODE_NORMAL) {
             snapshot_v_good();
         }
-        tau_both_l = APP_ANTIPAT_K_BOTH_V * (s_v_good_l - in->vel_motor_l_turns_s);
-        tau_both_r = APP_ANTIPAT_K_BOTH_V * (s_v_good_r - in->vel_motor_r_turns_s);
-        tau_both_l = clampf(tau_both_l, -APP_ANTIPAT_TAU_BOTH_MAX_NM, APP_ANTIPAT_TAU_BOTH_MAX_NM);
-        tau_both_r = clampf(tau_both_r, -APP_ANTIPAT_TAU_BOTH_MAX_NM, APP_ANTIPAT_TAU_BOTH_MAX_NM);
+        if (s_mode != WC_MODE_BOTH_AIR) {
+            compute_tau_both(in, &tau_both_l, &tau_both_r);
+        }
     }
 
     bool reanchor = false;
@@ -458,7 +515,7 @@ void wheel_contact_update(const wheel_contact_input_t *in, wheel_contact_output_
     s_out.tau_sync_r_nm = tau_sync_r;
     s_out.tau_both_l_nm = tau_both_l;
     s_out.tau_both_r_nm = tau_both_r;
-    s_out.both_active = (s_mode == WC_MODE_BOTH_AIR || both_cand);
+    s_out.both_active = both_overlay;
     s_out.reanchor_pos = reanchor;
     s_out.pos_offset_turns_new = pos_offset_new;
     s_out.reset_vel_integrators = reset_vel;

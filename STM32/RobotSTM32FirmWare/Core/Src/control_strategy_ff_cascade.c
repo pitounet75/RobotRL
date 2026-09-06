@@ -14,7 +14,7 @@
  *   u             = low_pass(u_ff + u_fb [+ friction comp])
  *   α_ref         = (u - c*sign(ω)) / J
  *   Δτ_L/R        = Kα*(α_ref - α_meas)   (gated; ODrive ω)
- *   u_yaw         = clamp(Kp·wrap(ψ_ref−ψ) − Kd·ψ̇, ±τ_yaw)   (ψ from ∫yaw_rate)
+ *   u_yaw         = clamp(Kp·(ψ̇_ref−ψ̇) − Kd·dψ̇/dt, ±τ_yaw)
  *   τ_L/R         = clamp(u ± u_yaw + Δτ)
  */
 
@@ -44,6 +44,10 @@ static float s_vel_dot_turns_s2;
 static bool s_vel_dot_valid;
 static float s_heading_rad;
 static bool s_heading_valid;
+static float s_yaw_rate_prev_rads;
+static bool s_yaw_rate_prev_valid;
+static float s_yaw_rate_lpf_rads;
+static bool s_yaw_rate_lpf_valid;
 static float s_vel_ref_slew; /* slew-limited command to cascade */
 static float s_vel_err_ema;  /* leaky integrator on (v_ref - v) */
 static float s_vel_ref_prev; /* for v̇_ref accel FF */
@@ -69,6 +73,7 @@ volatile float g_ctrl_pos_pitch_trim_rad;
 volatile float g_ctrl_pos_err_ema_m;
 volatile float g_ctrl_heading_rad;
 volatile float g_ctrl_heading_torque_nm;
+volatile float g_ctrl_yaw_rate_lpf_rads;
 volatile float g_ctrl_friction_comp_nm;
 volatile uint8_t g_ctrl_friction_regime; /* 0=off, 1=static, 2=kinetic */
 
@@ -231,6 +236,10 @@ void control_strategy_ff_cascade_reset(void)
 	s_vel_dot_valid = false;
 	s_heading_rad = 0.0f;
 	s_heading_valid = false;
+	s_yaw_rate_prev_rads = 0.0f;
+	s_yaw_rate_prev_valid = false;
+	s_yaw_rate_lpf_rads = 0.0f;
+	s_yaw_rate_lpf_valid = false;
 	s_vel_ref_slew = 0.0f;
 	s_vel_err_ema = 0.0f;
 	s_vel_ref_prev = 0.0f;
@@ -241,6 +250,7 @@ void control_strategy_ff_cascade_reset(void)
 	g_ctrl_pos_err_ema_m = 0.0f;
 	g_ctrl_heading_rad = 0.0f;
 	g_ctrl_heading_torque_nm = 0.0f;
+	g_ctrl_yaw_rate_lpf_rads = 0.0f;
 	g_ctrl_friction_comp_nm = 0.0f;
 	g_ctrl_friction_regime = 0;
 	wheel_contact_reset();
@@ -426,23 +436,48 @@ void control_strategy_ff_cascade_update(const control_strategy_input_t *in,
 		                                 p, in->pitch_rad, in->pitch_rate_rads);
 	}
 
-	/* --- Heading hold: differential torque from integrated yaw --- */
+	/* --- Yaw rate hold: differential torque from filtered ψ̇ tracking --- */
 	float u_yaw = 0.0f;
-	if (app_ctrl_params_consume_heading_reset() || !s_heading_valid) {
+	const bool heading_reset = app_ctrl_params_consume_heading_reset();
+	float yaw_rate = in->yaw_rate_rads;
+	{
+		const float a = clampf(APP_CTRL_YAW_RATE_LPF_ALPHA, 0.0f, 0.999f);
+		if (heading_reset || !s_yaw_rate_lpf_valid) {
+			s_yaw_rate_lpf_rads = in->yaw_rate_rads;
+			s_yaw_rate_lpf_valid = true;
+		} else if (a > 0.0f) {
+			s_yaw_rate_lpf_rads = a * s_yaw_rate_lpf_rads + (1.0f - a) * in->yaw_rate_rads;
+		} else {
+			s_yaw_rate_lpf_rads = in->yaw_rate_rads;
+		}
+		yaw_rate = s_yaw_rate_lpf_rads;
+	}
+	if (heading_reset || !s_heading_valid) {
 		s_heading_rad = 0.0f;
+		s_yaw_rate_prev_rads = yaw_rate;
+		s_yaw_rate_prev_valid = true;
 		s_heading_valid = true;
 	}
 	if (in->dt_s > 1.0e-6f) {
-		s_heading_rad += in->yaw_rate_rads * in->dt_s;
+		s_heading_rad += yaw_rate * in->dt_s;
 		s_heading_rad = wrap_pi(s_heading_rad);
 	}
-	const bool heading_on = (p->heading_kp != 0.0f || p->heading_kd > 0.0f) &&
-	                        p->heading_torque_max_nm > 0.0f;
-	if (heading_on && wcp->mode != WC_MODE_BOTH_AIR) {
-		const float herr = wrap_pi(p->heading_ref_rad - s_heading_rad);
-		u_yaw = p->heading_kp * herr - p->heading_kd * in->yaw_rate_rads;
+	const bool yaw_rate_on = (p->heading_kp != 0.0f || p->heading_kd > 0.0f) &&
+	                         p->heading_torque_max_nm > 0.0f;
+	if (yaw_rate_on && wcp->mode != WC_MODE_BOTH_AIR) {
+		const float rate_err = p->heading_ref_rad - yaw_rate;
+		float rate_dot = 0.0f;
+		if (p->heading_kd > 0.0f && s_yaw_rate_prev_valid && in->dt_s > 1.0e-6f) {
+			rate_dot = (yaw_rate - s_yaw_rate_prev_rads) / in->dt_s;
+		}
+		u_yaw = p->heading_kp * rate_err - p->heading_kd * rate_dot;
 		u_yaw = clampf(u_yaw, -p->heading_torque_max_nm, p->heading_torque_max_nm);
 	}
+	if (in->dt_s > 1.0e-6f) {
+		s_yaw_rate_prev_rads = yaw_rate;
+		s_yaw_rate_prev_valid = true;
+	}
+	g_ctrl_yaw_rate_lpf_rads = yaw_rate;
 	g_ctrl_heading_rad = s_heading_rad;
 	g_ctrl_heading_torque_nm = u_yaw;
 

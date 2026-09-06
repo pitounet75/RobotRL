@@ -11,26 +11,30 @@
 #include <stddef.h>
 #include <string.h>
 
-#ifndef M_PI
-#define M_PI 3.14159265358979323846
-#endif
-
-static float wrap_pi_f(float a)
+static float clampf(float x, float lo, float hi)
 {
-    const float pi = (float)M_PI;
-    const float twopi = 2.0f * pi;
-    while (a > pi) {
-        a -= twopi;
+    if (x < lo) {
+        return lo;
     }
-    while (a < -pi) {
-        a += twopi;
+    if (x > hi) {
+        return hi;
     }
-    return a;
+    return x;
 }
 
 static app_ctrl_params_snapshot_t s_params;
 static volatile bool s_pos_reset_req;
 static volatile bool s_heading_reset_req;
+
+/** ψ̇_ref = value (rad/s). heading_inc mirrors it for GET. */
+static void set_yaw_rate_ref(float value)
+{
+    s_params.heading_ref_rad = clampf(value,
+                                      -APP_CTRL_YAW_RATE_REF_MAX_RADS,
+                                      APP_CTRL_YAW_RATE_REF_MAX_RADS);
+    s_params.heading_inc = s_params.heading_ref_rad;
+    s_params.heading_dec = 0.0f;
+}
 
 static void load_defaults(void)
 {
@@ -40,20 +44,8 @@ static void load_defaults(void)
     s_params.pitch_ref_rad = APP_CTRL_PITCH_REF_RAD;
     s_params.vel_ref_turns_s = APP_CTRL_VEL_REF_TURNS_S;
     s_params.pitch_failsafe_rad = APP_CTRL_PITCH_FAILSAFE_RAD;
-    s_params.pitch_kp = APP_CTRL_PITCH_KP;
-    s_params.pitch_ki = APP_CTRL_PITCH_KI;
-    s_params.pitch_kd = APP_CTRL_PITCH_KD;
-    s_params.vel_kp = APP_CTRL_VEL_KP;
-    s_params.vel_ki = APP_CTRL_VEL_KI;
-    s_params.vel_kd = APP_CTRL_VEL_KD;
     s_params.cmd_max_torque_nm = APP_CTRL_CMD_MAX_TORQUE_NM;
-    s_params.linear_theta_func = (uint32_t)APP_CTRL_LINEAR_THETA_FUNC;
-    s_params.linear_k_pitch = APP_CTRL_LINEAR_K_PITCH;
-    s_params.linear_k_pitch_rate = APP_CTRL_LINEAR_K_PITCH_RATE;
-    s_params.linear_k_vel = APP_CTRL_LINEAR_K_VEL;
-    s_params.linear_output_alpha = APP_CTRL_LINEAR_OUTPUT_ALPHA;
     s_params.cascade_vel_kp = APP_CTRL_CASCADE_VEL_KP;
-    s_params.cascade_vel_ki = APP_CTRL_CASCADE_VEL_KI;
     s_params.cascade_vel_kd = APP_CTRL_CASCADE_VEL_KD;
     s_params.cascade_pitch_ref_max_rad = APP_CTRL_CASCADE_PITCH_REF_MAX_RAD;
     s_params.ff_grav_k = APP_CTRL_FF_GRAV_K;
@@ -74,10 +66,8 @@ static void load_defaults(void)
     s_params.alpha_lpf = APP_CTRL_ALPHA_LPF;
     s_params.pos_kp = APP_CTRL_POS_KP;
     s_params.pos_kd = APP_CTRL_POS_KD;
-    s_params.pos_pitch_kp = APP_CTRL_POS_PITCH_KP;
     s_params.pos_x_ref_m = APP_CTRL_POS_X_REF_M;
     s_params.pos_v_max_turns_s = APP_CTRL_POS_V_MAX_TURNS_S;
-    s_params.pos_pitch_max_rad = APP_CTRL_POS_PITCH_MAX_RAD;
     s_params.wheel_radius_m = APP_WHEEL_RADIUS_M;
     s_params.pos_reset = 0.0f;
     s_params.pos_err_ema_alpha = APP_CTRL_POS_ERR_EMA_ALPHA;
@@ -85,15 +75,13 @@ static void load_defaults(void)
     s_params.outer_mode = (float)APP_CTRL_OUTER_MODE_DEFAULT;
     s_params.heading_kp = APP_CTRL_HEADING_KP;
     s_params.heading_kd = APP_CTRL_HEADING_KD;
-    s_params.heading_ref_rad = APP_CTRL_HEADING_REF_RAD;
+    set_yaw_rate_ref(APP_CTRL_HEADING_REF_RAD);
     s_params.heading_torque_max_nm = APP_CTRL_HEADING_TORQUE_MAX_NM;
     s_params.heading_reset = 0.0f;
     s_params.cascade_vel_err_ema_alpha = APP_CTRL_CASCADE_VEL_ERR_EMA_ALPHA;
     s_params.cascade_vel_ema_kp = APP_CTRL_CASCADE_VEL_EMA_KP;
     s_params.vel_ref_slew_turns_s2 = APP_CTRL_VEL_REF_SLEW_TURNS_S2;
     s_params.cascade_vel_accel_kp = APP_CTRL_CASCADE_VEL_ACCEL_KP;
-    s_params.heading_inc = 0.0f;
-    s_params.heading_dec = 0.0f;
     s_params.friction_mode = (float)APP_CTRL_FRICTION_MODE;
     s_params.friction_static_nm = APP_CTRL_FRICTION_STATIC_NM;
     s_params.friction_kinetic_nm = APP_CTRL_FRICTION_KINETIC_NM;
@@ -114,15 +102,8 @@ static void apply_side_effects(uint16_t param_id)
     case APP_CTRL_PARAM_STRATEGY:
         (void)control_strategy_set((control_strategy_id_t)s_params.strategy_id);
         return;
-    case APP_CTRL_PARAM_PITCH_KP:
-    case APP_CTRL_PARAM_PITCH_KI:
-    case APP_CTRL_PARAM_PITCH_KD:
-    case APP_CTRL_PARAM_VEL_KP:
-    case APP_CTRL_PARAM_VEL_KI:
-    case APP_CTRL_PARAM_VEL_KD:
     case APP_CTRL_PARAM_CMD_MAX_TORQUE_NM:
     case APP_CTRL_PARAM_CASCADE_VEL_KP:
-    case APP_CTRL_PARAM_CASCADE_VEL_KI:
     case APP_CTRL_PARAM_CASCADE_VEL_KD:
     case APP_CTRL_PARAM_CASCADE_PITCH_REF_MAX_RAD:
         reset_active_strategy();
@@ -185,47 +166,11 @@ bool app_ctrl_params_get_value(uint16_t param_id, float *out_value)
     case APP_CTRL_PARAM_PITCH_FAILSAFE_RAD:
         *out_value = s_params.pitch_failsafe_rad;
         return true;
-    case APP_CTRL_PARAM_PITCH_KP:
-        *out_value = s_params.pitch_kp;
-        return true;
-    case APP_CTRL_PARAM_PITCH_KI:
-        *out_value = s_params.pitch_ki;
-        return true;
-    case APP_CTRL_PARAM_PITCH_KD:
-        *out_value = s_params.pitch_kd;
-        return true;
-    case APP_CTRL_PARAM_VEL_KP:
-        *out_value = s_params.vel_kp;
-        return true;
-    case APP_CTRL_PARAM_VEL_KI:
-        *out_value = s_params.vel_ki;
-        return true;
-    case APP_CTRL_PARAM_VEL_KD:
-        *out_value = s_params.vel_kd;
-        return true;
     case APP_CTRL_PARAM_CMD_MAX_TORQUE_NM:
         *out_value = s_params.cmd_max_torque_nm;
         return true;
-    case APP_CTRL_PARAM_LINEAR_THETA_FUNC:
-        *out_value = (float)s_params.linear_theta_func;
-        return true;
-    case APP_CTRL_PARAM_LINEAR_K_PITCH:
-        *out_value = s_params.linear_k_pitch;
-        return true;
-    case APP_CTRL_PARAM_LINEAR_K_PITCH_RATE:
-        *out_value = s_params.linear_k_pitch_rate;
-        return true;
-    case APP_CTRL_PARAM_LINEAR_K_VEL:
-        *out_value = s_params.linear_k_vel;
-        return true;
-    case APP_CTRL_PARAM_LINEAR_OUTPUT_ALPHA:
-        *out_value = s_params.linear_output_alpha;
-        return true;
     case APP_CTRL_PARAM_CASCADE_VEL_KP:
         *out_value = s_params.cascade_vel_kp;
-        return true;
-    case APP_CTRL_PARAM_CASCADE_VEL_KI:
-        *out_value = s_params.cascade_vel_ki;
         return true;
     case APP_CTRL_PARAM_CASCADE_VEL_KD:
         *out_value = s_params.cascade_vel_kd;
@@ -287,17 +232,11 @@ bool app_ctrl_params_get_value(uint16_t param_id, float *out_value)
     case APP_CTRL_PARAM_POS_KD:
         *out_value = s_params.pos_kd;
         return true;
-    case APP_CTRL_PARAM_POS_PITCH_KP:
-        *out_value = s_params.pos_pitch_kp;
-        return true;
     case APP_CTRL_PARAM_POS_X_REF_M:
         *out_value = s_params.pos_x_ref_m;
         return true;
     case APP_CTRL_PARAM_POS_V_MAX_TURNS_S:
         *out_value = s_params.pos_v_max_turns_s;
-        return true;
-    case APP_CTRL_PARAM_POS_PITCH_MAX_RAD:
-        *out_value = s_params.pos_pitch_max_rad;
         return true;
     case APP_CTRL_PARAM_WHEEL_RADIUS_M:
         *out_value = s_params.wheel_radius_m;
@@ -342,8 +281,22 @@ bool app_ctrl_params_get_value(uint16_t param_id, float *out_value)
         *out_value = s_params.cascade_vel_accel_kp;
         return true;
     case APP_CTRL_PARAM_HEADING_INC:
+        *out_value = s_params.heading_ref_rad;
+        return true;
     case APP_CTRL_PARAM_HEADING_DEC:
         *out_value = 0.0f;
+        return true;
+    case APP_CTRL_PARAM_FRICTION_MODE:
+        *out_value = s_params.friction_mode;
+        return true;
+    case APP_CTRL_PARAM_FRICTION_STATIC_NM:
+        *out_value = s_params.friction_static_nm;
+        return true;
+    case APP_CTRL_PARAM_FRICTION_KINETIC_NM:
+        *out_value = s_params.friction_kinetic_nm;
+        return true;
+    case APP_CTRL_PARAM_FRICTION_VEL_EPS_TURNS_S:
+        *out_value = s_params.friction_vel_eps_turns_s;
         return true;
     default:
         return false;
@@ -377,56 +330,14 @@ bool app_ctrl_params_set(uint16_t param_id, float value, float *out_value)
         }
         s_params.pitch_failsafe_rad = value;
         break;
-    case APP_CTRL_PARAM_PITCH_KP:
-        s_params.pitch_kp = value;
-        break;
-    case APP_CTRL_PARAM_PITCH_KI:
-        s_params.pitch_ki = value;
-        break;
-    case APP_CTRL_PARAM_PITCH_KD:
-        s_params.pitch_kd = value;
-        break;
-    case APP_CTRL_PARAM_VEL_KP:
-        s_params.vel_kp = value;
-        break;
-    case APP_CTRL_PARAM_VEL_KI:
-        s_params.vel_ki = value;
-        break;
-    case APP_CTRL_PARAM_VEL_KD:
-        s_params.vel_kd = value;
-        break;
     case APP_CTRL_PARAM_CMD_MAX_TORQUE_NM:
         if (value <= 0.0f) {
             return false;
         }
         s_params.cmd_max_torque_nm = value;
         break;
-    case APP_CTRL_PARAM_LINEAR_THETA_FUNC:
-        if (value < 0.0f || value > 1.0f) {
-            return false;
-        }
-        s_params.linear_theta_func = (uint32_t)value;
-        break;
-    case APP_CTRL_PARAM_LINEAR_K_PITCH:
-        s_params.linear_k_pitch = value;
-        break;
-    case APP_CTRL_PARAM_LINEAR_K_PITCH_RATE:
-        s_params.linear_k_pitch_rate = value;
-        break;
-    case APP_CTRL_PARAM_LINEAR_K_VEL:
-        s_params.linear_k_vel = value;
-        break;
-    case APP_CTRL_PARAM_LINEAR_OUTPUT_ALPHA:
-        if (value < 0.0f || value > 1.0f) {
-            return false;
-        }
-        s_params.linear_output_alpha = value;
-        break;
     case APP_CTRL_PARAM_CASCADE_VEL_KP:
         s_params.cascade_vel_kp = value;
-        break;
-    case APP_CTRL_PARAM_CASCADE_VEL_KI:
-        s_params.cascade_vel_ki = value;
         break;
     case APP_CTRL_PARAM_CASCADE_VEL_KD:
         s_params.cascade_vel_kd = value;
@@ -536,12 +447,6 @@ bool app_ctrl_params_set(uint16_t param_id, float value, float *out_value)
         }
         s_params.pos_kd = value;
         break;
-    case APP_CTRL_PARAM_POS_PITCH_KP:
-        if (value < 0.0f) {
-            return false;
-        }
-        s_params.pos_pitch_kp = value;
-        break;
     case APP_CTRL_PARAM_POS_X_REF_M:
         s_params.pos_x_ref_m = value;
         break;
@@ -550,12 +455,6 @@ bool app_ctrl_params_set(uint16_t param_id, float value, float *out_value)
             return false;
         }
         s_params.pos_v_max_turns_s = value;
-        break;
-    case APP_CTRL_PARAM_POS_PITCH_MAX_RAD:
-        if (value < 0.0f) {
-            return false;
-        }
-        s_params.pos_pitch_max_rad = value;
         break;
     case APP_CTRL_PARAM_WHEEL_RADIUS_M:
         if (value <= 0.0f) {
@@ -595,7 +494,7 @@ bool app_ctrl_params_set(uint16_t param_id, float value, float *out_value)
         s_params.heading_kd = value;
         break;
     case APP_CTRL_PARAM_HEADING_REF_RAD:
-        s_params.heading_ref_rad = value;
+        set_yaw_rate_ref(value);
         break;
     case APP_CTRL_PARAM_HEADING_TORQUE_MAX_NM:
         if (value < 0.0f) {
@@ -605,6 +504,7 @@ bool app_ctrl_params_set(uint16_t param_id, float value, float *out_value)
         break;
     case APP_CTRL_PARAM_HEADING_RESET:
         s_heading_reset_req = true;
+        set_yaw_rate_ref(0.0f);
         s_params.heading_reset = 0.0f;
         break;
     case APP_CTRL_PARAM_CASCADE_VEL_ERR_EMA_ALPHA:
@@ -631,18 +531,13 @@ bool app_ctrl_params_set(uint16_t param_id, float value, float *out_value)
         }
         s_params.cascade_vel_accel_kp = value;
         break;
-    case APP_CTRL_PARAM_HEADING_INC: {
-        const float d = fabsf(value);
-        s_params.heading_ref_rad = wrap_pi_f(s_params.heading_ref_rad + d);
-        s_params.heading_inc = 0.0f;
+    case APP_CTRL_PARAM_HEADING_INC:
+        set_yaw_rate_ref(value);
         break;
-    }
-    case APP_CTRL_PARAM_HEADING_DEC: {
-        const float d = fabsf(value);
-        s_params.heading_ref_rad = wrap_pi_f(s_params.heading_ref_rad - d);
-        s_params.heading_dec = 0.0f;
+    case APP_CTRL_PARAM_HEADING_DEC:
+        /* Alias: ψ̇_ref = −value (old UI). */
+        set_yaw_rate_ref(-value);
         break;
-    }
     case APP_CTRL_PARAM_FRICTION_MODE:
         if (value < 0.0f || value > 1.0f) {
             return false;
@@ -691,20 +586,8 @@ const char *app_ctrl_params_name(uint16_t param_id)
         [APP_CTRL_PARAM_PITCH_REF_RAD] = "pitch_ref_rad",
         [APP_CTRL_PARAM_VEL_REF_TURNS_S] = "vel_ref_turns_s",
         [APP_CTRL_PARAM_PITCH_FAILSAFE_RAD] = "pitch_failsafe_rad",
-        [APP_CTRL_PARAM_PITCH_KP] = "pitch_kp",
-        [APP_CTRL_PARAM_PITCH_KI] = "pitch_ki",
-        [APP_CTRL_PARAM_PITCH_KD] = "pitch_kd",
-        [APP_CTRL_PARAM_VEL_KP] = "vel_kp",
-        [APP_CTRL_PARAM_VEL_KI] = "vel_ki",
-        [APP_CTRL_PARAM_VEL_KD] = "vel_kd",
         [APP_CTRL_PARAM_CMD_MAX_TORQUE_NM] = "cmd_max_torque_nm",
-        [APP_CTRL_PARAM_LINEAR_THETA_FUNC] = "linear_theta_func",
-        [APP_CTRL_PARAM_LINEAR_K_PITCH] = "linear_k_pitch",
-        [APP_CTRL_PARAM_LINEAR_K_PITCH_RATE] = "linear_k_pitch_rate",
-        [APP_CTRL_PARAM_LINEAR_K_VEL] = "linear_k_vel",
-        [APP_CTRL_PARAM_LINEAR_OUTPUT_ALPHA] = "linear_output_alpha",
         [APP_CTRL_PARAM_CASCADE_VEL_KP] = "cascade_vel_kp",
-        [APP_CTRL_PARAM_CASCADE_VEL_KI] = "cascade_vel_ki",
         [APP_CTRL_PARAM_CASCADE_VEL_KD] = "cascade_vel_kd",
         [APP_CTRL_PARAM_CASCADE_PITCH_REF_MAX_RAD] = "cascade_pitch_ref_max_rad",
         [APP_CTRL_PARAM_FF_GRAV_K] = "ff_grav_k",
@@ -725,10 +608,8 @@ const char *app_ctrl_params_name(uint16_t param_id)
         [APP_CTRL_PARAM_ALPHA_LPF] = "alpha_lpf",
         [APP_CTRL_PARAM_POS_KP] = "pos_kp",
         [APP_CTRL_PARAM_POS_KD] = "pos_kd",
-        [APP_CTRL_PARAM_POS_PITCH_KP] = "pos_pitch_kp",
         [APP_CTRL_PARAM_POS_X_REF_M] = "pos_x_ref_m",
         [APP_CTRL_PARAM_POS_V_MAX_TURNS_S] = "pos_v_max_turns_s",
-        [APP_CTRL_PARAM_POS_PITCH_MAX_RAD] = "pos_pitch_max_rad",
         [APP_CTRL_PARAM_WHEEL_RADIUS_M] = "wheel_radius_m",
         [APP_CTRL_PARAM_POS_RESET] = "pos_reset",
         [APP_CTRL_PARAM_POS_ERR_EMA_ALPHA] = "pos_err_ema_alpha",

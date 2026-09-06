@@ -261,9 +261,7 @@ typedef struct {
 
 | ID | Name | File |
 |----|------|------|
-| 0 | dual_pid | `control_strategy_dual_pid.c` (default) |
-| 1 | linear | `control_strategy_linear.c` (F407-style) |
-| 2 | cascade | `control_strategy_cascade.c` |
+| 0 | ff_cascade | `control_strategy_ff_cascade.c` |
 
 Gains in `app_config.h`. Failsafe: IMU invalid or `|pitch| > APP_CTRL_PITCH_FAILSAFE_RAD` → estop, zero velocity.
 
