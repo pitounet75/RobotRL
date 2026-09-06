@@ -65,6 +65,8 @@ void Controller::start_anticogging_calibration() {
         config_.anticogging.index = 0;
         anticogging_settle_streak_ = 0;
         anticogging_calib_phase_ = 0;
+        anticogging_finalize_idx_ = 0;
+        anticogging_finalize_sum_ = 0.0f;
         for (float& v : anticogging_rev_buffer_) {
             v = 0.0f;
         }
@@ -75,6 +77,16 @@ void Controller::start_anticogging_calibration() {
 float Controller::get_anticogging_value(uint32_t index) {
     const uint32_t i = std::min<uint32_t>(index, 3599u);
     return config_.anticogging.cogging_map[i];
+}
+
+// Host-side restore of a previously dumped cogging map (no calibration sweep).
+// Out-of-range indices are ignored so a partial/garbled stream cannot corrupt
+// neighbouring config. The caller is expected to disable anticogging while
+// streaming, then set anticogging.pre_calibrated and call save_configuration().
+void Controller::set_anticogging_value(uint32_t index, float value) {
+    if (index < 3600u) {
+        config_.anticogging.cogging_map[index] = value;
+    }
 }
 
 /*
@@ -133,28 +145,52 @@ bool Controller::anticogging_calibration(float pos_estimate, float vel_estimate)
         }
     }
 
-    if (anticogging_calib_phase_ == 2) {
-        float sum = 0.0f;
-        for (uint32_t j = 0; j < kBins; j++) {
-            const float v = 0.5f * (config_.anticogging.cogging_map[j] + anticogging_rev_buffer_[j]);
-            config_.anticogging.cogging_map[j] = v;
-            sum += v;
-        }
-        const float mean = sum / (float)kBins;
-        for (uint32_t j = 0; j < kBins; j++) {
-            config_.anticogging.cogging_map[j] -= mean;
-        }
+    // Finalize (average fwd+rev, then subtract the global mean) is chunked across control cycles:
+    // doing the full 2x3600 float pass inline in one 8 kHz iteration overran the control deadline.
+    static constexpr uint32_t kFinalizeChunk = 128;
 
-        config_.anticogging.index = 0;
+    if (anticogging_calib_phase_ == 2 || anticogging_calib_phase_ == 3) {
+        const uint32_t end = std::min<uint32_t>(anticogging_finalize_idx_ + kFinalizeChunk, kBins);
+        if (anticogging_calib_phase_ == 2) {
+            // Pass A: cogging_map[j] = 0.5*(forward[j] + reverse[j]); accumulate sum for the mean.
+            for (uint32_t j = anticogging_finalize_idx_; j < end; j++) {
+                const float v = 0.5f * (config_.anticogging.cogging_map[j] + anticogging_rev_buffer_[j]);
+                config_.anticogging.cogging_map[j] = v;
+                anticogging_finalize_sum_ += v;
+            }
+        } else {
+            // Pass B: subtract the global mean -> zero-mean map.
+            for (uint32_t j = anticogging_finalize_idx_; j < end; j++) {
+                config_.anticogging.cogging_map[j] -= anticogging_finalize_mean_;
+            }
+        }
+        anticogging_finalize_idx_ = end;
+
+        // Keep holding position (motor is parked at bin 0 from the end of the reverse sweep).
         config_.control_mode = CONTROL_MODE_POSITION_CONTROL;
-        input_pos_ = 0.0f;
         input_vel_ = 0.0f;
         input_torque_ = 0.0f;
         input_pos_updated();
-        anticogging_valid_ = true;
-        config_.anticogging.calib_anticogging = false;
-        anticogging_calib_phase_ = 0;
-        return true;
+
+        if (anticogging_finalize_idx_ >= kBins) {
+            anticogging_finalize_idx_ = 0;
+            if (anticogging_calib_phase_ == 2) {
+                anticogging_finalize_mean_ = anticogging_finalize_sum_ / (float)kBins;
+                anticogging_calib_phase_ = 3;
+            } else {
+                config_.anticogging.index = 0;
+                input_pos_ = 0.0f;
+                input_vel_ = 0.0f;
+                input_torque_ = 0.0f;
+                input_pos_updated();
+                anticogging_valid_ = true;
+                config_.anticogging.calib_anticogging = false;
+                anticogging_calib_phase_ = 0;
+                anticogging_finalize_sum_ = 0.0f;
+                return true;
+            }
+        }
+        return false;
     }
 
     if (anticogging_calib_phase_ == 0 && config_.anticogging.index < kBins) {
@@ -365,7 +401,16 @@ bool Controller::update(float* torque_setpoint_output) {
     // We get the current position and apply a current feed-forward
     // ensuring that we handle negative encoder positions properly (-1 == motor->encoder.encoder_cpr - 1)
     if (anticogging_valid_ && config_.anticogging.anticogging_enabled) {
-        torque += config_.anticogging.cogging_map[std::clamp(mod((int)anticogging_pos, 3600), 0, 3600)];
+        // Interpolate linearly between adjacent bins so the feed-forward torque is continuous.
+        // The 3600-entry map is circular over one turn; anticogging_pos is in bin units
+        // (pos * 3600), or the trajectory setpoint in TRAP_TRAJ mode (see above).
+        const float turns = anticogging_pos * (1.0f / 3600.0f);
+        const float binf  = (turns - floorf(turns)) * 3600.0f;   // [0, 3600)
+        const int   i0    = std::clamp((int)binf, 0, 3599);
+        const int   i1    = (i0 + 1) % 3600;                      // circular wrap
+        const float frac  = binf - (float)i0;                     // [0, 1)
+        const float* m    = config_.anticogging.cogging_map;
+        torque += m[i0] + frac * (m[i1] - m[i0]);
     }
 
     float v_err = 0.0f;

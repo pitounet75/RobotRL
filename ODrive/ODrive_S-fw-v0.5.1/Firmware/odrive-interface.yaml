@@ -732,6 +732,13 @@ interfaces:
         doc: Return cogging_map[index] for index 0..3599 (clamped). Nm feedforward per bin.
         in: {index: uint32}
         out: {val: float32}
+      set_anticogging_value:
+        doc: |
+          Write cogging_map[index] (index 0..3599, out-of-range ignored). Nm feedforward per bin.
+          Lets a host restore a previously dumped map without re-running the calibration sweep.
+          Disable config.anticogging.anticogging_enabled while streaming the 3600 bins, then set
+          config.anticogging.pre_calibrated = True and save_configuration() when done.
+        in: {index: uint32, value: float32}
 
 
   ODrive.Encoder:
@@ -945,10 +952,18 @@ valuetypes:
       SpiThenAbzMt6835:
         value: 0x105
         doc: |
-          MT6835 (same SPI wiring and burst protocol as SpiAbsMt6835) with ABZ also connected.
-          On the first successful SPI read (valid CRC), the quadrature timer is seeded from the
-          absolute count and the axis continues in incremental (ABZ) mode — no index search for
-          initial mechanical angle. Use encoder ``config.cpr`` consistent with the part (e.g. 2^21).
+          MT6835 (same SPI wiring and burst protocol as SpiAbsMt6835) with the ABZ
+          incremental outputs also wired to the encoder A/B pins. On the first
+          successful SPI read (valid CRC) the quadrature timer is seeded from the
+          absolute count and the axis then runs purely incremental (ABZ) — no
+          index search needed for the initial mechanical angle.
+
+          IMPORTANT: after the hand-over the resolution is that of the ABZ output,
+          NOT the 21-bit SPI value. Set ``config.cpr`` = 4 × (ABZ PPR programmed in
+          the MT6835 EEPROM), which must be ≤ 65536 (ABZ PPR ≤ 16384). The default
+          ``config.cpr`` of 2^21 is only valid for the pure SpiAbsMt6835 mode; the
+          firmware rejects this mode with `UnsupportedEncoderMode` if ``cpr`` is
+          outside (0, 65536].
 
   ODrive.Controller.ControlMode:
     values:
