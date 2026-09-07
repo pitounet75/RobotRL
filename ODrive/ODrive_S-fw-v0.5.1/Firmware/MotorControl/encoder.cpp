@@ -13,6 +13,13 @@ enum class AbsSpiFmt : uint8_t {
 static SPI_HandleTypeDef* s_abs_spi = nullptr;
 static AbsSpiFmt s_abs_fmt = AbsSpiFmt::Unset;
 
+/* SPI3 is physically shared between the absolute encoder and the DRV8301 gate
+ * driver, which need incompatible frame formats (encoder MT6835: 8-bit / SPI
+ * mode 3 ; DRV8301: 16-bit / SPI mode 1). While this flag is set, a DRV8301
+ * transaction owns the bus and the ADC-ISR-driven encoder transfer skips its
+ * turn instead of colliding. Set/cleared from Motor::check_DRV_fault(). */
+static volatile bool s_spi3_drv_lock = false;
+
 static void abs_spi_apply_hw(SPI_HandleTypeDef* spi, Encoder::Mode mode) {
     AbsSpiFmt want = AbsSpiFmt::Unset;
     if (mode == Encoder::MODE_SPI_ABS_MT6835 || mode == Encoder::MODE_SPI_THEN_ABZ_MT6835) {
@@ -34,7 +41,10 @@ static void abs_spi_apply_hw(SPI_HandleTypeDef* spi, Encoder::Mode mode) {
     spi->Init.Mode = SPI_MODE_MASTER;
     spi->Init.Direction = SPI_DIRECTION_2LINES;
     spi->Init.NSS = SPI_NSS_SOFT;
-    spi->Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
+    // SPI3 = APB1/prescaler. /8 = 5.25 MHz was unreliable on a hand-made MT6835
+    // pigtail (spi_error_rate ~1). /16 = 2.6 MHz trades a bit of feedback latency
+    // (~18 us for the 6-byte burst, still << the 125 us control period) for margin.
+    spi->Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
     spi->Init.FirstBit = SPI_FIRSTBIT_MSB;
     spi->Init.TIMode = SPI_TIMODE_DISABLE;
     spi->Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -99,6 +109,11 @@ static uint8_t mt6835_crc8(const uint8_t* data, size_t len) {
 } // namespace
 
 
+void Encoder::spi3_lock_for_drv()   { s_spi3_drv_lock = true; }
+void Encoder::spi3_unlock_for_drv() { s_spi3_drv_lock = false; }
+bool Encoder::spi3_locked_for_drv() { return s_spi3_drv_lock; }
+
+
 Encoder::Encoder(const EncoderHardwareConfig_t& hw_config,
                 Config_t& config, const Motor::Config_t& motor_config) :
         hw_config_(hw_config),
@@ -124,6 +139,19 @@ void Encoder::setup() {
 
     mode_ = config_.mode;
     spi_then_abz_handoff_done_ = false;
+
+    if (mode_ == MODE_SPI_THEN_ABZ_MT6835) {
+        // After the SPI->ABZ handoff the position comes from the 16-bit quadrature
+        // timer fed by the MT6835 ABZ output. Usable resolution is 4 * ABZ_PPR,
+        // and ABZ_PPR maxes out at 16384 on the MT6835, so config_.cpr must be in
+        // (0, 65536] and must equal 4 * (ABZ PPR programmed in the MT6835 EEPROM).
+        // The default cpr (1 << 21) is only valid for pure MODE_SPI_ABS_MT6835.
+        if (config_.cpr <= 0 || config_.cpr > 65536) {
+            set_error(ERROR_UNSUPPORTED_ENCODER_MODE);
+            return;
+        }
+    }
+
     if(mode_ & MODE_FLAG_ABS){
         abs_spi_cs_pin_init();
         abs_spi_init();
@@ -445,6 +473,11 @@ bool Encoder::abs_spi_init(){
 bool Encoder::abs_spi_start_transaction(){
     if (mode_ & MODE_FLAG_ABS){
         if (mode_ == MODE_SPI_THEN_ABZ_MT6835 && spi_then_abz_handoff_done_) {
+            return true;
+        }
+        if (s_spi3_drv_lock) {
+            // DRV8301 owns SPI3 this cycle; skip. The spi_error_rate_ low-pass
+            // filter in update() tolerates a handful of skipped reads.
             return true;
         }
         abs_spi_apply_hw(hw_config_.spi, mode_);

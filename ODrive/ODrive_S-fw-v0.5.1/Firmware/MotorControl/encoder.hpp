@@ -11,7 +11,15 @@ public:
     static constexpr uint32_t MODE_FLAG_ABS = 0x100;
 
     struct Config_t {
-        Mode mode = MODE_SPI_ABS_MT6835;
+        // Default INCREMENTAL, not MT6835: pwm_trig_adc_cb() starts an abs-SPI
+        // transaction every cycle for ANY axis whose mode has MODE_FLAG_ABS, even
+        // when that axis is idle. With the factory default of MODE_SPI_ABS_MT6835
+        // an unconfigured axis1 hammers the SPI3 bus shared with axis0's encoder
+        // (and, sharing abs_spi_cs_gpio_pin=6, toggles the same CS), which
+        // corrupts axis0's reads (spi_error_rate -> 1). This came back after every
+        // erase_configuration()/NVM-load-fail. Configure axis0.encoder.config.mode
+        // explicitly, like stock ODrive.
+        Mode mode = MODE_INCREMENTAL;
         bool use_index = false;
         bool pre_calibrated = false; // If true, this means the offset stored in
                                     // configuration is valid and does not need
@@ -105,6 +113,13 @@ public:
     void abs_spi_cs_pin_init();
     /** Seed ABZ timer from last SPI absolute position; see MODE_SPI_THEN_ABZ_MT6835. */
     void spi_then_abz_handoff_from_abs_spi();
+    /** SPI3 is shared with the DRV8301 gate driver. A DRV8301 transaction calls
+     *  spi3_lock_for_drv() so the ADC-ISR-driven absolute-encoder transfer skips
+     *  its turn instead of colliding / running with the wrong frame format, then
+     *  spi3_unlock_for_drv() when done. See Motor::check_DRV_fault(). */
+    static void spi3_lock_for_drv();
+    static void spi3_unlock_for_drv();
+    static bool spi3_locked_for_drv();
     uint16_t abs_spi_dma_tx_[1] = {0xFFFF};
     uint16_t abs_spi_dma_rx_[1];
     static constexpr size_t MT6835_SPI_XFER_BYTES = 6;
