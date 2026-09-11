@@ -815,6 +815,7 @@ void start_analog_thread() {
 
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 {
+    bool matched = false;
     for (size_t i = 0; i < AXIS_COUNT; ++i) {
         Encoder& enc = axes[i]->encoder_;
         if (!(enc.mode_ & Encoder::MODE_FLAG_ABS)) {
@@ -824,11 +825,21 @@ void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
             (enc.mode_ == Encoder::MODE_SPI_THEN_ABZ_MT6835 && !enc.spi_then_abz_handoff_done_)) {
             if (hspi->pRxBuffPtr == enc.mt6835_dma_rx_) {
                 enc.abs_spi_cb();
+                matched = true;
             }
         } else {
             if (hspi->pRxBuffPtr == (uint8_t*)enc.abs_spi_dma_rx_) {
                 enc.abs_spi_cb();
+                matched = true;
             }
         }
     }
+    if (!matched) {
+        Encoder::abs_spi_note_no_callback(hspi);
+    }
+}
+
+void HAL_SPI_ErrorCallback(SPI_HandleTypeDef *hspi)
+{
+    Encoder::abs_spi_note_hal_error(hspi);
 }

@@ -147,7 +147,8 @@ bool Controller::anticogging_calibration(float pos_estimate, float vel_estimate)
 
     // Finalize (average fwd+rev, then subtract the global mean) is chunked across control cycles:
     // doing the full 2x3600 float pass inline in one 8 kHz iteration overran the control deadline.
-    static constexpr uint32_t kFinalizeChunk = 128;
+    // 128/cycle was still missing the deadline; cut further for margin.
+    static constexpr uint32_t kFinalizeChunk = 32;
 
     if (anticogging_calib_phase_ == 2 || anticogging_calib_phase_ == 3) {
         const uint32_t end = std::min<uint32_t>(anticogging_finalize_idx_ + kFinalizeChunk, kBins);

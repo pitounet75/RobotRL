@@ -268,6 +268,8 @@ int odrive_main(void) {
             axis->encoder_.abs_spi_cs_pin_init();
         }
     }
+    /* Park GPIO7 only if an abs-SPI encoder CS is not GPIO7 (leftover 5047). */
+    Encoder::spi3_park_foreign_cs();
 
     // Setup motors (DRV8301 SPI transactions here)
     // for(auto& axis : axes){

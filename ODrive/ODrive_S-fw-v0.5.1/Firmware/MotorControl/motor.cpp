@@ -146,12 +146,62 @@ void Motor::set_error(Motor::Error error){
 }
 
 bool Motor::do_checks() {
+    if (gate_driver_exported_.spi_ping_en) {
+        uint32_t now = HAL_GetTick();
+        if ((now - drv_spi_ping_last_ms_) >= 250) {
+            drv_spi_ping_last_ms_ = now;
+            drv_spi_ping();
+        }
+    }
     if (!check_DRV_fault()) {
         set_error(ERROR_DRV_FAULT);
         return false;
     }
 
     return true;
+}
+
+/* Diagnostic-only SPI3 ping of this axis's DRV8301. Shares the bus with the
+ * MT6835: lock so the ADC ISR skips, wait for any in-flight encoder DMA, switch
+ * to 16-bit mode 1, read Status_2 (device ID == 1), restore encoder framing in
+ * this thread, unlock. Never DeInit from the ADC ISR. */
+void Motor::drv_spi_ping() {
+    SPI_HandleTypeDef* spi = gate_driver_.spiHandle;
+    auto& gd = gate_driver_exported_;
+    if (armed_state_ != ARMED_STATE_DISARMED) {
+        return;
+    }
+    if (!spi || !Encoder::spi3_try_lock_for_drv()) {
+        return;
+    }
+
+    auto fail_busy = [&gd]() {
+        gd.spi_ping_last_hal = (uint32_t)HAL_BUSY;
+        gd.spi_ping_fail_count++;
+        Encoder::spi3_unlock_for_drv();
+    };
+
+    if (!Encoder::spi3_wait_idle(spi, 2)) {
+        fail_busy();
+        return;
+    }
+
+    Encoder::spi3_park_foreign_cs();
+    Encoder::spi3_apply_drv_format(spi);
+
+    /* Same 16-bit read as boot (DRV8301_readSpi), after parking foreign/owned
+     * encoder CS so unused slaves stay off MISO. */
+    const uint16_t word = DRV8301_readSpi(&gate_driver_, DRV8301_RegName_Status_2);
+    gd.spi_ping_last_raw = word;
+    gd.spi_ping_last_hal = 0;
+    if ((word & DRV8301_STATUS2_ID_BITS) == 1u) {
+        gd.spi_ping_ok_count++;
+    } else {
+        gd.spi_ping_fail_count++;
+    }
+
+    Encoder::spi3_restore_abs_format(spi);
+    Encoder::spi3_unlock_for_drv();
 }
 
 float Motor::effective_current_lim() {

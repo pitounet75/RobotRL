@@ -20,18 +20,10 @@ static AbsSpiFmt s_abs_fmt = AbsSpiFmt::Unset;
  * turn instead of colliding. Set/cleared from Motor::check_DRV_fault(). */
 static volatile bool s_spi3_drv_lock = false;
 
-static void abs_spi_apply_hw(SPI_HandleTypeDef* spi, Encoder::Mode mode) {
-    AbsSpiFmt want = AbsSpiFmt::Unset;
-    if (mode == Encoder::MODE_SPI_ABS_MT6835 || mode == Encoder::MODE_SPI_THEN_ABZ_MT6835) {
-        want = AbsSpiFmt::W8Mt6835;
-    } else if (mode == Encoder::MODE_SPI_ABS_AEAT) {
-        want = AbsSpiFmt::W16Aeat;
-    } else if (mode & Encoder::MODE_FLAG_ABS) {
-        want = AbsSpiFmt::W16Std;
-    } else {
+static void abs_spi_apply_fmt(SPI_HandleTypeDef* spi, AbsSpiFmt want) {
+    if (!spi || want == AbsSpiFmt::Unset) {
         return;
     }
-
     if (s_abs_spi == spi && s_abs_fmt == want) {
         return;
     }
@@ -41,10 +33,11 @@ static void abs_spi_apply_hw(SPI_HandleTypeDef* spi, Encoder::Mode mode) {
     spi->Init.Mode = SPI_MODE_MASTER;
     spi->Init.Direction = SPI_DIRECTION_2LINES;
     spi->Init.NSS = SPI_NSS_SOFT;
-    // SPI3 = APB1/prescaler. /8 = 5.25 MHz was unreliable on a hand-made MT6835
-    // pigtail (spi_error_rate ~1). /16 = 2.6 MHz trades a bit of feedback latency
-    // (~18 us for the 6-byte burst, still << the 125 us control period) for margin.
-    spi->Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
+    // SPI3 = APB1/prescaler. /8 = 5.25 MHz, 6-byte burst ~9 us. The earlier
+    // spi_error_rate ~1 was a floating GPIO7 (leftover AS5047) leaking onto MISO,
+    // not the clock rate; /16 only cost ~9 us/cycle of headroom and pushed the
+    // chunked anticogging finalize past the 8 kHz control deadline.
+    spi->Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
     spi->Init.FirstBit = SPI_FIRSTBIT_MSB;
     spi->Init.TIMode = SPI_TIMODE_DISABLE;
     spi->Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -56,12 +49,27 @@ static void abs_spi_apply_hw(SPI_HandleTypeDef* spi, Encoder::Mode mode) {
         spi->Init.CLKPolarity = SPI_POLARITY_HIGH;
         spi->Init.CLKPhase = SPI_PHASE_2EDGE;
     } else {
+        /* DRV8301 and AMS/CUI/RLS: 16-bit, mode 1 (CPOL=0 CPHA=1) except AEAT. */
         spi->Init.DataSize = SPI_DATASIZE_16BIT;
         spi->Init.CLKPolarity = (want == AbsSpiFmt::W16Aeat) ? SPI_POLARITY_HIGH : SPI_POLARITY_LOW;
         spi->Init.CLKPhase = SPI_PHASE_2EDGE;
     }
     HAL_SPI_DeInit(spi);
     HAL_SPI_Init(spi);
+}
+
+static void abs_spi_apply_hw(SPI_HandleTypeDef* spi, Encoder::Mode mode) {
+    AbsSpiFmt want = AbsSpiFmt::Unset;
+    if (mode == Encoder::MODE_SPI_ABS_MT6835 || mode == Encoder::MODE_SPI_THEN_ABZ_MT6835) {
+        want = AbsSpiFmt::W8Mt6835;
+    } else if (mode == Encoder::MODE_SPI_ABS_AEAT) {
+        want = AbsSpiFmt::W16Aeat;
+    } else if (mode & Encoder::MODE_FLAG_ABS) {
+        want = AbsSpiFmt::W16Std;
+    } else {
+        return;
+    }
+    abs_spi_apply_fmt(spi, want);
 }
 
 /* MT6835 datasheet §7.6.9 burst read: C3~C0=1010 with address 0x003, CSN held low
@@ -112,6 +120,132 @@ static uint8_t mt6835_crc8(const uint8_t* data, size_t len) {
 void Encoder::spi3_lock_for_drv()   { s_spi3_drv_lock = true; }
 void Encoder::spi3_unlock_for_drv() { s_spi3_drv_lock = false; }
 bool Encoder::spi3_locked_for_drv() { return s_spi3_drv_lock; }
+
+bool Encoder::spi3_try_lock_for_drv() {
+    uint32_t primask = cpu_enter_critical();
+    bool got = !s_spi3_drv_lock;
+    if (got) {
+        s_spi3_drv_lock = true;
+    }
+    cpu_exit_critical(primask);
+    return got;
+}
+
+bool Encoder::spi3_wait_idle(SPI_HandleTypeDef* spi, uint32_t timeout_ms) {
+    if (!spi) {
+        return false;
+    }
+    uint32_t t0 = HAL_GetTick();
+    while (spi->State != HAL_SPI_STATE_READY) {
+        if ((HAL_GetTick() - t0) > timeout_ms) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void Encoder::spi3_apply_drv_format(SPI_HandleTypeDef* spi) {
+    abs_spi_apply_fmt(spi, AbsSpiFmt::W16Std);
+}
+
+void Encoder::spi3_restore_abs_format(SPI_HandleTypeDef* spi) {
+    for (size_t i = 0; i < AXIS_COUNT; ++i) {
+        Encoder& enc = axes[i]->encoder_;
+        if (enc.hw_config_.spi != spi) {
+            continue;
+        }
+        if (!(enc.mode_ & MODE_FLAG_ABS)) {
+            continue;
+        }
+        if (enc.mode_ == MODE_SPI_THEN_ABZ_MT6835 && enc.spi_then_abz_handoff_done_) {
+            continue;
+        }
+        abs_spi_apply_hw(spi, enc.mode_);
+        return;
+    }
+}
+
+void Encoder::spi3_park_foreign_cs() {
+    /* GPIO7 is Axis1 Step in stock FW, not a CS. When an abs-SPI encoder
+     * uses another GPIO as CS, the leftover 5047 on GPIO7 stays INPUT
+     * NOPULL and can leak onto SPI3 MISO. Park only that case. If GPIO7
+     * itself is the selected encoder CS, abs_spi_cs_pin_init owns it. */
+    bool gpio7_is_encoder_cs = false;
+    bool other_encoder_cs = false;
+    for (size_t i = 0; i < AXIS_COUNT; ++i) {
+        const Encoder& enc = axes[i]->encoder_;
+        /* config_.mode: this runs before Encoder::setup() copies mode_. */
+        if (!(enc.config_.mode & MODE_FLAG_ABS) && !(enc.mode_ & MODE_FLAG_ABS)) {
+            continue;
+        }
+        if (enc.config_.abs_spi_cs_gpio_pin == 7) {
+            gpio7_is_encoder_cs = true;
+        } else {
+            other_encoder_cs = true;
+        }
+    }
+
+    if (other_encoder_cs && !gpio7_is_encoder_cs) {
+        static bool s_gpio7_parked = false;
+        GPIO_TypeDef* const gpio7_port = get_gpio_port_by_pin(7);
+        const uint16_t gpio7_pin = get_gpio_pin_by_pin(7);
+        if (!s_gpio7_parked) {
+            HAL_GPIO_DeInit(gpio7_port, gpio7_pin);
+            GPIO_InitTypeDef gpio = {};
+            gpio.Pin = gpio7_pin;
+            gpio.Mode = GPIO_MODE_OUTPUT_PP;
+            gpio.Pull = GPIO_PULLUP;
+            gpio.Speed = GPIO_SPEED_FREQ_LOW;
+            HAL_GPIO_Init(gpio7_port, &gpio);
+            s_gpio7_parked = true;
+        }
+        HAL_GPIO_WritePin(gpio7_port, gpio7_pin, GPIO_PIN_SET);
+    }
+
+    for (size_t i = 0; i < AXIS_COUNT; ++i) {
+        Encoder& enc = axes[i]->encoder_;
+        if ((enc.mode_ & MODE_FLAG_ABS) && enc.abs_spi_cs_port_) {
+            HAL_GPIO_WritePin(enc.abs_spi_cs_port_, enc.abs_spi_cs_pin_, GPIO_PIN_SET);
+        }
+    }
+}
+
+void Encoder::abs_spi_note_fail(uint32_t fail_class, uint32_t detail) {
+    spi_fail_class_ = fail_class;
+    spi_fail_detail_ = detail;
+    if (spi_fail_class_first_ == SPI_FAIL_NONE && fail_class != SPI_FAIL_NONE) {
+        spi_fail_class_first_ = fail_class;
+    }
+}
+
+void Encoder::abs_spi_note_hal_error(SPI_HandleTypeDef* spi) {
+    if (!spi || !spi->Instance) {
+        return;
+    }
+    const uint32_t detail = (uint32_t)spi->ErrorCode | ((uint32_t)spi->Instance->SR << 16);
+    for (size_t i = 0; i < AXIS_COUNT; ++i) {
+        Encoder& enc = axes[i]->encoder_;
+        if ((enc.mode_ & MODE_FLAG_ABS) && enc.hw_config_.spi == spi) {
+            enc.abs_spi_note_fail(SPI_FAIL_HAL, detail);
+            if (enc.abs_spi_cs_port_) {
+                HAL_GPIO_WritePin(enc.abs_spi_cs_port_, enc.abs_spi_cs_pin_, GPIO_PIN_SET);
+            }
+        }
+    }
+}
+
+void Encoder::abs_spi_note_no_callback(SPI_HandleTypeDef* spi) {
+    const uint32_t detail = spi ? (uint32_t)(size_t)spi->pRxBuffPtr : 0;
+    for (size_t i = 0; i < AXIS_COUNT; ++i) {
+        Encoder& enc = axes[i]->encoder_;
+        if ((enc.mode_ & MODE_FLAG_ABS) && enc.hw_config_.spi == spi) {
+            enc.abs_spi_note_fail(SPI_FAIL_NO_CB, detail);
+            if (enc.abs_spi_cs_port_) {
+                HAL_GPIO_WritePin(enc.abs_spi_cs_port_, enc.abs_spi_cs_pin_, GPIO_PIN_SET);
+            }
+        }
+    }
+}
 
 
 Encoder::Encoder(const EncoderHardwareConfig_t& hw_config,
@@ -483,6 +617,7 @@ bool Encoder::abs_spi_start_transaction(){
         abs_spi_apply_hw(hw_config_.spi, mode_);
         axis_->motor_.log_timing(TIMING_LOG_SPI_START);
         if(hw_config_.spi->State != HAL_SPI_STATE_READY){
+            abs_spi_note_fail(SPI_FAIL_NOT_READY, (uint32_t)hw_config_.spi->State);
             set_error(ERROR_ABS_SPI_NOT_READY);
             return false;
         }
@@ -526,8 +661,17 @@ void Encoder::abs_spi_cb(){
         mt6835_accum_[1] = mt6835_dma_rx_[3];
         mt6835_accum_[2] = mt6835_dma_rx_[4];
         mt6835_accum_[3] = mt6835_dma_rx_[5];
+        spi_rx_dbg_ = ((uint32_t)mt6835_accum_[0] << 24)
+                    | ((uint32_t)mt6835_accum_[1] << 16)
+                    | ((uint32_t)mt6835_accum_[2] << 8)
+                    | (uint32_t)mt6835_accum_[3];
 
-        if (mt6835_crc8(mt6835_accum_, 3) != mt6835_accum_[3]) {
+        const uint8_t crc_calc = mt6835_crc8(mt6835_accum_, 3);
+        if (crc_calc != mt6835_accum_[3]) {
+            uint32_t sr = (hw_config_.spi && hw_config_.spi->Instance)
+                ? hw_config_.spi->Instance->SR : 0u;
+            abs_spi_note_fail(SPI_FAIL_CRC,
+                (uint32_t)mt6835_accum_[3] | ((uint32_t)crc_calc << 8) | (sr << 16));
             return;
         }
 
