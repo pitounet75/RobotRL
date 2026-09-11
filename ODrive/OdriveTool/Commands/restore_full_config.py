@@ -57,6 +57,35 @@ MAP_BINS = 3600
 WRITABLE_ANTICOGGING = ("calib_pos_threshold", "calib_vel_threshold",
                         "anticogging_enabled", "pre_calibrated")
 
+# encoder.hpp: MODE_FLAG_ABS = 0x100. On boot, the firmware only re-arms
+# controller.anticogging_valid from anticogging.pre_calibrated for axes whose
+# encoder mode has this bit set (abs-SPI: no index search needed), or for
+# incremental encoders that complete an index search that boot (use_index=True).
+# A plain incremental encoder with use_index=False has no absolute position
+# reference across a power cycle - the firmware correctly refuses to trust
+# pre_calibrated there (re-arming anyway would silently apply the map at
+# whatever arbitrary phase the shaft happened to power up at, which is worse
+# than not applying it at all) - so a restored map on such an axis will never
+# activate after reboot, silently, unless this script warns about it here.
+MODE_FLAG_ABS = 0x100
+
+
+def warn_if_anticogging_wont_activate(ax, key):
+    try:
+        mode = int(ax.encoder.config.mode)
+        use_index = bool(ax.encoder.config.use_index)
+    except Exception:
+        return  # can't read encoder config; nothing to check
+    if not (mode & MODE_FLAG_ABS) and not use_index:
+        print("  axis{}: WARNING - encoder.config.mode={} is a plain incremental "
+              "encoder with use_index=False. The firmware cannot re-arm "
+              "anticogging_valid from pre_calibrated on boot without an absolute "
+              "position reference, so this restored map will NOT activate after "
+              "reboot even though pre_calibrated will read True. Enable use_index "
+              "(if the encoder has an index channel) or switch to an abs-SPI mode, "
+              "or the map will need to be re-calibrated fresh each boot instead."
+              .format(key, mode), file=sys.stderr)
+
 
 def close_enough(a, b):
     # float32 round-trip tolerance
@@ -190,6 +219,8 @@ def main():
                               file=sys.stderr)
             print("axis{}: flags -> pre_calibrated={} anticogging_enabled={}".format(
                 key, ac.pre_calibrated, ac.anticogging_enabled))
+            if ac.pre_calibrated:
+                warn_if_anticogging_wont_activate(ax, key)
 
     if dry:
         print("Dry run complete - nothing written.")
