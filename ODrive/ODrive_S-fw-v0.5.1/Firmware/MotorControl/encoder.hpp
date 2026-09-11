@@ -96,6 +96,7 @@ public:
     uint32_t spi_fail_class_first_ = 0;
     uint32_t spi_fail_detail_ = 0;
     uint32_t spi_rx_dbg_ = 0;
+    uint32_t spi_drv_skip_count_ = 0;
 
     static constexpr uint32_t SPI_FAIL_NONE = 0;
     static constexpr uint32_t SPI_FAIL_CRC = 1;

@@ -637,6 +637,7 @@ bool Encoder::abs_spi_start_transaction(){
         if (s_spi3_drv_lock) {
             // DRV8301 owns SPI3 this cycle; skip. The spi_error_rate_ low-pass
             // filter in update() tolerates a handful of skipped reads.
+            spi_drv_skip_count_++;
             return true;
         }
         abs_spi_apply_hw(hw_config_.spi, mode_);

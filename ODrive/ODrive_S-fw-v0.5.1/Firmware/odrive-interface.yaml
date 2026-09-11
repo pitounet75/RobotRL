@@ -810,6 +810,14 @@ interfaces:
       calib_scan_response: readonly float32
       pos_abs: int32
       spi_error_rate: readonly float32
+      spi_drv_skip_count:
+        type: readonly uint32
+        doc: |
+          Times this encoder's SPI3 burst read was skipped because the DRV8301
+          ping (Motor::drv_spi_ping) owned the bus that cycle. Benign and
+          already tolerated by spi_error_rate_ / ERROR_ABS_SPI_COM_FAIL; a
+          steadily climbing count with spi_fail_class == 0 means bus
+          contention, not a failing encoder.
       spi_fail_class:
         type: readonly uint32
         doc: |
