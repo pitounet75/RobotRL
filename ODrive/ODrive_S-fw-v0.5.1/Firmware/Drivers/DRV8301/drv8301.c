@@ -394,6 +394,46 @@ uint16_t DRV8301_readSpi(DRV8301_Handle handle, const DRV8301_RegName_e regName)
 }  // end of DRV8301_readSpi() function
 
 
+uint16_t DRV8301_readSpiEx(DRV8301_Handle handle, const DRV8301_RegName_e regName,
+                            uint32_t timeout_ms, HAL_StatusTypeDef* out_status)
+{
+  // Actuate chipselect
+  HAL_GPIO_WritePin(handle->nCSgpioHandle, handle->nCSgpioNumber, GPIO_PIN_RESET);
+  delay_us(1);
+
+  uint16_t zerobuff = 0;
+  uint16_t controlword = (uint16_t)DRV8301_buildCtrlWord(DRV8301_CtrlMode_Read, regName, 0);
+  uint16_t recbuff = 0xbeef;
+  HAL_StatusTypeDef status = HAL_SPI_Transmit(handle->spiHandle, (uint8_t*)(&controlword), 1, timeout_ms);
+
+  // Datasheet says you don't have to pulse the nCS between transfers, (16 clocks should commit the transfer)
+  // but for some reason you actually need to pulse it.
+  // Actuate chipselect
+  HAL_GPIO_WritePin(handle->nCSgpioHandle, handle->nCSgpioNumber, GPIO_PIN_SET);
+  delay_us(1);
+  // Actuate chipselect
+  HAL_GPIO_WritePin(handle->nCSgpioHandle, handle->nCSgpioNumber, GPIO_PIN_RESET);
+  delay_us(1);
+
+  HAL_StatusTypeDef status2 = HAL_SPI_TransmitReceive(handle->spiHandle, (uint8_t*)(&zerobuff), (uint8_t*)(&recbuff), 1, timeout_ms);
+  delay_us(1);
+
+  // Actuate chipselect
+  HAL_GPIO_WritePin(handle->nCSgpioHandle, handle->nCSgpioNumber, GPIO_PIN_SET);
+  delay_us(1);
+
+  if (out_status) {
+    *out_status = (status != HAL_OK) ? status : status2;
+  }
+
+  // No assert here: unlike DRV8301_readSpi(), this variant is meant to be
+  // called periodically against a bus that can legitimately be busy or a
+  // DRV that can legitimately be unresponsive, and must report that via
+  // out_status rather than halting the firmware.
+  return(recbuff & DRV8301_DATA_MASK);
+}  // end of DRV8301_readSpiEx() function
+
+
 void DRV8301_reset(DRV8301_Handle handle)
 {
   uint16_t data;

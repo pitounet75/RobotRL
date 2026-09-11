@@ -149,6 +149,8 @@ void Encoder::spi3_apply_drv_format(SPI_HandleTypeDef* spi) {
 }
 
 void Encoder::spi3_restore_abs_format(SPI_HandleTypeDef* spi) {
+    // Multiple axes can share this bus with abs-SPI encoders of different
+    // frame formats; apply every matching axis's format, not just the first.
     for (size_t i = 0; i < AXIS_COUNT; ++i) {
         Encoder& enc = axes[i]->encoder_;
         if (enc.hw_config_.spi != spi) {
@@ -161,7 +163,6 @@ void Encoder::spi3_restore_abs_format(SPI_HandleTypeDef* spi) {
             continue;
         }
         abs_spi_apply_hw(spi, enc.mode_);
-        return;
     }
 }
 
@@ -186,20 +187,44 @@ void Encoder::spi3_park_foreign_cs() {
     }
 
     if (other_encoder_cs && !gpio7_is_encoder_cs) {
+        /* GPIO7 is also Axis1's default step/dir input. If step/dir is
+         * genuinely active there, it legitimately owns the pin as an
+         * interrupt input (Axis::set_step_dir_active) and re-parking it as
+         * a push-pull output here would both break step counting and, since
+         * HAL_GPIO_Init on an EXTI-subscribed pin doesn't touch the EXTI/NVIC
+         * config GPIO_subscribe set up, leave the pin in a mixed state.
+         * Skip parking while step/dir owns it, and re-park (self-heal) the
+         * moment it's released -- rather than latching "already parked"
+         * once and never re-checking, which silently leaves GPIO7 floating
+         * again for the rest of the session once step/dir is toggled off. */
+        bool gpio7_owned_by_step_dir = false;
+        for (size_t i = 0; i < AXIS_COUNT; ++i) {
+            const Axis& axis = *axes[i];
+            if (axis.config_.step_gpio_pin == 7 && axis.step_dir_active_) {
+                gpio7_owned_by_step_dir = true;
+                break;
+            }
+        }
+
         static bool s_gpio7_parked = false;
         GPIO_TypeDef* const gpio7_port = get_gpio_port_by_pin(7);
         const uint16_t gpio7_pin = get_gpio_pin_by_pin(7);
-        if (!s_gpio7_parked) {
-            HAL_GPIO_DeInit(gpio7_port, gpio7_pin);
-            GPIO_InitTypeDef gpio = {};
-            gpio.Pin = gpio7_pin;
-            gpio.Mode = GPIO_MODE_OUTPUT_PP;
-            gpio.Pull = GPIO_PULLUP;
-            gpio.Speed = GPIO_SPEED_FREQ_LOW;
-            HAL_GPIO_Init(gpio7_port, &gpio);
-            s_gpio7_parked = true;
+
+        if (gpio7_owned_by_step_dir) {
+            s_gpio7_parked = false;
+        } else {
+            if (!s_gpio7_parked) {
+                HAL_GPIO_DeInit(gpio7_port, gpio7_pin);
+                GPIO_InitTypeDef gpio = {};
+                gpio.Pin = gpio7_pin;
+                gpio.Mode = GPIO_MODE_OUTPUT_PP;
+                gpio.Pull = GPIO_PULLUP;
+                gpio.Speed = GPIO_SPEED_FREQ_LOW;
+                HAL_GPIO_Init(gpio7_port, &gpio);
+                s_gpio7_parked = true;
+            }
+            HAL_GPIO_WritePin(gpio7_port, gpio7_pin, GPIO_PIN_SET);
         }
-        HAL_GPIO_WritePin(gpio7_port, gpio7_pin, GPIO_PIN_SET);
     }
 
     for (size_t i = 0; i < AXIS_COUNT; ++i) {

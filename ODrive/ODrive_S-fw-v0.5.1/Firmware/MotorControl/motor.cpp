@@ -190,11 +190,19 @@ void Motor::drv_spi_ping() {
     Encoder::spi3_apply_drv_format(spi);
 
     /* Same 16-bit read as boot (DRV8301_readSpi), after parking foreign/owned
-     * encoder CS so unused slaves stay off MISO. */
-    const uint16_t word = DRV8301_readSpi(&gate_driver_, DRV8301_RegName_Status_2);
+     * encoder CS so unused slaves stay off MISO. Uses a short, bounded SPI
+     * timeout (DRV8301_readSpiEx) instead of DRV8301_readSpi()'s 1000 ms:
+     * this ping holds s_spi3_drv_lock for its whole duration, which makes
+     * the ADC ISR skip the other axis's abs-encoder reads on this shared
+     * bus, so a genuinely unresponsive DRV must not be able to stall that
+     * axis's position feedback for seconds. */
+    constexpr uint32_t kSpiPingTimeoutMs = 2;
+    HAL_StatusTypeDef hal_status = HAL_OK;
+    const uint16_t word = DRV8301_readSpiEx(&gate_driver_, DRV8301_RegName_Status_2,
+                                             kSpiPingTimeoutMs, &hal_status);
     gd.spi_ping_last_raw = word;
-    gd.spi_ping_last_hal = 0;
-    if ((word & DRV8301_STATUS2_ID_BITS) == 1u) {
+    gd.spi_ping_last_hal = (uint32_t)hal_status;
+    if (hal_status == HAL_OK && (word & DRV8301_STATUS2_ID_BITS) == 1u) {
         gd.spi_ping_ok_count++;
     } else {
         gd.spi_ping_fail_count++;

@@ -583,7 +583,7 @@ interfaces:
             doc: Failed DRV8301 SPI pings (HAL error, timeout, or ID != 1).
           spi_ping_last_raw:
             type: readonly uint32
-            doc: DRV8301_readSpi(Status_2) & 0x7FF (device ID in bits 3-0, expect 1).
+            doc: DRV8301_readSpiEx(Status_2) & 0x7FF (device ID in bits 3-0, expect 1).
           spi_ping_last_hal:
             type: readonly uint32
             doc: Last HAL_StatusTypeDef (0 OK, 1 ERROR, 2 BUSY, 3 TIMEOUT).
