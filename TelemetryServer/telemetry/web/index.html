@@ -1,3 +1,53 @@
 <!doctype html>
-<title>RobotRL Telemetry</title>
-<p>Web UI coming soon.</p>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>RobotRL Telemetry</title>
+    <link rel="stylesheet" href="vendor/uplot/uPlot.min.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>RobotRL Telemetry</h1>
+      <span id="connection-status" class="status-bad">disconnected</span>
+    </header>
+
+    <main>
+      <section id="charts">
+        <div id="chart-pitch" class="chart"></div>
+        <div id="chart-torque" class="chart"></div>
+        <div id="chart-velocity" class="chart"></div>
+        <div id="chart-flags" class="chart"></div>
+      </section>
+
+      <section id="controls">
+        <div class="control-block">
+          <label for="speed-slider">Speed</label>
+          <input type="range" id="speed-slider" min="-4000" max="4000" value="0" step="10" />
+          <span id="speed-label">+0.00 m/s (+0.000 motor turn/s)</span>
+          <button id="speed-zero">0</button>
+        </div>
+        <div class="control-block">
+          <label for="heading-slider">Heading</label>
+          <input type="range" id="heading-slider" min="-180" max="180" value="0" step="1" />
+          <span id="heading-label">+0&deg; (+0.000 rad)</span>
+          <button id="heading-zero">0</button>
+        </div>
+
+        <div class="control-block">
+          <button id="gains-refresh">Refresh from robot</button>
+          <button id="gains-apply-changed">Apply changed</button>
+          <button id="gains-apply-all">Apply all</button>
+          <button id="gains-pos-reset">pos_reset</button>
+          <button id="gains-heading-reset">heading_reset</button>
+          <span id="gains-status"></span>
+        </div>
+        <div id="gains-form"></div>
+      </section>
+    </main>
+
+    <script src="vendor/uplot/uPlot.iife.min.js"></script>
+    <script src="app.js" defer></script>
+    <script src="control.js" defer></script>
+  </body>
+</html>
