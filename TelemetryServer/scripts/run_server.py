@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import sys
 import threading
 import time
@@ -31,15 +32,19 @@ from telemetry.udp_envelope import (
     decode_udp_datagram,
 )
 from telemetry.udp_receiver import UdpTelemetryReceiver
+from telemetry.web_server import TelemetryWebServer
 
 
-def main() -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     p = argparse.ArgumentParser(description="RobotRL balance telemetry server")
     p.add_argument("--bind-host", default="0.0.0.0")
     p.add_argument("--bind-port", type=int, default=5000)
     p.add_argument("--esp32-host", help="ESP32 IP for subscribe ping (learn-remote)")
     p.add_argument("--esp32-port", type=int, default=5000)
     p.add_argument("--plot", action="store_true", help="Live matplotlib plot")
+    p.add_argument("--web", action="store_true", help="Live web dashboard (browser)")
+    p.add_argument("--web-host", default="0.0.0.0", help="Web UI bind host")
+    p.add_argument("--web-port", type=int, default=8765, help="Web UI bind port")
     p.add_argument("--record", type=Path, help="CSV output path")
     p.add_argument("--history-s", type=float, default=10.0)
     p.add_argument("--receive-buffer", type=int, default=1024 * 1024, help="Requested UDP SO_RCVBUF bytes")
@@ -65,7 +70,10 @@ def main() -> int:
         default=0.002,
         help="|cmd| below this counts as stalled for --diag-stall (Nm)",
     )
-    args = p.parse_args()
+    args = p.parse_args(argv)
+
+    if args.plot and args.web:
+        p.error("--plot and --web are mutually exclusive; run two processes for both.")
 
     receiver = UdpTelemetryReceiver(
         bind_host=args.bind_host,
@@ -106,8 +114,12 @@ def main() -> int:
     if args.esp32_host:
         receiver.subscribe()
         print(f"Subscribe ping sent to {args.esp32_host}:{args.esp32_port} (repeats every 5 s)")
-        if plotter is not None:
+        if plotter is not None or args.web:
             rpc = SharedRpcClient(receiver)
+
+    web_server: Optional[TelemetryWebServer] = None
+    if args.web:
+        web_server = TelemetryWebServer(rpc=rpc, static_dir=ROOT / "telemetry" / "web")
 
     print(
         f"Listening UDP {args.bind_host}:{args.bind_port} "
@@ -228,6 +240,8 @@ def main() -> int:
                             recorder.write(host_t, bf)
                         if plotter is not None:
                             plotter.add(host_t, bf)
+                    if web_server is not None:
+                        web_server.push_balance_frame_threadsafe(bf)
                     frame_count += 1
                     if frame_count == 1:
                         print(f"first frame #{bf.frame_number} pitch={bf.pitch_rad:.4f}")
@@ -313,6 +327,8 @@ def main() -> int:
             from telemetry.app_window import run_telemetry_window
 
             run_telemetry_window(plotter, rpc=rpc)
+        elif web_server is not None:
+            asyncio.run(web_server.run(args.web_host, args.web_port))
         else:
             while True:
                 time.sleep(1.0)
