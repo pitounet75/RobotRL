@@ -1,11 +1,20 @@
 "use strict";
 
-const MAX_POINTS = 5000;
 const WS_TELEMETRY_PATH = "/ws/telemetry";
 const FRAME_BYTES = 56;
 // Chart chrome colours; keep in sync with --muted / --border in style.css.
 const AXIS_TEXT = "#9aa0a8";
 const AXIS_GRID = "#2c3038";
+
+// Time-window slider range (seconds). MAX_BUFFER_S must cover the slider's
+// max so widening the window never needs data we've already discarded.
+const MIN_VIEW_WINDOW_S = 2;
+const MAX_VIEW_WINDOW_S = 30;
+const DEFAULT_VIEW_WINDOW_S = 10;
+const MAX_BUFFER_S = MAX_VIEW_WINDOW_S;
+
+let viewWindowS = DEFAULT_VIEW_WINDOW_S;
+let frozen = false;
 
 function decodeBalanceFrame(buf) {
   const dv = new DataView(buf);
@@ -47,7 +56,8 @@ class ChannelBuffers {
 
   push(frame, tRecvSec) {
     if (this.t0 === null) this.t0 = tRecvSec;
-    this.t.push(tRecvSec - this.t0);
+    const t = tRecvSec - this.t0;
+    this.t.push(t);
     this.y.pitch_rad.push(frame.pitch_rad);
     this.y.pitch_deg.push((frame.pitch_rad * 180) / Math.PI);
     this.y.pitch_rate.push(frame.pitch_rate_rads);
@@ -60,9 +70,14 @@ class ChannelBuffers {
     this.y.vel_r.push(frame.vel_wheel_r_turns_s);
     this.y.estop.push(frame.estop);
     this.y.imu_valid.push(frame.imu_valid);
-    if (this.t.length > MAX_POINTS) {
-      this.t.shift();
-      for (const k of this.keys) this.y[k].shift();
+    // Evict anything older than MAX_BUFFER_S, so the buffer always covers
+    // the widest window the slider can ask for.
+    const cutoff = t - MAX_BUFFER_S;
+    let dropCount = 0;
+    while (dropCount < this.t.length && this.t[dropCount] < cutoff) dropCount++;
+    if (dropCount > 0) {
+      this.t.splice(0, dropCount);
+      for (const k of this.keys) this.y[k].splice(0, dropCount);
     }
   }
 
@@ -88,7 +103,7 @@ function makeChart(containerId, title, seriesKeys, labels) {
         stroke: `hsl(${(i * 67) % 360},70%,55%)`,
       })),
     ],
-    scales: { x: { time: false } },
+    scales: { x: { time: false, auto: false, range: [0, viewWindowS] } },
     // uPlot defaults to black axes/grid, which is invisible on the dark panel
     // background. These match --muted / --border in style.css.
     axes: [
@@ -135,8 +150,12 @@ function scheduleRedraw() {
   redrawScheduled = true;
   requestAnimationFrame(() => {
     redrawScheduled = false;
+    const latestT = buffers.t.length ? buffers.t[buffers.t.length - 1] : 0;
+    const maxT = Math.max(latestT, viewWindowS);
+    const minT = maxT - viewWindowS;
     for (const { plot, seriesKeys } of charts) {
       plot.setData(buffers.series(seriesKeys));
+      plot.setScale("x", { min: minT, max: maxT });
     }
   });
 }
@@ -159,11 +178,27 @@ function connectTelemetry() {
   };
   ws.onerror = () => ws.close();
   ws.onmessage = (event) => {
+    if (frozen) return;
     if (event.data.byteLength !== FRAME_BYTES) return;
     const frame = decodeBalanceFrame(event.data);
     buffers.push(frame, performance.now() / 1000);
     scheduleRedraw();
   };
 }
+
+const windowSlider = document.getElementById("window-slider");
+const windowLabel = document.getElementById("window-label");
+windowSlider.addEventListener("input", () => {
+  viewWindowS = Math.max(MIN_VIEW_WINDOW_S, Math.min(MAX_VIEW_WINDOW_S, Number(windowSlider.value)));
+  windowLabel.textContent = `${viewWindowS} s`;
+  scheduleRedraw();
+});
+
+const freezeToggle = document.getElementById("freeze-toggle");
+freezeToggle.addEventListener("click", () => {
+  frozen = !frozen;
+  freezeToggle.textContent = frozen ? "Resume" : "Freeze";
+  freezeToggle.classList.toggle("status-bad", frozen);
+});
 
 connectTelemetry();

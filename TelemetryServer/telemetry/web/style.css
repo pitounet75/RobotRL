@@ -55,7 +55,8 @@ header h1 {
   overflow-x: auto;
 }
 
-#controls {
+#controls,
+#chart-controls {
   margin-top: 16px;
   background: var(--panel);
   border: 1px solid var(--border);

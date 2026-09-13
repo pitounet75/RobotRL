@@ -20,6 +20,13 @@
         <div id="chart-flags" class="chart"></div>
       </section>
 
+      <div id="chart-controls" class="control-block">
+        <label for="window-slider">Time window</label>
+        <input type="range" id="window-slider" min="2" max="30" value="10" step="1" />
+        <span id="window-label">10 s</span>
+        <button id="freeze-toggle">Freeze</button>
+      </div>
+
       <section id="controls">
         <div class="control-block">
           <label for="speed-slider">Speed</label>
