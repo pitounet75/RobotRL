@@ -12,6 +12,11 @@ from aiohttp import WSMsgType, web
 from telemetry.balance_frame import BalanceFrame
 from telemetry.rpc_mux import SharedRpcClient
 
+# Bounded broadcast queue: at up to 500Hz this is ~0.2s of buffering before
+# the drop-oldest policy kicks in -- small enough that a stalled client
+# doesn't accumulate a large stale backlog, large enough to absorb jitter.
+_BROADCAST_QUEUE_MAX = 100
+
 
 def handle_control_message(
     rpc: Optional[SharedRpcClient], msg: Dict[str, Any]
@@ -44,13 +49,19 @@ class TelemetryWebServer:
         self._static_dir = static_dir
         self._telemetry_clients: Set[web.WebSocketResponse] = set()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._broadcast_queue: Optional["asyncio.Queue[BalanceFrame]"] = None
+        self._drain_task: Optional["asyncio.Future[None]"] = None
 
     def build_app(self) -> web.Application:
         app = web.Application()
         app.router.add_get("/ws/telemetry", self._telemetry_handler)
         app.router.add_get("/ws/control", self._control_handler)
-        app.router.add_static("/", self._static_dir, show_index=True)
+        app.router.add_get("/", self._index_handler)
+        app.router.add_static("/", self._static_dir, show_index=False)
         return app
+
+    async def _index_handler(self, request: web.Request) -> web.FileResponse:
+        return web.FileResponse(self._static_dir / "index.html")
 
     async def _telemetry_handler(self, request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse()
@@ -82,16 +93,61 @@ class TelemetryWebServer:
         return ws
 
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Bind the broadcast loop and start the single drain coroutine.
+
+        Must be called from inside `loop` (it creates the queue and the drain
+        task on it). Both `run()` and tests use this as the one entry point.
+        """
         self._loop = loop
+        if self._broadcast_queue is None:
+            self._broadcast_queue = asyncio.Queue(maxsize=_BROADCAST_QUEUE_MAX)
+        if self._drain_task is None:
+            self._drain_task = asyncio.ensure_future(self._drain_broadcast_queue())
+
+    def close_loop_binding(self) -> None:
+        """Cancel the drain coroutine (idempotent); counterpart of bind_loop."""
+        if self._drain_task is not None:
+            self._drain_task.cancel()
+            self._drain_task = None
+        self._broadcast_queue = None
+        self._loop = None
 
     def push_balance_frame_threadsafe(self, bf: BalanceFrame) -> None:
-        """Call from any thread; schedules a broadcast on the server's own loop."""
-        if self._loop is None:
+        """Call from any thread; enqueues onto the server's own loop for broadcast."""
+        loop = self._loop
+        queue = self._broadcast_queue
+        if loop is None or queue is None:
             return
-        self._loop.call_soon_threadsafe(self._schedule_broadcast, bf)
+        try:
+            loop.call_soon_threadsafe(self._enqueue_frame, bf)
+        except RuntimeError:
+            pass  # loop already closed during shutdown
 
-    def _schedule_broadcast(self, bf: BalanceFrame) -> None:
-        asyncio.ensure_future(self._broadcast(bf))
+    def _enqueue_frame(self, bf: BalanceFrame) -> None:
+        """Runs on the server loop. Drops the oldest frame when backed up."""
+        queue = self._broadcast_queue
+        if queue is None:
+            return
+        if queue.full():
+            # A stalled/backgrounded browser must not grow this without bound;
+            # for live telemetry the newest frame is the one worth keeping.
+            try:
+                queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+        queue.put_nowait(bf)
+
+    async def _drain_broadcast_queue(self) -> None:
+        assert self._broadcast_queue is not None
+        queue = self._broadcast_queue
+        while True:
+            bf = await queue.get()
+            try:
+                await self._broadcast(bf)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # never let one bad frame kill the drain
+                print(f"web broadcast error: {exc!r}")
 
     async def _broadcast(self, bf: BalanceFrame) -> None:
         if not self._telemetry_clients:
@@ -100,8 +156,8 @@ class TelemetryWebServer:
         dead = []
         for ws in list(self._telemetry_clients):
             try:
-                await ws.send_bytes(data)
-            except ConnectionResetError:
+                await asyncio.wait_for(ws.send_bytes(data), timeout=1.0)
+            except (ConnectionResetError, ConnectionError, OSError, asyncio.TimeoutError):
                 dead.append(ws)
         for ws in dead:
             self._telemetry_clients.discard(ws)
@@ -117,4 +173,5 @@ class TelemetryWebServer:
         try:
             await asyncio.Event().wait()
         finally:
+            self.close_loop_binding()
             await runner.cleanup()

@@ -3,6 +3,9 @@
 const MAX_POINTS = 5000;
 const WS_TELEMETRY_PATH = "/ws/telemetry";
 const FRAME_BYTES = 56;
+// Chart chrome colours; keep in sync with --muted / --border in style.css.
+const AXIS_TEXT = "#9aa0a8";
+const AXIS_GRID = "#2c3038";
 
 function decodeBalanceFrame(buf) {
   const dv = new DataView(buf);
@@ -83,7 +86,17 @@ function makeChart(containerId, title, seriesKeys, labels) {
       })),
     ],
     scales: { x: { time: false } },
-    axes: [{ label: "s" }, {}],
+    // uPlot defaults to black axes/grid, which is invisible on the dark panel
+    // background. These match --muted / --border in style.css.
+    axes: [
+      {
+        label: "s",
+        stroke: AXIS_TEXT,
+        grid: { stroke: AXIS_GRID },
+        ticks: { stroke: AXIS_GRID },
+      },
+      { stroke: AXIS_TEXT, grid: { stroke: AXIS_GRID }, ticks: { stroke: AXIS_GRID } },
+    ],
   };
   const plot = new uPlot(opts, buffers.series(seriesKeys), document.getElementById(containerId));
   return { plot, seriesKeys };

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 import unittest
 from pathlib import Path
 from typing import List, Tuple
@@ -109,6 +110,47 @@ class TelemetryWebServerTests(unittest.TestCase):
             await server._broadcast(bf)
             msg = await ws.receive(timeout=1.0)
             self.assertEqual(msg.data, bf.encode())
+        finally:
+            server.close_loop_binding()
+            await client.close()
+
+    def test_push_from_background_thread_reaches_client(self) -> None:
+        asyncio.run(self._check_threadsafe_push())
+
+    async def _check_threadsafe_push(self) -> None:
+        """Exercise the real cross-thread path: thread -> queue -> drain -> ws."""
+        server = TelemetryWebServer(rpc=None, static_dir=STATIC_DIR)
+        client = TestClient(TestServer(server.build_app()))
+        await client.start_server()
+        server.bind_loop(asyncio.get_running_loop())
+        try:
+            ws = await client.ws_connect("/ws/telemetry")
+            bf = _make_frame()
+            thread = threading.Thread(
+                target=server.push_balance_frame_threadsafe, args=(bf,)
+            )
+            thread.start()
+            try:
+                msg = await ws.receive(timeout=2.0)
+            finally:
+                thread.join(timeout=2.0)
+            self.assertEqual(msg.data, bf.encode())
+        finally:
+            server.close_loop_binding()
+            await client.close()
+
+    def test_index_route_serves_dashboard_html(self) -> None:
+        asyncio.run(self._check_index_route())
+
+    async def _check_index_route(self) -> None:
+        server = TelemetryWebServer(rpc=None, static_dir=STATIC_DIR)
+        client = TestClient(TestServer(server.build_app()))
+        await client.start_server()
+        try:
+            resp = await client.get("/")
+            self.assertEqual(resp.status, 200)
+            body = await resp.text()
+            self.assertIn("<title>RobotRL Telemetry</title>", body)
         finally:
             await client.close()
 

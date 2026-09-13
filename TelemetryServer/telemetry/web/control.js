@@ -8,12 +8,35 @@ let loadedValues = {};
 let wheelRadiusM = 0.04;
 let speedSendTimer = null;
 let headingSendTimer = null;
+// FIFO of in-flight {resolve, reject} pairs. The server replies strictly in
+// order on a single /ws/control connection, so the Nth reply belongs to the
+// Nth outstanding request.
+let pendingRequests = [];
 
 function connectControl() {
   const url = `ws://${window.location.host}/ws/control`;
   controlWs = new WebSocket(url);
   controlWs.onopen = () => refreshGains();
-  controlWs.onclose = () => setTimeout(connectControl, 1000);
+  controlWs.onclose = () => {
+    const err = new Error("control socket closed");
+    const stranded = pendingRequests;
+    pendingRequests = [];
+    for (const pending of stranded) pending.reject(err);
+    setTimeout(connectControl, 1000);
+  };
+  controlWs.onmessage = (event) => {
+    const pending = pendingRequests.shift();
+    if (!pending) return;
+    let resp;
+    try {
+      resp = JSON.parse(event.data);
+    } catch (err) {
+      pending.reject(err);
+      return;
+    }
+    if (resp.ok) pending.resolve(resp);
+    else pending.reject(new Error(resp.error));
+  };
 }
 
 function sendControl(action, extra) {
@@ -22,14 +45,16 @@ function sendControl(action, extra) {
       reject(new Error("control socket not connected"));
       return;
     }
-    const handler = (event) => {
-      controlWs.removeEventListener("message", handler);
-      const resp = JSON.parse(event.data);
-      if (resp.ok) resolve(resp);
-      else reject(new Error(resp.error));
-    };
-    controlWs.addEventListener("message", handler);
-    controlWs.send(JSON.stringify(Object.assign({ action }, extra)));
+    const pending = { resolve, reject };
+    pendingRequests.push(pending);
+    try {
+      controlWs.send(JSON.stringify(Object.assign({ action }, extra)));
+    } catch (err) {
+      // Nothing was sent, so no reply will come: drop this slot or the FIFO
+      // would desync and every later reply would go to the wrong request.
+      pendingRequests = pendingRequests.filter((p) => p !== pending);
+      reject(err);
+    }
   });
 }
 
@@ -71,6 +96,22 @@ async function refreshGains() {
     buildGainsForm(resp.params);
     if (typeof resp.params.wheel_radius_m === "number" && resp.params.wheel_radius_m > 1e-6) {
       wheelRadiusM = resp.params.wheel_radius_m;
+    }
+    // Seed the sliders from the robot's actual setpoints (wheelRadiusM above is
+    // already updated, so the m/s conversion uses the real geometry).
+    if (typeof resp.params.vel_ref_turns_s === "number") {
+      const mps = motorTurnsPerSToMps(resp.params.vel_ref_turns_s);
+      const mmS = Math.max(-4000, Math.min(4000, Math.round(mps * 1000)));
+      speedSlider.value = String(mmS);
+      speedLabel.textContent = formatSpeedLabel(mmS / 1000);
+    }
+    if (typeof resp.params.heading_ref_rad === "number") {
+      const deg = Math.max(
+        -180,
+        Math.min(180, Math.round((resp.params.heading_ref_rad * 180) / Math.PI))
+      );
+      headingSlider.value = String(deg);
+      headingLabel.textContent = formatHeadingLabel(deg);
     }
     setGainsStatus(`Loaded snapshot version=${resp.version}`, false);
   } catch (err) {
