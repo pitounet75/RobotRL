@@ -178,3 +178,25 @@ class BalanceFrame:
     def is_sane(self, limits: BalanceFrameSanityLimits = DEFAULT_SANITY_LIMITS) -> bool:
         """Return whether encoding checks and configured operational limits pass."""
         return not self.sanity_issues(limits)
+
+    def encode(self) -> bytes:
+        """Canonical V2-layout bytes (up-converts V1-sourced frames) for the web UI."""
+        return BALANCE_FRAME_STRUCT_V2.pack(
+            self.frame_number,
+            self.time_us,
+            self.pitch_rad,
+            self.pitch_rate_rads,
+            self.vel_wheel_turns_s,
+            self.vel_wheel_l_turns_s,
+            self.vel_wheel_r_turns_s,
+            self.cmd_torque_nm,
+            self.cmd_torque_left_nm,
+            self.cmd_torque_right_nm,
+            self.u_ff_nm,
+            self.u_fb_nm,
+            self.pitch_ref_rad,
+            self.imu_valid,
+            self.estop,
+            self.strategy_id,
+            self.source_drop_count_mod256,
+        )

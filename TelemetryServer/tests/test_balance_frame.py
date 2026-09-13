@@ -73,6 +73,35 @@ class BalanceFrameSanityTests(unittest.TestCase):
 
         self.assertEqual([(issue.category, issue.reason) for issue in issues], [("encoding", "pitch_rate_rads is not finite")])
 
+    def test_encode_round_trips_through_decode(self) -> None:
+        # Float fields are packed as float32 on the wire, so a double like 0.1
+        # loses precision on the round trip (0.1 -> 0.10000000149011612) --
+        # compare floats with assertAlmostEqual, not full dataclass equality.
+        frame = make_frame(frame_number=42, time_us=123456, source_drop_count_mod256=7)
+
+        decoded = BalanceFrame.decode(frame.encode())
+
+        self.assertEqual(decoded.frame_number, frame.frame_number)
+        self.assertEqual(decoded.time_us, frame.time_us)
+        self.assertEqual(decoded.imu_valid, frame.imu_valid)
+        self.assertEqual(decoded.estop, frame.estop)
+        self.assertEqual(decoded.strategy_id, frame.strategy_id)
+        self.assertEqual(decoded.source_drop_count_mod256, frame.source_drop_count_mod256)
+        for field in (
+            "pitch_rad",
+            "pitch_rate_rads",
+            "vel_wheel_turns_s",
+            "vel_wheel_l_turns_s",
+            "vel_wheel_r_turns_s",
+            "cmd_torque_nm",
+            "cmd_torque_left_nm",
+            "cmd_torque_right_nm",
+            "u_ff_nm",
+            "u_fb_nm",
+            "pitch_ref_rad",
+        ):
+            self.assertAlmostEqual(getattr(decoded, field), getattr(frame, field), places=6)
+
 
 if __name__ == "__main__":
     unittest.main()
