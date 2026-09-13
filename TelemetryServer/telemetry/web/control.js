@@ -69,6 +69,9 @@ async function refreshGains() {
   try {
     const resp = await sendControl("get_params");
     buildGainsForm(resp.params);
+    if (typeof resp.params.wheel_radius_m === "number" && resp.params.wheel_radius_m > 1e-6) {
+      wheelRadiusM = resp.params.wheel_radius_m;
+    }
     setGainsStatus(`Loaded snapshot version=${resp.version}`, false);
   } catch (err) {
     setGainsStatus(`Refresh failed: ${err.message}`, true);
@@ -176,6 +179,8 @@ async function flushHeading(deg) {
     const rad = (deg * Math.PI) / 180;
     const resp = await sendControl("set_param", { name: "heading_ref_rad", value: rad });
     const appliedDeg = (resp.applied * 180) / Math.PI;
+    const clampedDeg = Math.max(-180, Math.min(180, appliedDeg));
+    headingSlider.value = String(Math.round(clampedDeg));
     headingLabel.textContent = formatHeadingLabel(appliedDeg);
   } catch (err) {
     headingLabel.textContent = `SET failed: ${err.message}`;
