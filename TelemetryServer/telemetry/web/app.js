@@ -73,11 +73,14 @@ class ChannelBuffers {
 
 const buffers = new ChannelBuffers(BUFFER_KEYS);
 
+const CHART_HEIGHT = 220;
+
 function makeChart(containerId, title, seriesKeys, labels) {
+  const container = document.getElementById(containerId);
   const opts = {
     title,
-    width: 600,
-    height: 220,
+    width: container.clientWidth,
+    height: CHART_HEIGHT,
     series: [
       {},
       ...seriesKeys.map((k, i) => ({
@@ -98,8 +101,8 @@ function makeChart(containerId, title, seriesKeys, labels) {
       { stroke: AXIS_TEXT, grid: { stroke: AXIS_GRID }, ticks: { stroke: AXIS_GRID } },
     ],
   };
-  const plot = new uPlot(opts, buffers.series(seriesKeys), document.getElementById(containerId));
-  return { plot, seriesKeys };
+  const plot = new uPlot(opts, buffers.series(seriesKeys), container);
+  return { plot, seriesKeys, container };
 }
 
 const charts = [
@@ -113,6 +116,17 @@ const charts = [
   makeChart("chart-velocity", "Wheel velocity (turn/s)", ["vel_l", "vel_r"], ["vel_l", "vel_r"]),
   makeChart("chart-flags", "Flags", ["estop", "imu_valid"], ["estop", "imu_valid"]),
 ];
+
+function resizeCharts() {
+  for (const { plot, container } of charts) {
+    const width = container.clientWidth;
+    if (width > 0) {
+      plot.setSize({ width, height: CHART_HEIGHT });
+    }
+  }
+}
+
+window.addEventListener("resize", resizeCharts);
 
 let redrawScheduled = false;
 
