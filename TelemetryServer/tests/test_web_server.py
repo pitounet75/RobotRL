@@ -1,8 +1,16 @@
+import asyncio
+import json
 import unittest
+from pathlib import Path
 from typing import List, Tuple
 
+from aiohttp.test_utils import TestClient, TestServer
+
+from telemetry.balance_frame import BalanceFrame
 from telemetry.ctrl_params import ControlParamsSnapshot
-from telemetry.web_server import handle_control_message
+from telemetry.web_server import TelemetryWebServer, handle_control_message
+
+STATIC_DIR = Path(__file__).resolve().parents[1] / "telemetry" / "web"
 
 
 class _FakeRpc:
@@ -63,6 +71,64 @@ class HandleControlMessageTests(unittest.TestCase):
 
         resp = handle_control_message(_RaisingRpc(), {"action": "get_params"})
         self.assertEqual(resp, {"ok": False, "error": "no reply for seq=1"})
+
+
+def _make_frame() -> BalanceFrame:
+    return BalanceFrame(
+        frame_number=1,
+        time_us=1000,
+        pitch_rad=0.1,
+        pitch_rate_rads=0.0,
+        vel_wheel_turns_s=0.0,
+        vel_wheel_l_turns_s=0.0,
+        vel_wheel_r_turns_s=0.0,
+        cmd_torque_nm=0.0,
+        cmd_torque_left_nm=0.0,
+        cmd_torque_right_nm=0.0,
+        u_ff_nm=0.0,
+        u_fb_nm=0.0,
+        pitch_ref_rad=0.0,
+        imu_valid=1,
+        estop=0,
+        strategy_id=0,
+    )
+
+
+class TelemetryWebServerTests(unittest.TestCase):
+    def test_broadcast_reaches_connected_client(self) -> None:
+        asyncio.run(self._check_broadcast())
+
+    async def _check_broadcast(self) -> None:
+        server = TelemetryWebServer(rpc=None, static_dir=STATIC_DIR)
+        client = TestClient(TestServer(server.build_app()))
+        await client.start_server()
+        server.bind_loop(asyncio.get_running_loop())
+        try:
+            ws = await client.ws_connect("/ws/telemetry")
+            bf = _make_frame()
+            await server._broadcast(bf)
+            msg = await ws.receive(timeout=1.0)
+            self.assertEqual(msg.data, bf.encode())
+        finally:
+            await client.close()
+
+    def test_control_endpoint_reports_rpc_unavailable(self) -> None:
+        asyncio.run(self._check_control_unavailable())
+
+    async def _check_control_unavailable(self) -> None:
+        server = TelemetryWebServer(rpc=None, static_dir=STATIC_DIR)
+        client = TestClient(TestServer(server.build_app()))
+        await client.start_server()
+        try:
+            ws = await client.ws_connect("/ws/control")
+            await ws.send_json({"action": "get_params"})
+            msg = await ws.receive(timeout=1.0)
+            self.assertEqual(
+                json.loads(msg.data),
+                {"ok": False, "error": "RPC unavailable (pass --esp32-host)."},
+            )
+        finally:
+            await client.close()
 
 
 if __name__ == "__main__":

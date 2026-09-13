@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+import asyncio
+import json
+from pathlib import Path
+from typing import Any, Dict, Optional, Set
 
+from aiohttp import WSMsgType, web
+
+from telemetry.balance_frame import BalanceFrame
 from telemetry.rpc_mux import SharedRpcClient
 
 
@@ -28,3 +34,87 @@ def handle_control_message(
         return {"ok": False, "error": f"unknown action {action!r}"}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+class TelemetryWebServer:
+    """Serves the web UI, broadcasts BalanceFrames, and bridges control RPC."""
+
+    def __init__(self, rpc: Optional[SharedRpcClient], static_dir: Path) -> None:
+        self._rpc = rpc
+        self._static_dir = static_dir
+        self._telemetry_clients: Set[web.WebSocketResponse] = set()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def build_app(self) -> web.Application:
+        app = web.Application()
+        app.router.add_get("/ws/telemetry", self._telemetry_handler)
+        app.router.add_get("/ws/control", self._control_handler)
+        app.router.add_static("/", self._static_dir, show_index=True)
+        return app
+
+    async def _telemetry_handler(self, request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        self._telemetry_clients.add(ws)
+        try:
+            async for _ in ws:
+                pass  # telemetry socket is broadcast-only
+        finally:
+            self._telemetry_clients.discard(ws)
+        return ws
+
+    async def _control_handler(self, request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        loop = asyncio.get_running_loop()
+        async for msg in ws:
+            if msg.type != WSMsgType.TEXT:
+                continue
+            try:
+                req = json.loads(msg.data)
+            except ValueError:
+                await ws.send_json({"ok": False, "error": "invalid JSON"})
+                continue
+            resp = await loop.run_in_executor(
+                None, handle_control_message, self._rpc, req
+            )
+            await ws.send_json(resp)
+        return ws
+
+    def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+
+    def push_balance_frame_threadsafe(self, bf: BalanceFrame) -> None:
+        """Call from any thread; schedules a broadcast on the server's own loop."""
+        if self._loop is None:
+            return
+        self._loop.call_soon_threadsafe(self._schedule_broadcast, bf)
+
+    def _schedule_broadcast(self, bf: BalanceFrame) -> None:
+        asyncio.ensure_future(self._broadcast(bf))
+
+    async def _broadcast(self, bf: BalanceFrame) -> None:
+        if not self._telemetry_clients:
+            return
+        data = bf.encode()
+        dead = []
+        for ws in list(self._telemetry_clients):
+            try:
+                await ws.send_bytes(data)
+            except ConnectionResetError:
+                dead.append(ws)
+        for ws in dead:
+            self._telemetry_clients.discard(ws)
+
+    async def run(self, host: str, port: int) -> None:
+        self.bind_loop(asyncio.get_running_loop())
+        runner = web.AppRunner(self.build_app())
+        await runner.setup()
+        site = web.TCPSite(runner, host, port)
+        await site.start()
+        display_host = "localhost" if host == "0.0.0.0" else host
+        print(f"Web UI: http://{display_host}:{port}/")
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await runner.cleanup()
