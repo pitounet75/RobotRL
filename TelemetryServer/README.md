@@ -26,6 +26,26 @@ python scripts/run_server.py --esp32-host 192.168.x.x --plot --record logs\sessi
 - `--verbose` separates UDP sequence gaps, envelope errors, TM CRC/length/version
   errors, STM32 error responses, decode errors, and physical-limit rejects.
 
+## Run (web dashboard)
+
+```powershell
+cd H:\Projects\RobotRL\TelemetryServer
+.\venv\Scripts\Activate.ps1
+python scripts/run_server.py --esp32-host 192.168.1.7 --web
+```
+
+Open `http://localhost:8765/` in a browser. `--web` and `--plot` are mutually
+exclusive per process — run two `run_server.py` processes if you want both.
+
+- `--web-host` / `--web-port`: bind address/port for the web UI (default
+  `0.0.0.0:8765` — reachable from other devices on the LAN).
+- Without `--esp32-host`, telemetry streaming still works; the Gains panel and
+  speed/heading sliders report "RPC unavailable" (same as `--plot` without
+  `--esp32-host`).
+- No hardware needed to try it: `python scripts/fake_telemetry_feed.py --hz 500`
+  sends synthetic `BalanceFrame` UDP traffic to `127.0.0.1:5000`, which
+  `run_server.py --web` (run without `--esp32-host`) will pick up and display.
+
 ## Remote control (mouse)
 
 ```powershell
