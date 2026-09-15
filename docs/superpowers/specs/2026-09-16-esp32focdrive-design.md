@@ -58,7 +58,8 @@ Hors périmètre :
   négative comme une erreur et `update()` sort sans toucher à l'angle.
 - Seul le **premier** front Z fixe l'origine. Rebaser le compteur sur les fronts
   suivants ferait sauter l'angle de π ou 2π et le PID de vitesse réagirait.
-- Fenêtre de calcul de vitesse : `min_elapsed_time = 2 ms`.
+- Fenêtre de calcul de vitesse : `ENC_VEL_MIN_DT`, ramenée de 2 ms à **1 ms**
+  (voir section 7).
 - Filtre de glitch PCNT : 250 cycles APB, environ 3 µs.
 
 ### 3.2 Boucle temps réel
@@ -124,7 +125,7 @@ L'enregistrement NVS permet de ne refaire qu'un `zsearch` au boot.
 | Core | Priorité | Tâche | Rôle |
 |------|----------|-------|------|
 | 0 | 20 | `foc` | encodeurs, `loopFOC`, `move`, failsafe, instantané d'état |
-| 1 | 10 | `ctrl` | IMU et équilibrage — **pas dans ce firmware** |
+| 1 | 19 | `ctrl` | IMU et équilibrage — **pas dans ce firmware** |
 | 1 | 1 | `loop()` Arduino | ligne de commande, OTA |
 
 La boucle d'équilibrage aura sa propre tâche sur le core 1, pas `loop()` :
@@ -226,7 +227,15 @@ bool driveGetState(uint8_t axis, AxisState *out);
 - `timeout_ms` est le failsafe. La tâche compare l'horodatage de la dernière
   consigne à l'échéance ; au dépassement, cible à zéro et désarmement. La ligne
   de commande passe `0`, donc pas de timeout. La boucle d'équilibrage passera
-  une vingtaine de millisecondes, pour qu'un blocage du core 1 coupe les roues.
+  **10 ms**, soit 4 périodes à 400 Hz : assez pour tolérer une commande sautée,
+  assez court pour qu'un blocage du core 1 coupe les roues.
+
+Coût réel du flux de consignes, pour une boucle d'équilibrage à 400 Hz : 800
+appels par seconde, chacun réduit à un bornage et deux écritures 32 bits
+alignées, soit quelques centaines de nanosecondes. Moins de 0.1 % d'un core,
+contre environ 32 % pour la tâche FOC elle-même. Le facteur limitant n'est
+donc pas le débit d'ordres mais la gigue d'ordonnancement, traitée en
+section 13.
 - `driveGetState` rend un instantané cohérent, publié une fois par itération et
   protégé par un compteur pair/impair : le lecteur relit si le compteur a bougé.
 
@@ -241,6 +250,11 @@ Fichier `pcnt_encoder.*` repris, avec quatre changements :
   l'encodeur ne dépend plus de `FOC_VEL_LIMIT`.
 - Diagnostics conservés : `zEdges`, `jumps`, journal des sauts, compteur de
   dépliages.
+- Fenêtre de vitesse dans `config.h` : `ENC_VEL_MIN_DT = 1 ms`. À 2 ms, la
+  vitesse n'est recalculée qu'à 500 Hz ; une boucle d'équilibrage à 400 Hz
+  lirait alors une valeur dont l'âge varie de 0 à 2 ms, avec un battement entre
+  les deux cadences, ce qui coûte de la marge de phase. À 1 ms, la résolution
+  reste de 2π / 65536 / 1 ms, soit 0.096 rad/s, largement suffisante.
 
 Câblage ABZ, confirmé au banc :
 
@@ -350,6 +364,7 @@ donc commune aux deux axes.
 | `FOC_LOOP_HZ` | 4 k | 4 k | plancher 4 k, plafond 16 k |
 | `FOC_POLE_PAIRS` | 7 | 7 | 12N14P |
 | `ENC_PPR` | 16384 | 16384 | registre ABZ du MT6835 |
+| `ENC_VEL_MIN_DT` | 2 ms | **1 ms** | vitesse à 1 kHz, pour une boucle d'équilibrage à 400 Hz |
 
 Les gains de vitesse sont un point de départ, à retuner au banc avec `vcap`.
 
@@ -425,6 +440,30 @@ avec le MT6835 branché.
 **Charge à 4 kHz sur deux axes.** À valider par `dtmax` avant d'aller plus haut
 en fréquence.
 
+**Gigue d'ordonnancement, WiFi actif.** C'est la contrainte qui décidera de la
+qualité de l'équilibrage, bien avant le débit de consignes. Relevé dans le SDK
+de ce framework :
+
+| Élément | Valeur |
+|---|---|
+| `configMAX_PRIORITIES` | 25 |
+| Tick FreeRTOS | 1 kHz |
+| Tâches WiFi | épinglées **core 0** |
+| Tâche TCP/IP (lwIP) | priorité 18, **core 0** |
+| `esp_timer` | priorité 22 |
+| `loop()` et tâche d'événements Arduino | core 1 |
+
+Sur le core 0, la tâche FOC à la priorité 20 peut donc être préemptée par
+`esp_timer` (22) et par la tâche WiFi (priorité 23 d'après la documentation
+IDF, valeur non vérifiable ici car elle vit dans les blobs précompilés). C'est
+ce que `dtmax` et `late` mesurent, et c'est la raison d'être de `wifioff`.
+Leviers, dans l'ordre : mesurer, puis monter la tâche FOC à 23 ou 24, puis
+couper le WiFi pendant l'équilibrage.
+
+Sur le core 1, la tâche d'événements Arduino tourne à la priorité 20. `ctrl`
+est donc prévue à **19** : elle ne sera décalée que par un événement réseau,
+par exemple une reconnexion WiFi.
+
 ## 14. Mise au point, étape par étape
 
 Chaque étape a son critère de validation au banc, roue levée.
@@ -443,6 +482,10 @@ Chaque étape a son critère de validation au banc, roue levée.
 8. **Deuxième axe.** Boot propre avec GPIO5, les deux axes calibrés, `dtmax`
    relevé à deux axes.
 9. **Diagnostics.** `vcap` et `vdump` sur un `vel 3`, `jlog` à zéro saut.
+10. **Gigue, avant de brancher l'équilibrage.** Relever `dtmax` et `late` sur
+    plusieurs minutes de `vel 3` à deux axes, une fois WiFi actif et une fois
+    après `wifioff`. L'écart entre les deux chiffres décide s'il faut monter la
+    priorité de la tâche FOC ou couper le WiFi en fonctionnement.
 
 ## 15. Plus tard
 
