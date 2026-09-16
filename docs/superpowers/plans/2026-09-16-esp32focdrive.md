@@ -1773,10 +1773,13 @@ inline SelfTestResult selfTestRun(SelfTestReport report, void *ctx) {
   SELF_TEST_CHECK("parse_bare", parseCmd("status", &p) && strcmp(p.cmd, "status") == 0 &&
                                     p.axis_mask == (uint8_t)FOC_AXIS_MASK && !p.has_value);
   SELF_TEST_CHECK("parse_value", parseCmd("  vel  3.5 ", &p) && strcmp(p.cmd, "vel") == 0 &&
-                                     p.has_value && selfTestNear(p.value, 3.5f, 1e-4f));
-  SELF_TEST_CHECK("parse_axis_r", parseCmd("vel R -2", &p) && p.axis_mask == 0b10 &&
-                                      p.has_value && selfTestNear(p.value, -2.0f, 1e-4f));
-  SELF_TEST_CHECK("parse_axis_l", parseCmd("cal l", &p) && p.axis_mask == 0b01 && !p.has_value);
+                                     p.axis_mask == (uint8_t)FOC_AXIS_MASK && p.has_value &&
+                                     selfTestNear(p.value, 3.5f, 1e-4f));
+  SELF_TEST_CHECK("parse_axis_r", parseCmd("vel R -2", &p) && strcmp(p.cmd, "vel") == 0 &&
+                                      p.axis_mask == 0b10 && p.has_value &&
+                                      selfTestNear(p.value, -2.0f, 1e-4f));
+  SELF_TEST_CHECK("parse_axis_l", parseCmd("cal l", &p) && strcmp(p.cmd, "cal") == 0 &&
+                                      p.axis_mask == 0b01 && !p.has_value);
   SELF_TEST_CHECK("parse_empty", !parseCmd("   ", &p));
   SELF_TEST_CHECK("parse_truncate",
                   parseCmd("abcdefghijklmnopqrstuvwxyz 1", &p) && strlen(p.cmd) == 11 && p.has_value);
