@@ -28,7 +28,9 @@
 
 ## Ordre d'exécution
 
-**1, 2, 8, puis 3, 4, 5, 6, 7, 9, 10, 11.** La numérotation des tâches ne change pas ; seul l'ordre change.
+**1, 2, 8, 3, 4, 12, puis 5, 6, 7, 9, 10, 11.** La numérotation des tâches ne change pas ; seul l'ordre change.
+
+La tâche 12 est ajoutée en cours de route, après la tâche 4. Raison : la carte a un défaut matériel qui impose de maintenir BOOT et d'appuyer sur RESET pour **tout** flash USB, et le binaire Unity n'embarque pas de serveur OTA. Exécuter les tests coûtait donc deux gestes physiques : un pour téléverser les tests, un pour revenir à l'application. La tâche 12 expose les mêmes vérifications derrière une commande `selftest` de l'application, validable en OTA.
 
 La tâche 8, réseau et OTA, est exécutée **en troisième**, juste après la ligne de commande. Sans elle, chaque itération imposerait un flash USB, pénible sur cette carte à cause du CH340 qui pulse DTR. Une fois la tâche 8 en place, tous les uploads suivants passent par OTA.
 
@@ -1719,6 +1721,146 @@ Attendu : trois `SUCCESS` et `21 Tests 0 Failures 0 Ignored`.
 git add ESP32FOCDrive
 git commit -m "docs(esp32focdrive): bring-up guide, bench gains, scheduling jitter figures"
 ```
+
+---
+
+### Task 12 : commande `selftest`, pour valider sans câble
+
+**Files:**
+- Create: `ESP32FOCDrive/include/self_test.h`
+- Modify: `ESP32FOCDrive/test/test_logic/test_main.cpp`
+- Modify: `ESP32FOCDrive/src/cli.cpp`
+
+**Interfaces:**
+- Consomme : `cmd_parse.h`, `enc_math.h`, et plus tard `failsafe.h` et `cal_record.h` — chaque tâche qui ajoute un en-tête pur ajoute ses vérifications ici.
+- Produit : `struct SelfTestResult { int run; int failed; }`, `typedef void (*SelfTestReport)(const char *name, bool ok, void *ctx)`, `SelfTestResult selfTestRun(SelfTestReport report, void *ctx)`.
+
+**Pourquoi cette tâche existe.** Les tests Unity s'exécutent sur la cible, et cette carte impose un geste physique — maintenir BOOT, appuyer sur RESET — pour tout flash USB, parce que son auto-reset par DTR/RTS est cassé. Le binaire Unity n'ayant pas de serveur OTA, chaque exécution coûtait deux manipulations. Les vérifications déménagent donc dans un en-tête partagé, appelé par **deux** exécuteurs : la suite Unity, et une commande `selftest` de l'application, qui elle arrive par OTA. Un seul jeu d'assertions, aucune duplication.
+
+- [ ] **Step 1 : écrire `include/self_test.h`**
+
+En-tête autonome, sans dépendance Arduino, sur le modèle des autres en-têtes purs. Chaque vérification appelle le rapporteur avec son nom et son résultat ; le compteur d'échecs est tenu par `selfTestRun`.
+
+```cpp
+#pragma once
+
+#include <math.h>
+#include <stdint.h>
+#include <string.h>
+
+#include "cmd_parse.h"
+#include "enc_math.h"
+
+/**
+ * Pure-logic checks, shared by two runners: the Unity suite on target, and
+ * the firmware's own `selftest` command. This board cannot be flashed over
+ * USB without a manual BOOT+RESET, so validation has to ride the OTA path.
+ */
+struct SelfTestResult {
+  int run;
+  int failed;
+};
+
+typedef void (*SelfTestReport)(const char *name, bool ok, void *ctx);
+
+#define SELF_TEST_CHECK(name, cond)        \
+  do {                                     \
+    const bool ok_ = (cond);               \
+    res.run += 1;                          \
+    if (!ok_) {                            \
+      res.failed += 1;                     \
+    }                                      \
+    if (report != nullptr) {               \
+      report(name, ok_, ctx);              \
+    }                                      \
+  } while (0)
+
+inline bool selfTestNear(float a, float b, float tol) { return fabsf(a - b) <= tol; }
+
+inline SelfTestResult selfTestRun(SelfTestReport report, void *ctx) {
+  SelfTestResult res{0, 0};
+  ParsedCmd p{};
+
+  SELF_TEST_CHECK("parse_bare", parseCmd("status", &p) && strcmp(p.cmd, "status") == 0 &&
+                                    p.axis_mask == (uint8_t)FOC_AXIS_MASK && !p.has_value);
+  SELF_TEST_CHECK("parse_value", parseCmd("  vel  3.5 ", &p) && strcmp(p.cmd, "vel") == 0 &&
+                                     p.has_value && selfTestNear(p.value, 3.5f, 1e-4f));
+  SELF_TEST_CHECK("parse_axis_r", parseCmd("vel R -2", &p) && p.axis_mask == 0b10 &&
+                                      p.has_value && selfTestNear(p.value, -2.0f, 1e-4f));
+  SELF_TEST_CHECK("parse_axis_l", parseCmd("cal l", &p) && p.axis_mask == 0b01 && !p.has_value);
+  SELF_TEST_CHECK("parse_empty", !parseCmd("   ", &p));
+  SELF_TEST_CHECK("parse_truncate",
+                  parseCmd("abcdefghijklmnopqrstuvwxyz 1", &p) && strlen(p.cmd) == 11 && p.has_value);
+
+  SELF_TEST_CHECK("fold_fwd", encFoldDelta(100, 105, 16384) == 5);
+  SELF_TEST_CHECK("fold_back", encFoldDelta(105, 100, 16384) == -5);
+  SELF_TEST_CHECK("fold_hlim", encFoldDelta(16380, -16374, 16384) == 10);
+  SELF_TEST_CHECK("fold_llim", encFoldDelta(-16380, 16374, 16384) == -10);
+
+  int32_t rot = 0;
+  float shaft = 0.0f;
+  encAngleFromCount(65536 + 16384, 65536, &rot, &shaft);
+  SELF_TEST_CHECK("angle_pos", rot == 1 && selfTestNear(shaft, 1.5708f, 1e-3f));
+  encAngleFromCount(-16384, 65536, &rot, &shaft);
+  SELF_TEST_CHECK("angle_neg", rot == -1 && selfTestNear(shaft, 4.7124f, 1e-3f));
+
+  return res;
+}
+```
+
+- [ ] **Step 2 : faire passer la suite Unity par ce même en-tête**
+
+Dans `test/test_logic/test_main.cpp`, remplacer les douze tests existants par un test unique qui délègue, de sorte qu'il n'existe plus qu'un seul jeu d'assertions dans le dépôt :
+
+```cpp
+#include "self_test.h"
+
+static void unityReport(const char *name, bool ok, void *) {
+  TEST_ASSERT_TRUE_MESSAGE(ok, name);
+}
+
+void test_self_test_suite() {
+  const SelfTestResult r = selfTestRun(unityReport, nullptr);
+  TEST_ASSERT_GREATER_THAN_INT(0, r.run);
+  TEST_ASSERT_EQUAL_INT(0, r.failed);
+}
+```
+
+La granularité par test est perdue côté Unity, mais le nom de la vérification qui échoue est porté par le message d'assertion. C'est le prix de l'absence de duplication, et Unity devient de toute façon l'exécuteur secondaire.
+
+- [ ] **Step 3 : ajouter la commande `selftest` à la ligne de commande**
+
+Dans `cli.cpp`, un rapporteur qui imprime une ligne par vérification, puis un résumé :
+
+```
+selftest: parse_bare PASS
+selftest: fold_hlim PASS
+...
+selftest: 12 run, 0 failed
+```
+
+L'ajouter au texte de `help`. La commande ne pilote aucun moteur et ne touche à aucune broche : elle est sûre à tout moment, moteur armé ou non.
+
+- [ ] **Step 4 : vérifier la compilation**
+
+```bash
+cd H:/Projects/RobotRL/ESP32FOCDrive
+pio run -e left && pio run -e right && pio run -e dual
+```
+Attendu : trois `SUCCESS`.
+
+- [ ] **Step 5 : validation**
+
+Par OTA, puis `selftest` dans le moniteur. Attendu : `12 run, 0 failed`.
+
+- [ ] **Step 6 : commit**
+
+```bash
+git add ESP32FOCDrive
+git commit -m "feat(esp32focdrive): shared pure-logic checks behind a selftest command, runnable over OTA"
+```
+
+**Règle pour la suite du plan :** toute tâche qui ajoute un en-tête pur — `failsafe.h` en tâche 7, `cal_record.h` en tâche 5 — ajoute ses vérifications à `self_test.h` au lieu d'écrire des tests Unity séparés.
 
 ---
 
