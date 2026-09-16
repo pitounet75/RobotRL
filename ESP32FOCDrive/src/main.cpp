@@ -18,6 +18,20 @@ void setup() {
   Serial.begin(115200);
   delay(200);
 
+  /* This step-1 binary drives only kAxis, but env:dual marks both axes
+   * present and boardInit() only parks absent axes; M_EN is shared between
+   * both gate drivers, so the other axis' floating PWM inputs must be parked
+   * here before M_EN goes high. */
+  for (int i = 0; i < AXIS_COUNT; ++i) {
+    if (i == kAxis) {
+      continue;
+    }
+    for (int p = 0; p < 3; ++p) {
+      pinMode(kAxisPwm[i][p], OUTPUT);
+      digitalWrite(kAxisPwm[i][p], LOW);
+    }
+  }
+
   driver.voltage_power_supply = FOC_VBUS;
   driver.voltage_limit = FOC_VOLTAGE_LIMIT;
   driver.pwm_frequency = FOC_PWM_HZ;
