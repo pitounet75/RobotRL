@@ -12,10 +12,13 @@ void mainSetOpenloop(uint8_t axis_mask, float rad_s);
 void mainIdle(uint8_t axis_mask);
 float mainVoltageLimit();
 void mainSetVoltageLimit(float v);
+void mainPrintEncLine();
 
 namespace {
 char line[96];
 uint8_t line_len = 0;
+bool enc_stream = false;
+uint32_t enc_last_print_ms = 0;
 
 void handleLine(const char *raw) {
   ParsedCmd p{};
@@ -56,6 +59,16 @@ void handleLine(const char *raw) {
     }
     mainSetVoltageLimit(v);
     Serial.printf("limit: %.2f V\n", (double)v);
+  } else if (strcmp(p.cmd, "enc") == 0) {
+    if (!p.has_value) {
+      mainPrintEncLine();
+    } else if (p.value >= 0.5f) {
+      enc_stream = true;
+      enc_last_print_ms = millis();
+      mainPrintEncLine();
+    } else {
+      enc_stream = false;
+    }
   } else if (strcmp(p.cmd, "download") == 0 || strcmp(p.cmd, "dl") == 0) {
     mainIdle(0b11);
     boardEnterDownload();
@@ -76,10 +89,15 @@ void cliPrintHelp() {
   Serial.println("  help status");
   Serial.println("  ol [L|R] <rad/s>   idle [L|R]");
   Serial.println("  limit [L|R] <V>    download");
-  Serial.println("  ota                wifioff");
+  Serial.println("  enc [0|1]          ota");
+  Serial.println("  wifioff");
 }
 
 void cliPoll() {
+  if (enc_stream && (millis() - enc_last_print_ms) >= 1000u) {
+    enc_last_print_ms = millis();
+    mainPrintEncLine();
+  }
   while (Serial.available() > 0) {
     const char c = (char)Serial.read();
     if (c == '\r' || c == '\n') {
