@@ -1,0 +1,101 @@
+#include "cli.h"
+
+#include <Arduino.h>
+
+#include "board.h"
+#include "cmd_parse.h"
+#include "config.h"
+
+/* Temporary seam, replaced by drive_api.h in task 7. */
+void mainSetOpenloop(uint8_t axis_mask, float rad_s);
+void mainIdle(uint8_t axis_mask);
+float mainVoltageLimit();
+void mainSetVoltageLimit(float v);
+
+namespace {
+char line[96];
+uint8_t line_len = 0;
+
+void handleLine(const char *raw) {
+  ParsedCmd p{};
+  if (!parseCmd(raw, &p)) {
+    return;
+  }
+  if (strcmp(p.cmd, "help") == 0 || strcmp(p.cmd, "?") == 0) {
+    cliPrintHelp();
+  } else if (strcmp(p.cmd, "status") == 0) {
+    cliPrintStatus();
+  } else if (strcmp(p.cmd, "ol") == 0) {
+    if (!p.has_value) {
+      Serial.println("usage: ol [L|R] <rad/s>");
+      return;
+    }
+    float v = p.value;
+    if (v > FOC_VEL_LIMIT) {
+      v = FOC_VEL_LIMIT;
+    } else if (v < -FOC_VEL_LIMIT) {
+      v = -FOC_VEL_LIMIT;
+    }
+    mainSetOpenloop(p.axis_mask, v);
+    Serial.printf("ol: mask=%u tgt=%.2f rad/s\n", (unsigned)p.axis_mask, (double)v);
+  } else if (strcmp(p.cmd, "idle") == 0 || strcmp(p.cmd, "stop") == 0) {
+    mainIdle(p.axis_mask);
+    Serial.println("idle");
+  } else if (strcmp(p.cmd, "limit") == 0) {
+    if (!p.has_value) {
+      Serial.printf("limit: %.2f V\n", (double)mainVoltageLimit());
+      return;
+    }
+    float v = p.value;
+    if (v < 0.2f) {
+      v = 0.2f;
+    }
+    if (v > FOC_VBUS) {
+      v = FOC_VBUS;
+    }
+    mainSetVoltageLimit(v);
+    Serial.printf("limit: %.2f V\n", (double)v);
+  } else if (strcmp(p.cmd, "download") == 0 || strcmp(p.cmd, "dl") == 0) {
+    mainIdle(0b11);
+    boardEnterDownload();
+  } else {
+    Serial.println("unknown - help");
+  }
+}
+}  // namespace
+
+void cliInit() { line_len = 0; }
+
+void cliPrintHelp() {
+  Serial.println("ESP32FOCDrive  FS2804 x2  voltage FOC  MT6835 ABZ");
+  Serial.println("  help status");
+  Serial.println("  ol [L|R] <rad/s>   idle [L|R]");
+  Serial.println("  limit [L|R] <V>    download");
+}
+
+void cliPoll() {
+  while (Serial.available() > 0) {
+    const char c = (char)Serial.read();
+    if (c == '\r' || c == '\n') {
+      if (line_len == 0) {
+        continue;
+      }
+      line[line_len] = '\0';
+      line_len = 0;
+      Serial.write('\n');
+      handleLine(line);
+      continue;
+    }
+    if (c == 0x08 || c == 0x7f) {
+      if (line_len > 0) {
+        line_len -= 1;
+        Serial.print("\b \b");
+      }
+      continue;
+    }
+    if (line_len + 1u < sizeof(line)) {
+      line[line_len++] = c;
+      Serial.write(c);
+    }
+  }
+}

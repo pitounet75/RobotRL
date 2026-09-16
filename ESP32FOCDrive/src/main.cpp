@@ -1,9 +1,10 @@
-/** ESP32FOCDrive — step 1: bare SimpleFOC open-loop, one axis, loop() driven. */
+/** ESP32FOCDrive — step 2: command parser, minimal CLI, no auto-start. */
 
 #include <Arduino.h>
 #include <SimpleFOC.h>
 
 #include "board.h"
+#include "cli.h"
 #include "config.h"
 
 namespace {
@@ -13,15 +14,51 @@ BLDCMotor motor(FOC_POLE_PAIRS);
 BLDCDriver3PWM driver(kAxisPwm[kAxis][0], kAxisPwm[kAxis][1], kAxisPwm[kAxis][2]);
 }  // namespace
 
+/* Temporary seam, replaced by drive_api.h in task 7. */
+void mainSetOpenloop(uint8_t axis_mask, float rad_s) {
+  if (!(axis_mask & (1u << kAxis))) {
+    return;
+  }
+  motor.target = rad_s;
+  /* enable() always does setPwm(0,0,0) and resets the PIDs: re-arming an
+   * already-armed motor would stall the shaft on every command. */
+  if (!motor.enabled) {
+    motor.enable();
+    boardMotorPowerRef(+1);
+  }
+}
+
+void mainIdle(uint8_t axis_mask) {
+  if (!(axis_mask & (1u << kAxis))) {
+    return;
+  }
+  motor.target = 0;
+  const bool was_enabled = motor.enabled;
+  motor.disable();
+  if (was_enabled) {
+    boardMotorPowerRef(-1);
+  }
+}
+
+float mainVoltageLimit() { return motor.voltage_limit; }
+
+void mainSetVoltageLimit(float v) { motor.voltage_limit = v; }
+
+void cliPrintStatus() {
+  Serial.printf("axis=%c tgt=%.2f rad/s Uq=%.2f V limit=%.2f V MEN=%d\n",
+                kAxisName[kAxis], (double)motor.target, (double)motor.voltage.q,
+                (double)motor.voltage_limit, (int)boardMotorPowered());
+}
+
 void setup() {
   boardInit();
   Serial.begin(115200);
   delay(200);
 
-  /* This step-1 binary drives only kAxis, but env:dual marks both axes
-   * present and boardInit() only parks absent axes; M_EN is shared between
-   * both gate drivers, so the other axis' floating PWM inputs must be parked
-   * here before M_EN goes high. */
+  /* This binary drives only kAxis, but env:dual marks both axes present and
+   * boardInit() only parks absent axes; M_EN is shared between both gate
+   * drivers, so the other axis' floating PWM inputs must be parked here
+   * before M_EN goes high. */
   for (int i = 0; i < AXIS_COUNT; ++i) {
     if (i == kAxis) {
       continue;
@@ -41,14 +78,18 @@ void setup() {
   motor.voltage_limit = FOC_VOLTAGE_LIMIT;
   motor.foc_modulation = FOC_MODULATION;
   motor.controller = MotionControlType::velocity_openloop;
-  motor.target = 3.0f;
   motor.init();
-  motor.enable();
-  boardMotorPowerRef(+1);
+  /* No auto-start: the motor stays idle and M_EN stays low until a CLI
+   * command (ol) arms it. */
 
-  Serial.printf("ESP32FOCDrive step1 axis=%c Vbus=%.1f Ulim=%.1f MEN=%d\n",
+  cliInit();
+
+  Serial.printf("ESP32FOCDrive axis=%c Vbus=%.1f Ulim=%.1f MEN=%d\n",
                 kAxisName[kAxis], (double)FOC_VBUS, (double)FOC_VOLTAGE_LIMIT,
                 (int)boardMotorPowered());
 }
 
-void loop() { motor.move(); }
+void loop() {
+  motor.move();
+  cliPoll();
+}
