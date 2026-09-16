@@ -26,6 +26,17 @@
 - **Chaque commit** se termine par les lignes d'attribution de la session en cours (`Co-Authored-By` et `Claude-Session`).
 - **`platformio.local.ini` n'est jamais commité** ; il est déjà couvert par `.gitignore` via `*.local.ini`.
 
+## Ordre d'exécution
+
+**1, 2, 8, puis 3, 4, 5, 6, 7, 9, 10, 11.** La numérotation des tâches ne change pas ; seul l'ordre change.
+
+La tâche 8, réseau et OTA, est exécutée **en troisième**, juste après la ligne de commande. Sans elle, chaque itération imposerait un flash USB, pénible sur cette carte à cause du CH340 qui pulse DTR. Une fois la tâche 8 en place, tous les uploads suivants passent par OTA.
+
+Trois conséquences, déjà intégrées dans le texte des tâches concernées :
+- **Tâche 8 :** à cette position, ni `driveStop` ni `focPauseTimer` n'existent. `onStart` arrête les moteurs par la couture `mainIdle(0b11)` de la tâche 2 et ne met aucun timer en pause.
+- **Tâche 4 :** ajoute la mise en pause et la reprise du timer dans `net.cpp`, une fois le timer créé.
+- **Tâche 7 :** remplace `mainIdle(0b11)` par la boucle `driveStop`, dans le même mouvement que la suppression des autres coutures.
+
 ## Structure des fichiers
 
 | Fichier | Responsabilité |
@@ -1050,10 +1061,16 @@ Les fonctions de couture de la tâche 2 deviennent : `mainSetOpenloop` écrit `m
 
 `hz` sans valeur affiche la cadence et les métriques ; avec une valeur, elle appelle `focSetHz` qui borne entre `FOC_LOOP_HZ_MIN` et `FOC_LOOP_HZ_MAX`, remet `dt_max` à zéro et redémarre le timer. `dt` remet `dt_max` et `late` à zéro. `status` affiche désormais `hz`, `dt`, `dtmax`, `late` et `loops`.
 
-- [ ] **Step 5 : valider au banc**
+- [ ] **Step 5 : mettre le timer FOC en pause pendant un OTA**
+
+`net.cpp` existe déjà — la tâche 8 a été exécutée avant celle-ci, voir « Ordre d'exécution » — et son `onStart` arrête les moteurs sans toucher au timer, qui n'existait pas. Maintenant qu'il existe, ajouter `focPauseTimer()` dans `onStart` après l'arrêt des moteurs, `focResumeTimer()` dans `onError`, et compléter le message en `"ota: start - motors off, FOC timer paused"`.
+
+Sans cette pause, le timer continue de réveiller la tâche FOC à 4 kHz pendant l'écriture de la flash.
+
+- [ ] **Step 6 : valider au banc**
 
 ```bash
-pio run -e left -t upload && pio device monitor -e left
+pio run -e left_ota -t upload && pio device monitor -e left
 ```
 Attendu :
 - `ol 20` fait tourner le shaft **régulièrement**, et un `status` toutes les secondes ne provoque plus d'à-coup ;
@@ -1453,7 +1470,9 @@ Réintroduire dans `focTask`, avant le traitement du mode, le bloc décrit à la
 
 - [ ] **Step 7 : faire passer la CLI par l'API**
 
-Remplacer `mainSetOpenloop`, `mainIdle`, `mainVoltageLimit` et `mainSetVoltageLimit` par des appels à `drive_api.h`, avec `timeout_ms = 0`. Supprimer les quatre déclarations de couture de `cli.cpp`. La CLI traduit son masque : `for (i in 0..1) if (mask & (1<<i)) driveSetVelocity(i, v, 0);`.
+Remplacer `mainSetOpenloop`, `mainIdle`, `mainVoltageLimit` et `mainSetVoltageLimit` par des appels à `drive_api.h`, avec `timeout_ms = 0`. Supprimer les quatre déclarations de couture de `cli.cpp`.
+
+**Ne pas oublier `net.cpp` :** son `onStart` appelle encore `mainIdle(0b11)`, la dernière couture. La remplacer par `for (uint8_t i = 0; i < AXIS_COUNT; ++i) { driveStop(i); }` et supprimer la déclaration de `mainIdle` en haut du fichier. Après cette étape, un `grep -rn "mainIdle\|mainSetOpenloop\|mainVoltageLimit\|mainSetVoltageLimit" src include` ne doit plus rien retourner. La CLI traduit son masque : `for (i in 0..1) if (mask & (1<<i)) driveSetVelocity(i, v, 0);`.
 
 **Attention au signe :** `status` affiche des valeurs dans le repère moteur, alors que `vel 3` est maintenant une commande en repère robot. Afficher les deux : `tgt` (moteur) et `cmd` (robot).
 
@@ -1481,7 +1500,7 @@ git commit -m "feat(esp32focdrive): drive API with command failsafe and seqlock 
 - Create: `ESP32FOCDrive/platformio.local.ini` (non commité)
 
 **Interfaces:**
-- Consomme : `driveStop`, `focPauseTimer`, `focResumeTimer`.
+- Consomme : la couture `mainIdle(uint8_t axis_mask)` de la tâche 2. **Ni `driveStop` ni `focPauseTimer` n'existent encore** : cette tâche est exécutée en troisième position, voir « Ordre d'exécution ».
 - Produit : `void netSetup()`, `void netLoop()`, `bool netOtaActive()`, `void netPrintInfo()`, `void netWifiOff()`.
 
 - [ ] **Step 1 : écrire `net.cpp`**
@@ -1491,20 +1510,18 @@ Porté de `ESP32FOCHardwareCheck/src/main.cpp:187` : STA avec 8 s de timeout, re
 ```cpp
 ArduinoOTA.onStart([]() {
   s_ota_active = true;
-  for (uint8_t i = 0; i < AXIS_COUNT; ++i) {
-    driveStop(i);
-  }
-  focPauseTimer();
+  mainIdle(0b11);          /* task 7 swaps this for the driveStop loop */
   disableCore1WDT();
-  Serial.println("ota: start - motors off, FOC timer paused");
+  Serial.println("ota: start - motors off");
   Serial.flush();
 });
 ArduinoOTA.onError([](ota_error_t err) {
   s_ota_active = false;
-  focResumeTimer();
   Serial.printf("ota: err %u\n", (unsigned)err);
 });
 ```
+
+Il n'y a **pas** de mise en pause du timer FOC ici : à cette position dans l'ordre d'exécution, la tâche FOC n'existe pas encore. La tâche 4 l'ajoutera. Déclarer `void mainIdle(uint8_t axis_mask);` en haut de `net.cpp`, comme le fait déjà `cli.cpp`.
 
 - [ ] **Step 2 : céder le CPU pendant l'upload**
 
