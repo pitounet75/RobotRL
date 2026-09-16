@@ -20,7 +20,7 @@
 - **`ENC_PPR = 16384`**, PCNT en quadrature complète, donc CPR = 65536.
 - **`ENC_VEL_MIN_DT = 0.001f`** (1 ms).
 - **Cadence FOC :** `FOC_LOOP_HZ = 4000`, bornes 4000 à 16000.
-- **Langue :** commentaires et identifiants **en anglais** dans le code, comme le reste du dépôt. Documentation (`README.md`) en français.
+- **Langue :** commentaires et identifiants **en anglais** dans le code C++ (`.h`, `.cpp`), comme le reste du dépôt. Les fichiers de configuration (`platformio.ini`) et la documentation (`README.md`) sont **en français**, comme leurs équivalents dans `ESP32FOCHardwareCheck`.
 - **Tests :** Unity **sur la cible**, `pio test -e left -f test_logic`. Il n'y a pas de compilateur hôte sur cette machine, donc pas d'env `native`. Toute logique testée vit dans un en-tête autonome de `include/`, sans `#include <Arduino.h>`, pour qu'un test compile sans `src/`.
 - **Sans carte branchée**, le garde-fou minimal est la compilation : `pio run -e left`, `pio run -e right`, `pio run -e dual`.
 - **Chaque commit** se termine par les lignes d'attribution de la session en cours (`Co-Authored-By` et `Claude-Session`).
