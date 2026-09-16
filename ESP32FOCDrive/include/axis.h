@@ -50,7 +50,10 @@ extern Axis axes[AXIS_COUNT];
 /** Builds the driver/encoder/motor for every axis in FOC_AXIS_MASK. */
 void axisInitAll();
 /** Pushes ax.voltage_limit into the driver, motor and velocity PID output
- * limit. Callable any time, including while the axis is armed. */
+ * limit, and re-clamps ax.align_voltage to it (pushing the result into
+ * motor.voltage_sensor_align) so a `limit` below the current align voltage
+ * cannot leave calibration driving more volts than just asked for. Callable
+ * any time, including while the axis is armed. */
 void axisApplyLimits(Axis &ax);
 /** Arms the motor (idempotent) and takes one M_EN power reference. */
 void axisArm(Axis &ax);
@@ -78,8 +81,42 @@ void axisSetMode(Axis &ax, Mode m);
  * to remember to pair the two: axisTakeOwnership() only returns once the
  * task has observed the axis is no longer its to touch; axisReleaseOwnership
  * only returns once the task is guaranteed to pick the axis back up on its
- * next iteration. Nothing in this task calls either yet — task 5's
- * calibration is their first user.
+ * next iteration. axisCal()/axisZSearch()/axisForgetCal() (task 5) are their
+ * first users.
  */
 void axisTakeOwnership(Axis &ax);
 void axisReleaseOwnership(Axis &ax);
+
+/**
+ * Per-axis electrical calibration, ported from
+ * ESP32FOCHardwareCheck/src/main.cpp with every current-sense step removed
+ * (this firmware has no current sense: torque is voltage-only).
+ *
+ * axisCal() takes ownership of ax for its whole duration and drives it
+ * directly (loopFOC()/move()/setPhaseVoltage()), never through the core-0
+ * FOC task: index search, open-loop direction detection with a sanity
+ * check against the commanded open-loop speed, a gently ramped electrical
+ * zero capture, then initFOC(). Leaves ax idle (mode Off, disarmed) and
+ * ownership released either way; sets ax.calibrated on success.
+ */
+bool axisCal(Axis &ax);
+/**
+ * Open-loop index (Z) search. With park=false, the caller already owns ax
+ * (axisCal()'s use) and the axis is left armed/owned on return either way.
+ * With park=true (the standalone CLI `zsearch`), axisZSearch() manages its
+ * own ownership: on success it also tries to reload a saved NVS zero via
+ * axisLoadCal() and re-run initFOC(), then idles and releases ax.
+ */
+bool axisZSearch(Axis &ax, bool park);
+/** Persists the axis' current electrical zero/direction/pole pairs to NVS
+ * (namespace "drive", key "cal0"/"cal1"), guarded by ax.calibrated. */
+bool axisSaveCal(Axis &ax);
+/** Clears the stored NVS record and the axis' in-RAM electrical zero. */
+void axisForgetCal(Axis &ax);
+/** Loads a stored NVS record and applies it to ax.motor if it validates
+ * against calRecordValid() for this axis' name and the live ENC_PPR. Does
+ * not run initFOC(). */
+bool axisLoadCal(Axis &ax);
+/** Prints "need cal" and returns false unless ax is calibrated and its
+ * encoder currently holds an index. */
+bool axisRequireCal(Axis &ax);

@@ -1,6 +1,11 @@
 #include "axis.h"
 
+#include <Arduino.h>
+#include <Preferences.h>
+#include <math.h>
+
 #include "board.h"
+#include "cal_record.h"
 #include "foc_task.h"
 
 Axis::Axis(int i)
@@ -28,6 +33,14 @@ void axisApplyLimits(Axis &ax) {
   ax.motor.voltage_limit = ax.voltage_limit;
   ax.motor.PID_velocity.limit = ax.voltage_limit; /* output is VOLTS */
   ax.motor.velocity_limit = FOC_VEL_LIMIT;
+  /* align_voltage is set once by initAll() and can also be changed on its
+   * own by the `alignv` command; re-clamp it here on every limit change so
+   * a `limit` dropped below the current align voltage cannot leave the
+   * calibration pass driving more volts than just requested. */
+  if (ax.align_voltage > ax.voltage_limit) {
+    ax.align_voltage = ax.voltage_limit;
+  }
+  ax.motor.voltage_sensor_align = ax.align_voltage;
 }
 
 void axisInitAll() {
@@ -93,4 +106,324 @@ void axisTakeOwnership(Axis &ax) {
 void axisReleaseOwnership(Axis &ax) {
   ax.owner = Owner::Task;
   focSyncWithTask();
+}
+
+/**
+ * Calibration sequence, ported from ESP32FOCHardwareCheck/src/main.cpp
+ * (runZSearch:383, slewElectric:419, rampElectricDown:433,
+ * rampElectricUp:442, runOpenloopDirectionAndZero:450, runInitFoc:503).
+ * Every current-sense step (current_sense.driverAlign(), .skip_align) is
+ * dropped: this firmware has no current sense at all, voltage torque only.
+ *
+ * All of it runs while the caller owns ax (Owner::Cli): it drives the motor
+ * directly via loopFOC()/move()/setPhaseVoltage(), never through the core-0
+ * FOC task.
+ */
+namespace {
+
+constexpr const char *kNvsNs = "drive";
+
+const char *calKey(const Axis &ax) { return ax.idx == 0 ? "cal0" : "cal1"; }
+
+const char *dirName(Direction d) {
+  if (d == Direction::CW) {
+    return "CW";
+  }
+  if (d == Direction::CCW) {
+    return "CCW";
+  }
+  return "UNKNOWN";
+}
+
+/**
+ * Polls the encoder in small steps instead of sleeping in one shot.
+ * axisTakeOwnership()'s contract (see axis.h) requires the 16-bit PCNT
+ * count to be re-read well inside its ~8192-count wrap window for as long
+ * as the CLI, not the FOC task, owns the axis. A bare delay() during the
+ * ramp/settle phases below would be exactly the passive wait that contract
+ * forbids, so every wait here re-reads the encoder about once a
+ * millisecond instead.
+ */
+void axisOwnedDelay(Axis &ax, uint32_t ms) {
+  for (uint32_t i = 0; i < ms; ++i) {
+    ax.encoder.update();
+    delay(1);
+  }
+}
+
+constexpr float kAlignOlRadS = 3.0f;
+constexpr uint32_t kAlignOlMs = 500;
+constexpr float kAlignMinRad = 0.25f;
+
+void slewElectric(Axis &ax, float u, float el_from, float el_to, uint32_t ms) {
+  float d = el_to - el_from;
+  d = _normalizeAngle(d + _PI) - _PI;
+  const int n = (int)(ms / 5u);
+  if (n <= 0) {
+    ax.motor.setPhaseVoltage(u, 0.0f, el_to);
+    return;
+  }
+  for (int i = 1; i <= n; ++i) {
+    ax.motor.setPhaseVoltage(u, 0.0f, _normalizeAngle(el_from + d * ((float)i / (float)n)));
+    axisOwnedDelay(ax, 5);
+  }
+}
+
+void rampElectricDown(Axis &ax, float u, float el, uint32_t ms) {
+  const int n = (int)(ms / 5u);
+  for (int i = 1; i <= n; ++i) {
+    ax.motor.setPhaseVoltage(u * (1.0f - (float)i / (float)n), 0.0f, el);
+    axisOwnedDelay(ax, 5);
+  }
+  ax.motor.setPhaseVoltage(0.0f, 0.0f, 0.0f);
+}
+
+void rampElectricUp(Axis &ax, float u, float el, uint32_t ms) {
+  const int n = (int)(ms / 5u);
+  for (int i = 1; i <= n; ++i) {
+    ax.motor.setPhaseVoltage(u * ((float)i / (float)n), 0.0f, el);
+    axisOwnedDelay(ax, 5);
+  }
+}
+
+/**
+ * Open-loop spin to detect the sensor direction, then a gently ramped
+ * electrical-zero capture: rotor already at rest, so the transition to the
+ * angle that reads zero_electric_angle is stepped through many small
+ * voltage/angle increments (ramp up, slew, settle, ramp down) rather than
+ * SimpleFOC's native alignSensor(), which jumps voltage in single steps and
+ * kicks the shaft on this hardware.
+ */
+bool axisOpenloopDirectionAndZero(Axis &ax) {
+  axisApplyLimits(ax);
+  ax.motor.controller = MotionControlType::velocity_openloop;
+  ax.motor.torque_controller = TorqueControlType::voltage;
+  ax.motor.target = kAlignOlRadS;
+  axisArm(ax);
+
+  ax.encoder.update();
+  const int64_t cnt0 = ax.encoder.count();
+  Serial.printf("align %c: ol %.1f rad/s  Ulim=%.2f  cnt=%lld\n", ax.name, (double)kAlignOlRadS,
+                (double)ax.voltage_limit, (long long)cnt0);
+
+  const uint32_t t0 = millis();
+  while ((millis() - t0) < kAlignOlMs) {
+    ax.motor.loopFOC();
+    ax.motor.move();
+  }
+
+  ax.encoder.update();
+  const int64_t cnt1 = ax.encoder.count();
+  const int64_t dcnt = cnt1 - cnt0;
+  const float moved = (float)dcnt * (_2PI / ax.encoder.cpr());
+  ax.motor.target = 0.0f;
+  ax.motor.move();
+  Serial.printf("align %c: ol moved=%.4f rad  dcnt=%lld\n", ax.name, (double)moved,
+                (long long)dcnt);
+
+  /* An open-loop spin at 3 rad/s for 500 ms should move the shaft ~1.5 rad.
+   * A large mismatch means ENC_PPR differs from the MT6835 ABZ register or
+   * pole_pairs is wrong. Warn only: slipping in open loop is possible. */
+  const float expected = kAlignOlRadS * (kAlignOlMs / 1000.0f);
+  const float ratio = fabsf(moved) / expected;
+  Serial.printf("cal %c: moved=%.3f rad expected=%.3f ratio=%.2f%s\n", ax.name, (double)moved,
+                (double)expected, (double)ratio,
+                (ratio < 0.7f || ratio > 1.3f) ? "  WARNING check ENC_PPR / pole_pairs" : "");
+
+  if (fabsf(moved) < kAlignMinRad) {
+    Serial.printf("align %c: FAIL - ol did not move the shaft\n", ax.name);
+    return false;
+  }
+
+  ax.motor.sensor_direction = (dcnt > 0) ? Direction::CW : Direction::CCW;
+  const float el_from = _normalizeAngle(ax.motor.shaft_angle * (float)ax.motor.pole_pairs);
+  rampElectricUp(ax, ax.align_voltage, el_from, 200);
+  slewElectric(ax, ax.align_voltage, el_from, _3PI_2, 400);
+  axisOwnedDelay(ax, 400);
+  ax.encoder.update();
+  ax.motor.zero_electric_angle = 0.0f;
+  ax.motor.zero_electric_angle = ax.motor.electricalAngle();
+  rampElectricDown(ax, ax.align_voltage, _3PI_2, 250);
+  Serial.printf("align %c: dir=%s  zero=%.4f\n", ax.name, dirName(ax.motor.sensor_direction),
+                (double)ax.motor.zero_electric_angle);
+  return _isset(ax.motor.zero_electric_angle);
+}
+
+/**
+ * Runs open-loop direction/zero detection only if the axis does not
+ * already have a direction/zero (e.g. just loaded from NVS), then
+ * initFOC(). With current sense gone there is nothing left to do in the
+ * "already known" branch beyond that — the original's current-sense
+ * repolarization pass is dropped entirely.
+ */
+int axisRunInitFoc(Axis &ax) {
+  axisApplyLimits(ax);
+  if (ax.motor.sensor_direction == Direction::UNKNOWN || !_isset(ax.motor.zero_electric_angle)) {
+    if (!axisOpenloopDirectionAndZero(ax)) {
+      return 0;
+    }
+  }
+  axisArm(ax);
+  const int ok = ax.motor.initFOC();
+  Serial.printf("align %c: initFOC=%d  zero=%.4f  dir=%s\n", ax.name, ok,
+                (double)ax.motor.zero_electric_angle, dirName(ax.motor.sensor_direction));
+  ax.motor.target = 0.0f;
+  return ok;
+}
+
+}  // namespace
+
+bool axisZSearch(Axis &ax, bool park) {
+  if (park) {
+    axisTakeOwnership(ax);
+  }
+  ax.encoder.clearIndex();
+  ax.motor.controller = MotionControlType::velocity_openloop;
+  ax.motor.torque_controller = TorqueControlType::voltage;
+  ax.motor.target = Z_SEARCH_RPS * _2PI;
+  axisArm(ax);
+
+  const uint32_t timeout_ms = (uint32_t)(Z_SEARCH_TURNS / Z_SEARCH_RPS * 1000.0f) + 200u;
+  Serial.printf("zsearch %c: %.2f rps  timeout=%.1f turn\n", ax.name, (double)Z_SEARCH_RPS,
+                (double)Z_SEARCH_TURNS);
+  const uint32_t t0 = millis();
+  while (!ax.encoder.indexFound() && (millis() - t0) < timeout_ms) {
+    ax.motor.loopFOC();
+    ax.motor.move();
+  }
+  const bool ok = ax.encoder.indexFound();
+  ax.motor.target = 0.0f;
+  Serial.printf("zsearch %c: %s  cnt=%lld\n", ax.name, ok ? "ok" : "FAIL (no index)",
+                (long long)ax.encoder.count());
+
+  if (!park) {
+    /* axisCal() already owns ax and continues straight into direction/zero
+     * detection: stay armed, stay owned, let the caller finish the job. */
+    return ok;
+  }
+
+  ax.calibrated = false;
+  if (ok) {
+    if (axisLoadCal(ax)) {
+      const int fok = axisRunInitFoc(ax);
+      ax.calibrated = (fok != 0) && ax.motor.sensor_direction != Direction::UNKNOWN &&
+                       _isset(ax.motor.zero_electric_angle);
+      Serial.printf("zsearch %c: electrical %s  initFOC=%d\n", ax.name,
+                    ax.calibrated ? "ok" : "FAIL", fok);
+    } else {
+      Serial.printf("zsearch %c: ok, no nvs electrical zero - run cal\n", ax.name);
+    }
+  }
+  axisSetMode(ax, Mode::Off);
+  axisDisarm(ax);
+  axisReleaseOwnership(ax);
+  return ok;
+}
+
+bool axisCal(Axis &ax) {
+  axisTakeOwnership(ax);
+  Serial.printf("cal %c: Z search then ol %.1f for dir/zero - motor will spin\n", ax.name,
+                (double)kAlignOlRadS);
+
+  if (!axisZSearch(ax, false)) {
+    ax.calibrated = false;
+    axisSetMode(ax, Mode::Off);
+    axisDisarm(ax);
+    axisReleaseOwnership(ax);
+    Serial.printf("cal %c: FAIL (Z)\n", ax.name);
+    return false;
+  }
+
+  ax.motor.sensor_direction = Direction::UNKNOWN;
+  ax.motor.zero_electric_angle = NOT_SET;
+  const int ok = axisRunInitFoc(ax);
+  axisSetMode(ax, Mode::Off);
+  axisDisarm(ax);
+  ax.calibrated = (ok != 0) && ax.encoder.indexFound() &&
+                  ax.motor.sensor_direction != Direction::UNKNOWN &&
+                  _isset(ax.motor.zero_electric_angle);
+  Serial.printf("cal %c: %s  zero=%.4f (%.1f deg) dir=%s  initFOC=%d\n", ax.name,
+                ax.calibrated ? "ok" : "FAIL", (double)ax.motor.zero_electric_angle,
+                (double)(ax.motor.zero_electric_angle * (180.0f / _PI)),
+                dirName(ax.motor.sensor_direction), ok);
+  if (ax.calibrated) {
+    Serial.printf("cal %c: type save - next boot only needs zsearch\n", ax.name);
+  }
+  axisReleaseOwnership(ax);
+  return ax.calibrated;
+}
+
+bool axisSaveCal(Axis &ax) {
+  if (!ax.calibrated || ax.motor.sensor_direction == Direction::UNKNOWN ||
+      !_isset(ax.motor.zero_electric_angle)) {
+    Serial.printf("save %c: not calibrated\n", ax.name);
+    return false;
+  }
+  CalRecord rec{};
+  rec.magic = kCalMagic;
+  rec.zero_electric_angle = ax.motor.zero_electric_angle;
+  rec.sensor_direction = static_cast<int8_t>(ax.motor.sensor_direction);
+  rec.pole_pairs = static_cast<uint8_t>(ax.motor.pole_pairs);
+  rec.enc_ppr = (uint16_t)ENC_PPR;
+  rec.axis = ax.name;
+
+  Preferences prefs;
+  if (!prefs.begin(kNvsNs, false)) {
+    Serial.printf("save %c: nvs fail\n", ax.name);
+    return false;
+  }
+  const size_t n = prefs.putBytes(calKey(ax), &rec, sizeof(rec));
+  prefs.end();
+  if (n != sizeof(rec)) {
+    Serial.printf("save %c: write fail\n", ax.name);
+    return false;
+  }
+  Serial.printf("save %c: zero=%.4f dir=%s pp=%u ppr=%u  (reboot: zsearch then this zero)\n",
+                ax.name, (double)rec.zero_electric_angle, dirName(ax.motor.sensor_direction),
+                (unsigned)rec.pole_pairs, (unsigned)rec.enc_ppr);
+  return true;
+}
+
+void axisForgetCal(Axis &ax) {
+  axisTakeOwnership(ax);
+  axisSetMode(ax, Mode::Off);
+  axisDisarm(ax);
+  ax.calibrated = false;
+  ax.motor.sensor_direction = Direction::UNKNOWN;
+  ax.motor.zero_electric_angle = NOT_SET;
+  axisReleaseOwnership(ax);
+
+  Preferences prefs;
+  if (prefs.begin(kNvsNs, false)) {
+    prefs.remove(calKey(ax));
+    prefs.end();
+  }
+  Serial.printf("forget %c: nvs cleared, run cal\n", ax.name);
+}
+
+bool axisLoadCal(Axis &ax) {
+  Preferences prefs;
+  if (!prefs.begin(kNvsNs, true)) {
+    return false;
+  }
+  CalRecord rec{};
+  const size_t n = prefs.getBytes(calKey(ax), &rec, sizeof(rec));
+  prefs.end();
+  if (n != sizeof(rec) || !calRecordValid(rec, ax.name, (uint16_t)ENC_PPR)) {
+    return false;
+  }
+  ax.motor.pole_pairs = rec.pole_pairs;
+  ax.motor.sensor_direction = static_cast<Direction>(rec.sensor_direction);
+  ax.motor.zero_electric_angle = rec.zero_electric_angle;
+  Serial.printf("nvs %c: zero=%.4f dir=%s pp=%u\n", ax.name, (double)rec.zero_electric_angle,
+                dirName(ax.motor.sensor_direction), (unsigned)rec.pole_pairs);
+  return true;
+}
+
+bool axisRequireCal(Axis &ax) {
+  if (!ax.calibrated || !ax.encoder.indexFound()) {
+    Serial.printf("need cal %c (or zsearch after save)\n", ax.name);
+    return false;
+  }
+  return true;
 }

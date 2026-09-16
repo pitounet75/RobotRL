@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 
+#include "axis.h"
 #include "board.h"
 #include "cmd_parse.h"
 #include "config.h"
@@ -66,6 +67,59 @@ void handleLine(const char *raw) {
     }
     mainSetVoltageLimit(p.axis_mask, v);
     Serial.printf("limit: %.2f V\n", (double)v);
+  } else if (strcmp(p.cmd, "alignv") == 0) {
+    if (!p.has_value) {
+      for (int i = 0; i < AXIS_COUNT; ++i) {
+        if ((p.axis_mask & (1u << i)) && axes[i].present) {
+          Serial.printf("alignv %c: %.2f V\n", axes[i].name, (double)axes[i].align_voltage);
+        }
+      }
+      return;
+    }
+    for (int i = 0; i < AXIS_COUNT; ++i) {
+      if (!(p.axis_mask & (1u << i)) || !axes[i].present) {
+        continue;
+      }
+      Axis &ax = axes[i];
+      ax.align_voltage = p.value;
+      if (ax.align_voltage < 0.2f) {
+        ax.align_voltage = 0.2f;
+      }
+      /* Clamps to ax.voltage_limit and pushes into motor.voltage_sensor_align. */
+      axisApplyLimits(ax);
+      Serial.printf("alignv %c: %.2f V\n", ax.name, (double)ax.align_voltage);
+    }
+  } else if (strcmp(p.cmd, "cal") == 0) {
+    /* No axis prefix -> both axes, one after the other: axisCal() spins the
+     * shaft open-loop, so two axes at once would be two motors moving at
+     * once for no reason and would make each ratio warning ambiguous. */
+    for (int i = 0; i < AXIS_COUNT; ++i) {
+      if (!(p.axis_mask & (1u << i)) || !axes[i].present) {
+        continue;
+      }
+      axisCal(axes[i]);
+    }
+  } else if (strcmp(p.cmd, "zsearch") == 0) {
+    for (int i = 0; i < AXIS_COUNT; ++i) {
+      if (!(p.axis_mask & (1u << i)) || !axes[i].present) {
+        continue;
+      }
+      axisZSearch(axes[i], true);
+    }
+  } else if (strcmp(p.cmd, "save") == 0) {
+    for (int i = 0; i < AXIS_COUNT; ++i) {
+      if (!(p.axis_mask & (1u << i)) || !axes[i].present) {
+        continue;
+      }
+      axisSaveCal(axes[i]);
+    }
+  } else if (strcmp(p.cmd, "forget") == 0) {
+    for (int i = 0; i < AXIS_COUNT; ++i) {
+      if (!(p.axis_mask & (1u << i)) || !axes[i].present) {
+        continue;
+      }
+      axisForgetCal(axes[i]);
+    }
   } else if (strcmp(p.cmd, "enc") == 0) {
     if (!p.has_value) {
       mainPrintEncLine(p.axis_mask);
@@ -112,7 +166,8 @@ void cliPrintHelp() {
   Serial.println("ESP32FOCDrive  FS2804 x2  voltage FOC  MT6835 ABZ");
   Serial.println("  help status");
   Serial.println("  ol [L|R] <rad/s>   idle [L|R]");
-  Serial.println("  limit [L|R] <V>    download");
+  Serial.println("  limit [L|R] <V>    alignv [L|R] <V>  download");
+  Serial.println("  cal [L|R]          zsearch [L|R]  save [L|R]  forget [L|R]");
   Serial.println("  enc [0|1]          ota");
   Serial.println("  hz [Hz]            dt");
   Serial.println("  selftest           wifioff");

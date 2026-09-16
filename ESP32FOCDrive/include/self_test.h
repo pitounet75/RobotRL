@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "cal_record.h"
 #include "cmd_parse.h"
 #include "enc_math.h"
 
@@ -32,6 +33,17 @@ typedef void (*SelfTestReport)(const char *name, bool ok, void *ctx);
   } while (0)
 
 inline bool selfTestNear(float a, float b, float tol) { return fabsf(a - b) <= tol; }
+
+inline CalRecord selfTestMakeCalRecord() {
+  CalRecord r{};
+  r.magic = kCalMagic;
+  r.zero_electric_angle = 1.234f;
+  r.sensor_direction = 1;
+  r.pole_pairs = 7;
+  r.enc_ppr = 16384;
+  r.axis = 'L';
+  return r;
+}
 
 inline SelfTestResult selfTestRun(SelfTestReport report, void *ctx) {
   SelfTestResult res{0, 0};
@@ -62,6 +74,21 @@ inline SelfTestResult selfTestRun(SelfTestReport report, void *ctx) {
   SELF_TEST_CHECK("angle_pos", rot == 1 && selfTestNear(shaft, 1.5708f, 1e-3f));
   encAngleFromCount(-16384, 65536, &rot, &shaft);
   SELF_TEST_CHECK("angle_neg", rot == -1 && selfTestNear(shaft, 4.7124f, 1e-3f));
+
+  SELF_TEST_CHECK("cal_match", calRecordValid(selfTestMakeCalRecord(), 'L', 16384));
+  SELF_TEST_CHECK("cal_other_axis", !calRecordValid(selfTestMakeCalRecord(), 'R', 16384));
+  /* Changing ENC_PPR silently invalidates every stored electrical zero. */
+  SELF_TEST_CHECK("cal_ppr_change", !calRecordValid(selfTestMakeCalRecord(), 'L', 4096));
+  {
+    CalRecord bad = selfTestMakeCalRecord();
+    bad.magic = 0xdeadbeefu;
+    SELF_TEST_CHECK("cal_bad_magic", !calRecordValid(bad, 'L', 16384));
+  }
+  {
+    CalRecord bad = selfTestMakeCalRecord();
+    bad.sensor_direction = 0;
+    SELF_TEST_CHECK("cal_no_dir", !calRecordValid(bad, 'L', 16384));
+  }
 
   return res;
 }
