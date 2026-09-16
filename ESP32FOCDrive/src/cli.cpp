@@ -5,6 +5,7 @@
 #include "board.h"
 #include "cmd_parse.h"
 #include "config.h"
+#include "net.h"
 
 /* Temporary seam, replaced by drive_api.h in task 7. */
 void mainSetOpenloop(uint8_t axis_mask, float rad_s);
@@ -58,6 +59,10 @@ void handleLine(const char *raw) {
   } else if (strcmp(p.cmd, "download") == 0 || strcmp(p.cmd, "dl") == 0) {
     mainIdle(0b11);
     boardEnterDownload();
+  } else if (strcmp(p.cmd, "ota") == 0) {
+    netPrintInfo();
+  } else if (strcmp(p.cmd, "wifioff") == 0) {
+    netWifiOff();
   } else {
     Serial.println("unknown - help");
   }
@@ -71,6 +76,7 @@ void cliPrintHelp() {
   Serial.println("  help status");
   Serial.println("  ol [L|R] <rad/s>   idle [L|R]");
   Serial.println("  limit [L|R] <V>    download");
+  Serial.println("  ota                wifioff");
 }
 
 void cliPoll() {

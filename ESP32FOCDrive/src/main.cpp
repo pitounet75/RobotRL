@@ -2,10 +2,13 @@
 
 #include <Arduino.h>
 #include <SimpleFOC.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include "board.h"
 #include "cli.h"
 #include "config.h"
+#include "net.h"
 
 namespace {
 constexpr int kAxis = (FOC_AXIS_MASK & 0b01) ? 0 : 1;
@@ -48,6 +51,7 @@ void cliPrintStatus() {
   Serial.printf("axis=%c tgt=%.2f rad/s Uq=%.2f V limit=%.2f V MEN=%d\n",
                 kAxisName[kAxis], (double)motor.target, (double)motor.voltage.q,
                 (double)motor.voltage_limit, (int)boardMotorPowered());
+  netPrintInfo();
 }
 
 void setup() {
@@ -83,6 +87,7 @@ void setup() {
    * command (ol) arms it. */
 
   cliInit();
+  netSetup();
 
   Serial.printf("ESP32FOCDrive axis=%c Vbus=%.1f Ulim=%.1f MEN=%d\n",
                 kAxisName[kAxis], (double)FOC_VBUS, (double)FOC_VOLTAGE_LIMIT,
@@ -90,6 +95,12 @@ void setup() {
 }
 
 void loop() {
+  netLoop();
+  if (netOtaActive()) {
+    /* A tight handle() loop starves IDLE1 and the WDT aborts mid-flash. */
+    vTaskDelay(1);
+    return;
+  }
   motor.move();
   cliPoll();
 }
