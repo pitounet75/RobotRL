@@ -21,7 +21,15 @@ namespace {
 bool s_ota_active = false;
 
 void printOta() {
-  if (WiFi.getMode() == WIFI_MODE_STA && WiFi.status() == WL_CONNECTED) {
+  /* The real mode drives the message, not a default fallthrough: after
+   * netWifiOff() the mode is WIFI_MODE_NULL, and falling into the AP
+   * branch would advertise an AP that no longer broadcasts, at 0.0.0.0. */
+  const wifi_mode_t mode = WiFi.getMode();
+  if (mode == WIFI_MODE_NULL) {
+    Serial.println("ota: wifi off (reboot to restore OTA)");
+    return;
+  }
+  if (mode == WIFI_MODE_STA && WiFi.status() == WL_CONNECTED) {
     Serial.printf("ota: STA %s  ip=%s  host=%s\n", WIFI_SSID,
                   WiFi.localIP().toString().c_str(), OTA_HOSTNAME);
     return;
@@ -63,6 +71,9 @@ void netSetup() {
   });
   ArduinoOTA.onError([](ota_error_t err) {
     s_ota_active = false;
+    /* An OTA failure returns control to normal operation, motor.move() and
+     * cliPoll() included, so the safety net has to come back with it. */
+    enableCore1WDT();
     Serial.printf("ota: err %u\n", (unsigned)err);
   });
   ArduinoOTA.begin();
