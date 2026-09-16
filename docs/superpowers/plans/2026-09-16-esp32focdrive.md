@@ -633,7 +633,9 @@ void cliPrintHelp();
 void cliPrintStatus();
 ```
 
-- [ ] **Step 6 : écrire `src/cli.cpp`, commandes `help`, `status`, `ol`, `idle`, `limit`, `alignv`, `download`**
+- [ ] **Step 6 : écrire `src/cli.cpp`, commandes `help`, `status`, `ol`, `idle`, `limit`, `download`**
+
+Pas de `alignv` ici : elle règle `voltage_sensor_align`, qui ne sert qu'à la calibration. Elle arrive avec elle, au step 6 de la tâche 5.
 
 Le lecteur de ligne est repris de `ESP32FOCHardwareCheck/src/main.cpp:1117` : lecture caractère par caractère, écho, gestion du backspace, tampon de 96 octets. À cette étape, `ol` et `idle` agissent encore directement sur le `motor` global de `main.cpp`, exposé par deux fonctions temporaires `mainSetOpenloop(uint8_t axis_mask, float rad_s)` et `mainIdle(uint8_t axis_mask)` déclarées dans `cli.cpp`. La tâche 7 remplacera ces deux appels par `drive_api.h`.
 
