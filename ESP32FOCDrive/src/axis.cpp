@@ -84,3 +84,13 @@ void axisSetMode(Axis &ax, Mode m) {
   ax.mode = m;
   focSyncWithTask();
 }
+
+void axisTakeOwnership(Axis &ax) {
+  ax.owner = Owner::Cli;
+  focSyncWithTask();
+}
+
+void axisReleaseOwnership(Axis &ax) {
+  ax.owner = Owner::Task;
+  focSyncWithTask();
+}
