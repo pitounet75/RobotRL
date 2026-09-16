@@ -14,8 +14,16 @@
  *
  * Caller must read often enough that a true motion never exceeds lim/2
  * (8192 counts here, about 10 ms at 80 rad/s with 65536 CPR).
+ *
+ * Called from an ISR path (PcntEncoder::zIsr -> foldLocked, IRAM_ATTR). `inline`
+ * is only a hint: if the compiler emits an out-of-line body anyway, it lands in
+ * regular flash, which is unreachable from an ISR while the flash cache is
+ * disabled during an OTA or NVS write -- this firmware does both. Force
+ * inlining so no out-of-line body can ever exist, instead of tagging this
+ * function IRAM_ATTR, which would pull IDF headers into this otherwise
+ * freestanding header.
  */
-inline int32_t encFoldDelta(int16_t prev, int16_t now, int32_t lim) {
+__attribute__((always_inline)) inline int32_t encFoldDelta(int16_t prev, int16_t now, int32_t lim) {
   int32_t d = (int32_t)now - (int32_t)prev;
   if (d < -(lim / 2)) {
     d += lim;
