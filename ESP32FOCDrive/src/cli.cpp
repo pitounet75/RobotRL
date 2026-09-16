@@ -7,6 +7,7 @@
 #include "config.h"
 #include "foc_task.h"
 #include "net.h"
+#include "self_test.h"
 
 /* Temporary seam, replaced by drive_api.h in task 7. */
 void mainSetOpenloop(uint8_t axis_mask, float rad_s);
@@ -21,6 +22,10 @@ uint8_t line_len = 0;
 bool enc_stream = false;
 uint8_t enc_stream_mask = (uint8_t)FOC_AXIS_MASK;
 uint32_t enc_last_print_ms = 0;
+
+void selfTestReport(const char *name, bool ok, void *) {
+  Serial.printf("selftest: %s %s\n", name, ok ? "PASS" : "FAIL");
+}
 
 void handleLine(const char *raw) {
   ParsedCmd p{};
@@ -92,6 +97,9 @@ void handleLine(const char *raw) {
   } else if (strcmp(p.cmd, "dt") == 0) {
     focResetMetrics();
     Serial.println("dt: reset");
+  } else if (strcmp(p.cmd, "selftest") == 0) {
+    const SelfTestResult r = selfTestRun(selfTestReport, nullptr);
+    Serial.printf("selftest: %d run, %d failed\n", r.run, r.failed);
   } else {
     Serial.println("unknown - help");
   }
@@ -107,7 +115,7 @@ void cliPrintHelp() {
   Serial.println("  limit [L|R] <V>    download");
   Serial.println("  enc [0|1]          ota");
   Serial.println("  hz [Hz]            dt");
-  Serial.println("  wifioff");
+  Serial.println("  selftest           wifioff");
 }
 
 void cliPoll() {
