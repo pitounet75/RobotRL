@@ -21,7 +21,8 @@
 - **`ENC_VEL_MIN_DT = 0.001f`** (1 ms).
 - **Cadence FOC :** `FOC_LOOP_HZ = 4000`, bornes 4000 à 16000.
 - **Langue :** commentaires et identifiants **en anglais** dans le code C++ (`.h`, `.cpp`), comme le reste du dépôt. Les fichiers de configuration (`platformio.ini`) et la documentation (`README.md`) sont **en français**, comme leurs équivalents dans `ESP32FOCHardwareCheck`.
-- **Tests :** Unity **sur la cible**, `pio test -e left -f test_logic`. Il n'y a pas de compilateur hôte sur cette machine, donc pas d'env `native`. Toute logique testée vit dans un en-tête autonome de `include/`, sans `#include <Arduino.h>`, pour qu'un test compile sans `src/`.
+- **Tests :** toute logique testée vit dans un en-tête autonome de `include/`, sans `#include <Arduino.h>`. Les vérifications sont centralisées dans `include/self_test.h` (tâche 12) et lancées de deux façons : la commande **`selftest`** de l'application, qui arrive par OTA et est le chemin normal, et la suite Unity sur cible (`pio test -e dual -f test_logic`), secondaire. Il n'y a pas de compilateur hôte sur cette machine, donc pas d'env `native`. **Aucune tâche postérieure à la 12 n'écrit de test Unity séparé** : elle ajoute ses vérifications à `self_test.h`.
+- **Flash :** cette carte a un défaut, l'auto-reset par DTR/RTS ne fonctionne pas et tout flash USB impose un geste physique de l'humain. L'OTA est donc le chemin normal, et un firmware dont l'OTA est cassé coûte cher.
 - **Sans carte branchée**, le garde-fou minimal est la compilation : `pio run -e left`, `pio run -e right`, `pio run -e dual`.
 - **Chaque commit** se termine par les lignes d'attribution de la session en cours (`Co-Authored-By` et `Claude-Session`).
 - **`platformio.local.ini` n'est jamais commité** ; il est déjà couvert par `.gitignore` via `*.local.ini`.
@@ -57,7 +58,8 @@ Trois conséquences, déjà intégrées dans le texte des tâches concernées :
 | `include/cli.h`, `src/cli.cpp` | lecture série, exécution des commandes, `status` |
 | `include/net.h`, `src/net.cpp` | WiFi, OTA |
 | `src/main.cpp` | `setup()` et `loop()` |
-| `test/test_logic/test_main.cpp` | tests Unity des en-têtes purs |
+| `include/self_test.h` | **en-tête pur** : toutes les vérifications, un seul jeu d'assertions |
+| `test/test_logic/test_main.cpp` | exécuteur Unity, délègue à `self_test.h` |
 | `scripts/` | `wrap_uploader.py`, `esptool_nodtr.py` |
 | `README.md` | câblage, séquence de mise au point, commandes |
 
@@ -1097,19 +1099,21 @@ git commit -m "feat(esp32focdrive): isochronous FOC task on core 0 with ownershi
 
 **Files:**
 - Create: `ESP32FOCDrive/include/cal_record.h`
-- Modify: `ESP32FOCDrive/test/test_logic/test_main.cpp`
+- Modify: `ESP32FOCDrive/include/self_test.h`
 - Modify: `ESP32FOCDrive/include/axis.h`, `ESP32FOCDrive/src/axis.cpp`, `ESP32FOCDrive/src/cli.cpp`
 
 **Interfaces:**
 - Consomme : `Axis`, `focSyncWithTask`.
 - Produit : `struct CalRecord`, `bool calRecordValid(const CalRecord &rec, char axis, uint16_t ppr)`, et sur `axis.h` : `bool axisCal(Axis &)`, `bool axisZSearch(Axis &, bool park)`, `bool axisSaveCal(Axis &)`, `void axisForgetCal(Axis &)`, `bool axisLoadCal(Axis &)`, `bool axisRequireCal(Axis &)`.
 
-- [ ] **Step 1 : écrire les tests qui échouent**
+- [ ] **Step 1 : ajouter les vérifications de `cal_record.h` à `self_test.h`**
 
-Ajouter dans `test/test_logic/test_main.cpp`, avec `#include "cal_record.h"` :
+La tâche 12 a centralisé toutes les vérifications de logique pure dans `include/self_test.h`, appelé à la fois par la suite Unity et par la commande `selftest` de l'application. **Ne crée donc aucun test Unity séparé** : `test/test_logic/test_main.cpp` ne doit pas être modifié par cette tâche.
+
+Dans `self_test.h` : ajouter `#include "cal_record.h"` en tête, le petit constructeur d'enregistrement en `inline`, et les cinq vérifications avant le `return res;` final.
 
 ```cpp
-static CalRecord makeRec() {
+inline CalRecord selfTestMakeCalRecord() {
   CalRecord r{};
   r.magic = kCalMagic;
   r.zero_electric_angle = 1.234f;
@@ -1119,39 +1123,32 @@ static CalRecord makeRec() {
   r.axis = 'L';
   return r;
 }
-
-void test_cal_record_accepts_matching() {
-  TEST_ASSERT_TRUE(calRecordValid(makeRec(), 'L', 16384));
-}
-
-void test_cal_record_rejects_other_axis() {
-  TEST_ASSERT_FALSE(calRecordValid(makeRec(), 'R', 16384));
-}
-
-/* Changing ENC_PPR silently invalidates every stored electrical zero. */
-void test_cal_record_rejects_ppr_change() {
-  TEST_ASSERT_FALSE(calRecordValid(makeRec(), 'L', 4096));
-}
-
-void test_cal_record_rejects_bad_magic() {
-  CalRecord r = makeRec();
-  r.magic = 0xdeadbeefu;
-  TEST_ASSERT_FALSE(calRecordValid(r, 'L', 16384));
-}
-
-void test_cal_record_rejects_unknown_direction() {
-  CalRecord r = makeRec();
-  r.sensor_direction = 0;
-  TEST_ASSERT_FALSE(calRecordValid(r, 'L', 16384));
-}
 ```
 
-- [ ] **Step 2 : lancer et vérifier l'échec**
+```cpp
+  SELF_TEST_CHECK("cal_match", calRecordValid(selfTestMakeCalRecord(), 'L', 16384));
+  SELF_TEST_CHECK("cal_other_axis", !calRecordValid(selfTestMakeCalRecord(), 'R', 16384));
+  /* Changing ENC_PPR silently invalidates every stored electrical zero. */
+  SELF_TEST_CHECK("cal_ppr_change", !calRecordValid(selfTestMakeCalRecord(), 'L', 4096));
+  {
+    CalRecord bad = selfTestMakeCalRecord();
+    bad.magic = 0xdeadbeefu;
+    SELF_TEST_CHECK("cal_bad_magic", !calRecordValid(bad, 'L', 16384));
+  }
+  {
+    CalRecord bad = selfTestMakeCalRecord();
+    bad.sensor_direction = 0;
+    SELF_TEST_CHECK("cal_no_dir", !calRecordValid(bad, 'L', 16384));
+  }
+```
+
+- [ ] **Step 2 : vérifier que la compilation échoue**
 
 ```bash
-pio test -e dual -f test_logic
+cd H:/Projects/RobotRL/ESP32FOCDrive
+pio run -e dual
 ```
-Attendu : `cal_record.h: No such file or directory`.
+Attendu : `cal_record.h: No such file or directory`. C'est la compilation qui sert de test rouge ici : les vérifications s'exécutent sur la carte, et l'implémenteur ne téléverse pas.
 
 - [ ] **Step 3 : écrire `include/cal_record.h`**
 
@@ -1189,12 +1186,12 @@ inline bool calRecordValid(const CalRecord &rec, char axis, uint16_t ppr) {
 }
 ```
 
-- [ ] **Step 4 : lancer et vérifier que ça passe**
+- [ ] **Step 4 : vérifier que la compilation passe**
 
 ```bash
-pio test -e dual -f test_logic
+pio run -e left && pio run -e right && pio run -e dual
 ```
-Attendu : `17 Tests 0 Failures 0 Ignored`.
+Attendu : trois `SUCCESS`. L'exécution des vérifications se fait ensuite par OTA, avec la commande `selftest` : `17 run, 0 failed`.
 
 - [ ] **Step 5 : porter la séquence de calibration**
 
@@ -1334,7 +1331,7 @@ git commit -m "feat(esp32focdrive): closed-loop velocity and voltage torque, est
 **Files:**
 - Create: `ESP32FOCDrive/include/failsafe.h`
 - Create: `ESP32FOCDrive/include/drive_api.h`, `ESP32FOCDrive/src/drive_api.cpp`
-- Modify: `ESP32FOCDrive/test/test_logic/test_main.cpp`, `ESP32FOCDrive/src/foc_task.cpp`, `ESP32FOCDrive/src/cli.cpp`, `ESP32FOCDrive/src/main.cpp`
+- Modify: `ESP32FOCDrive/include/self_test.h`, `ESP32FOCDrive/src/foc_task.cpp`, `ESP32FOCDrive/src/cli.cpp`, `ESP32FOCDrive/src/main.cpp`
 
 **Interfaces:**
 - Consomme : `axisSetVelocity`, `axisSetTorque`, `axisDisarm`, `Axis`.
@@ -1342,35 +1339,28 @@ git commit -m "feat(esp32focdrive): closed-loop velocity and voltage torque, est
 
 `axis` est ici un **index** (0 ou 1), pas un masque : c'est l'API qu'utilisera la boucle d'équilibrage. La CLI convertit son masque en appels par axe.
 
-- [ ] **Step 1 : écrire les tests qui échouent**
+- [ ] **Step 1 : ajouter les vérifications de `failsafe.h` à `self_test.h`**
+
+La tâche 12 a centralisé les vérifications de logique pure dans `include/self_test.h`, appelé à la fois par la suite Unity et par la commande `selftest`. **Ne crée aucun test Unity séparé** : `test/test_logic/test_main.cpp` ne doit pas être modifié par cette tâche.
+
+Dans `self_test.h` : ajouter `#include "failsafe.h"` en tête, et les cinq vérifications avant le `return res;` final.
 
 ```cpp
-void test_failsafe_zero_timeout_never_expires() {
-  TEST_ASSERT_FALSE(failsafeExpired(1000000u, 0u, 0u));
-}
-
-void test_failsafe_not_expired_within_window() {
-  TEST_ASSERT_FALSE(failsafeExpired(1005u, 1000u, 10u));
-}
-
-void test_failsafe_expired_after_window() {
-  TEST_ASSERT_TRUE(failsafeExpired(1011u, 1000u, 10u));
-}
-
-/* millis() wraps every ~49.7 days; unsigned subtraction must carry it. */
-void test_failsafe_survives_millis_wrap() {
-  const uint32_t last = 0xFFFFFFF0u;
-  TEST_ASSERT_FALSE(failsafeExpired(0x00000005u, last, 50u));
-  TEST_ASSERT_TRUE(failsafeExpired(0x00000040u, last, 50u));
-}
+  SELF_TEST_CHECK("fs_zero_never", !failsafeExpired(1000000u, 0u, 0u));
+  SELF_TEST_CHECK("fs_within", !failsafeExpired(1005u, 1000u, 10u));
+  SELF_TEST_CHECK("fs_after", failsafeExpired(1011u, 1000u, 10u));
+  /* millis() wraps every ~49.7 days; unsigned subtraction must carry it. */
+  SELF_TEST_CHECK("fs_wrap_ok", !failsafeExpired(0x00000005u, 0xFFFFFFF0u, 50u));
+  SELF_TEST_CHECK("fs_wrap_expired", failsafeExpired(0x00000040u, 0xFFFFFFF0u, 50u));
 ```
 
-- [ ] **Step 2 : lancer et vérifier l'échec**
+- [ ] **Step 2 : vérifier que la compilation échoue**
 
 ```bash
-pio test -e dual -f test_logic
+cd H:/Projects/RobotRL/ESP32FOCDrive
+pio run -e dual
 ```
-Attendu : `failsafe.h: No such file or directory`.
+Attendu : `failsafe.h: No such file or directory`. C'est la compilation qui sert de test rouge : les vérifications s'exécutent sur la carte, et l'implémenteur ne téléverse pas.
 
 - [ ] **Step 3 : écrire `include/failsafe.h`**
 
@@ -1394,12 +1384,12 @@ inline bool failsafeExpired(uint32_t now_ms, uint32_t last_ms, uint32_t timeout_
 }
 ```
 
-- [ ] **Step 4 : lancer et vérifier que ça passe**
+- [ ] **Step 4 : vérifier que la compilation passe**
 
 ```bash
-pio test -e dual -f test_logic
+pio run -e left && pio run -e right && pio run -e dual
 ```
-Attendu : `21 Tests 0 Failures 0 Ignored`.
+Attendu : trois `SUCCESS`. L'exécution se fait ensuite par OTA, avec la commande `selftest` : toutes les vérifications passent, `0 failed`.
 
 - [ ] **Step 5 : écrire `drive_api.h` et `drive_api.cpp`**
 
@@ -1711,9 +1701,8 @@ Y documenter aussi les deux pièges déjà payés une fois : `platformio.local.i
 ```bash
 cd H:/Projects/RobotRL/ESP32FOCDrive
 pio run -e left && pio run -e right && pio run -e dual
-pio test -e dual -f test_logic
 ```
-Attendu : trois `SUCCESS` et `21 Tests 0 Failures 0 Ignored`.
+Attendu : trois `SUCCESS`. Puis, par OTA, la commande `selftest` sur la carte : toutes les vérifications passent, `0 failed`.
 
 - [ ] **Step 4 : commit**
 
