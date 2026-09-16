@@ -5,19 +5,21 @@
 #include "board.h"
 #include "cmd_parse.h"
 #include "config.h"
+#include "foc_task.h"
 #include "net.h"
 
 /* Temporary seam, replaced by drive_api.h in task 7. */
 void mainSetOpenloop(uint8_t axis_mask, float rad_s);
 void mainIdle(uint8_t axis_mask);
-float mainVoltageLimit();
-void mainSetVoltageLimit(float v);
-void mainPrintEncLine();
+float mainVoltageLimit(uint8_t axis_mask);
+void mainSetVoltageLimit(uint8_t axis_mask, float v);
+void mainPrintEncLine(uint8_t axis_mask);
 
 namespace {
 char line[96];
 uint8_t line_len = 0;
 bool enc_stream = false;
+uint8_t enc_stream_mask = (uint8_t)FOC_AXIS_MASK;
 uint32_t enc_last_print_ms = 0;
 
 void handleLine(const char *raw) {
@@ -47,7 +49,7 @@ void handleLine(const char *raw) {
     Serial.println("idle");
   } else if (strcmp(p.cmd, "limit") == 0) {
     if (!p.has_value) {
-      Serial.printf("limit: %.2f V\n", (double)mainVoltageLimit());
+      Serial.printf("limit: %.2f V\n", (double)mainVoltageLimit(p.axis_mask));
       return;
     }
     float v = p.value;
@@ -57,15 +59,16 @@ void handleLine(const char *raw) {
     if (v > FOC_VBUS) {
       v = FOC_VBUS;
     }
-    mainSetVoltageLimit(v);
+    mainSetVoltageLimit(p.axis_mask, v);
     Serial.printf("limit: %.2f V\n", (double)v);
   } else if (strcmp(p.cmd, "enc") == 0) {
     if (!p.has_value) {
-      mainPrintEncLine();
+      mainPrintEncLine(p.axis_mask);
     } else if (p.value >= 0.5f) {
       enc_stream = true;
+      enc_stream_mask = p.axis_mask;
       enc_last_print_ms = millis();
-      mainPrintEncLine();
+      mainPrintEncLine(p.axis_mask);
     } else {
       enc_stream = false;
     }
@@ -76,6 +79,19 @@ void handleLine(const char *raw) {
     netPrintInfo();
   } else if (strcmp(p.cmd, "wifioff") == 0) {
     netWifiOff();
+  } else if (strcmp(p.cmd, "hz") == 0) {
+    if (!p.has_value) {
+      const FocMetrics m = focGetMetrics();
+      Serial.printf("hz=%lu dt=%lu us dtmax=%lu us late=%lu loops=%llu\n",
+                    (unsigned long)m.hz, (unsigned long)m.dt_us, (unsigned long)m.dt_max_us,
+                    (unsigned long)m.late, (unsigned long long)m.loops);
+      return;
+    }
+    focSetHz((uint32_t)p.value);
+    Serial.printf("hz: %lu\n", (unsigned long)focHz());
+  } else if (strcmp(p.cmd, "dt") == 0) {
+    focResetMetrics();
+    Serial.println("dt: reset");
   } else {
     Serial.println("unknown - help");
   }
@@ -90,13 +106,14 @@ void cliPrintHelp() {
   Serial.println("  ol [L|R] <rad/s>   idle [L|R]");
   Serial.println("  limit [L|R] <V>    download");
   Serial.println("  enc [0|1]          ota");
+  Serial.println("  hz [Hz]            dt");
   Serial.println("  wifioff");
 }
 
 void cliPoll() {
   if (enc_stream && (millis() - enc_last_print_ms) >= 1000u) {
     enc_last_print_ms = millis();
-    mainPrintEncLine();
+    mainPrintEncLine(enc_stream_mask);
   }
   while (Serial.available() > 0) {
     const char c = (char)Serial.read();

@@ -1,67 +1,95 @@
-/** ESP32FOCDrive — step 2: command parser, minimal CLI, no auto-start. */
+/** ESP32FOCDrive — step 4: isochronous FOC task on core 0, CLI on core 1. */
 
 #include <Arduino.h>
-#include <SimpleFOC.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+#include "axis.h"
 #include "board.h"
 #include "cli.h"
 #include "config.h"
+#include "foc_task.h"
 #include "net.h"
-#include "pcnt_encoder.h"
-
-namespace {
-constexpr int kAxis = (FOC_AXIS_MASK & 0b01) ? 0 : 1;
-
-BLDCMotor motor(FOC_POLE_PAIRS);
-BLDCDriver3PWM driver(kAxisPwm[kAxis][0], kAxisPwm[kAxis][1], kAxisPwm[kAxis][2]);
-PcntEncoder encoder(kAxisEnc[kAxis][0], kAxisEnc[kAxis][1], kAxisEnc[kAxis][2], ENC_PPR,
-                     pcnt_unit_t(kAxis), 6.0f * FOC_VEL_LIMIT, ENC_VEL_MIN_DT);
-}  // namespace
 
 /* Temporary seam, replaced by drive_api.h in task 7. */
 void mainSetOpenloop(uint8_t axis_mask, float rad_s) {
-  if (!(axis_mask & (1u << kAxis))) {
-    return;
-  }
-  motor.target = rad_s;
-  /* enable() always does setPwm(0,0,0) and resets the PIDs: re-arming an
-   * already-armed motor would stall the shaft on every command. */
-  if (!motor.enabled) {
-    motor.enable();
-    boardMotorPowerRef(+1);
+  for (int i = 0; i < AXIS_COUNT; ++i) {
+    if (!(axis_mask & (1u << i)) || !axes[i].present) {
+      continue;
+    }
+    Axis &ax = axes[i];
+    ax.motor.controller = MotionControlType::velocity_openloop;
+    ax.motor.target = rad_s;
+    /* Settle the mode (and let the task observe it) before arming: mirrors
+     * the disarm ordering below, keeping mode and power state changes from
+     * racing the task on the other core. */
+    axisSetMode(ax, Mode::Openloop);
+    axisArm(ax);
   }
 }
 
 void mainIdle(uint8_t axis_mask) {
-  if (!(axis_mask & (1u << kAxis))) {
-    return;
-  }
-  motor.target = 0;
-  const bool was_enabled = motor.enabled;
-  motor.disable();
-  if (was_enabled) {
-    boardMotorPowerRef(-1);
+  for (int i = 0; i < AXIS_COUNT; ++i) {
+    if (!(axis_mask & (1u << i)) || !axes[i].present) {
+      continue;
+    }
+    Axis &ax = axes[i];
+    ax.motor.target = 0.0f;
+    /* Mode -> Off and synced BEFORE disarm: otherwise the task could still
+     * be mid-loopFOC()/move() when M_EN drops, and with M_EN shared between
+     * both gate drivers that is not harmless. */
+    axisSetMode(ax, Mode::Off);
+    axisDisarm(ax);
   }
 }
 
-float mainVoltageLimit() { return motor.voltage_limit; }
+float mainVoltageLimit(uint8_t axis_mask) {
+  for (int i = 0; i < AXIS_COUNT; ++i) {
+    if ((axis_mask & (1u << i)) && axes[i].present) {
+      return axes[i].voltage_limit;
+    }
+  }
+  return FOC_VOLTAGE_LIMIT;
+}
 
-void mainSetVoltageLimit(float v) { motor.voltage_limit = v; }
+void mainSetVoltageLimit(uint8_t axis_mask, float v) {
+  for (int i = 0; i < AXIS_COUNT; ++i) {
+    if (!(axis_mask & (1u << i)) || !axes[i].present) {
+      continue;
+    }
+    axes[i].voltage_limit = v;
+    axisApplyLimits(axes[i]);
+  }
+}
 
-void mainPrintEncLine() {
-  Serial.printf("enc %c cnt=%lld idx=%d zn=%lu A=%d B=%d Z=%d ang=%.4f\n", kAxisName[kAxis],
-                (long long)encoder.count(), (int)encoder.indexFound(),
-                (unsigned long)encoder.zEdges(), (int)digitalRead(kAxisEnc[kAxis][0]),
-                (int)digitalRead(kAxisEnc[kAxis][1]), (int)digitalRead(kAxisEnc[kAxis][2]),
-                (double)encoder.getAngle());
+void mainPrintEncLine(uint8_t axis_mask) {
+  for (int i = 0; i < AXIS_COUNT; ++i) {
+    if (!(axis_mask & (1u << i)) || !axes[i].present) {
+      continue;
+    }
+    Axis &ax = axes[i];
+    Serial.printf("enc %c cnt=%lld idx=%d zn=%lu A=%d B=%d Z=%d ang=%.4f\n", ax.name,
+                  (long long)ax.encoder.count(), (int)ax.encoder.indexFound(),
+                  (unsigned long)ax.encoder.zEdges(), (int)digitalRead(kAxisEnc[ax.idx][0]),
+                  (int)digitalRead(kAxisEnc[ax.idx][1]), (int)digitalRead(kAxisEnc[ax.idx][2]),
+                  (double)ax.encoder.getAngle());
+  }
 }
 
 void cliPrintStatus() {
-  Serial.printf("axis=%c tgt=%.2f rad/s Uq=%.2f V limit=%.2f V MEN=%d\n",
-                kAxisName[kAxis], (double)motor.target, (double)motor.voltage.q,
-                (double)motor.voltage_limit, (int)boardMotorPowered());
+  for (int i = 0; i < AXIS_COUNT; ++i) {
+    if (!axes[i].present) {
+      continue;
+    }
+    Axis &ax = axes[i];
+    Serial.printf("axis=%c tgt=%.2f rad/s Uq=%.2f V limit=%.2f V armed=%d\n", ax.name,
+                  (double)ax.motor.target, (double)ax.motor.voltage.q, (double)ax.voltage_limit,
+                  (int)ax.armed);
+  }
+  const FocMetrics m = focGetMetrics();
+  Serial.printf("MEN=%d hz=%lu dt=%lu us dtmax=%lu us late=%lu loops=%llu\n",
+                (int)boardMotorPowered(), (unsigned long)m.hz, (unsigned long)m.dt_us,
+                (unsigned long)m.dt_max_us, (unsigned long)m.late, (unsigned long long)m.loops);
   netPrintInfo();
 }
 
@@ -70,42 +98,17 @@ void setup() {
   Serial.begin(115200);
   delay(200);
 
-  /* This binary drives only kAxis, but env:dual marks both axes present and
-   * boardInit() only parks absent axes; M_EN is shared between both gate
-   * drivers, so the other axis' floating PWM inputs must be parked here
-   * before M_EN goes high. */
-  for (int i = 0; i < AXIS_COUNT; ++i) {
-    if (i == kAxis) {
-      continue;
-    }
-    for (int p = 0; p < 3; ++p) {
-      pinMode(kAxisPwm[i][p], OUTPUT);
-      digitalWrite(kAxisPwm[i][p], LOW);
-    }
-  }
-
-  encoder.init();
-
-  driver.voltage_power_supply = FOC_VBUS;
-  driver.voltage_limit = FOC_VOLTAGE_LIMIT;
-  driver.pwm_frequency = FOC_PWM_HZ;
-  driver.init();
-
-  motor.linkDriver(&driver);
-  motor.linkSensor(&encoder);
-  motor.voltage_limit = FOC_VOLTAGE_LIMIT;
-  motor.foc_modulation = FOC_MODULATION;
-  motor.controller = MotionControlType::velocity_openloop;
-  motor.init();
-  /* No auto-start: the motor stays idle and M_EN stays low until a CLI
-   * command (ol) arms it. */
+  axisInitAll();
+  /* No auto-start: motors stay idle and M_EN stays low until a CLI command
+   * (ol) arms an axis. */
 
   cliInit();
+  focTaskStart();
   netSetup();
 
-  Serial.printf("ESP32FOCDrive axis=%c Vbus=%.1f Ulim=%.1f MEN=%d\n",
-                kAxisName[kAxis], (double)FOC_VBUS, (double)FOC_VOLTAGE_LIMIT,
-                (int)boardMotorPowered());
+  Serial.printf("ESP32FOCDrive mask=0x%x Vbus=%.1f Ulim=%.1f hz=%lu MEN=%d\n",
+                (unsigned)FOC_AXIS_MASK, (double)FOC_VBUS, (double)FOC_VOLTAGE_LIMIT,
+                (unsigned long)focHz(), (int)boardMotorPowered());
 }
 
 void loop() {
@@ -115,7 +118,9 @@ void loop() {
     vTaskDelay(1);
     return;
   }
-  encoder.update();
-  motor.move();
+  /* No encoder.update()/motor.move() here: the core-0 FOC task does both,
+   * in every mode including Off, so the PCNT count is re-read often enough
+   * to unwrap before it hits the +-8192 hardware limit. */
   cliPoll();
+  vTaskDelay(1);
 }

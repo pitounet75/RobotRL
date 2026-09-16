@@ -10,6 +10,7 @@
 #include <WiFi.h>
 
 #include "config.h"
+#include "foc_task.h"
 
 /* Temporary seam, provided by main.cpp (task 2). At this position in the
  * execution order (task 8 runs third, right after the CLI) there is no FOC
@@ -65,14 +66,19 @@ void netSetup() {
   ArduinoOTA.onStart([]() {
     s_ota_active = true;
     mainIdle(0b11); /* task 7 swaps this for the driveStop loop */
+    /* The FOC timer keeps ticking at FOC_LOOP_HZ (core 0) independently of
+     * this OTA transfer (core 1); left running it would keep waking the FOC
+     * task for no reason while the flash write is happening. */
+    focPauseTimer();
     disableCore1WDT();
-    Serial.println("ota: start - motors off");
+    Serial.println("ota: start - motors off, FOC timer paused");
     Serial.flush();
   });
   ArduinoOTA.onError([](ota_error_t err) {
     s_ota_active = false;
     /* An OTA failure returns control to normal operation, motor.move() and
      * cliPoll() included, so the safety net has to come back with it. */
+    focResumeTimer();
     enableCore1WDT();
     Serial.printf("ota: err %u\n", (unsigned)err);
   });

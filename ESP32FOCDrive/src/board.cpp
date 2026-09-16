@@ -16,6 +16,14 @@ void holdPinLow(int pin) {
 }  // namespace
 
 void boardInit() {
+  /* boardEnterDownload() leaves GPIO0 held low via the RTC pad hold across
+   * esp_restart() so the ROM samples download mode. Nothing ever released
+   * that hold on a normal boot, so the board stayed stuck in download mode
+   * after every flash until the user power-cycled it. These are no-ops when
+   * no hold is active. */
+  rtc_gpio_hold_dis(GPIO_NUM_0);
+  rtc_gpio_deinit(GPIO_NUM_0);
+
   holdPinLow(FOC_PIN_MEN);
   power_refs = 0;
   for (int i = 0; i < AXIS_COUNT; ++i) {
