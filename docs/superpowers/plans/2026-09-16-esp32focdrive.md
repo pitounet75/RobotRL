@@ -1082,7 +1082,7 @@ Attendu :
 
 Si `late` s'emballe ou si la CLI meurt : c'est un problème de priorité ou de core, pas une raison de baisser la cadence.
 
-- [ ] **Step 6 : commit**
+- [ ] **Step 7 : commit**
 
 ```bash
 git add ESP32FOCDrive
