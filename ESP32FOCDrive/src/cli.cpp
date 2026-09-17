@@ -10,6 +10,7 @@
 #include "drive_api.h"
 #include "foc_task.h"
 #include "net.h"
+#include "pcnt_encoder.h"
 #include "self_test.h"
 
 /* Still provided by main.cpp: not part of the core/core drive API, just the
@@ -355,6 +356,48 @@ void handleLine(const char *raw) {
   } else if (strcmp(p.cmd, "dt") == 0) {
     focResetMetrics();
     Serial.println("dt: reset");
+  } else if (strcmp(p.cmd, "vcap") == 0) {
+    /* Single axis, not the usual axis_mask loop: `vcap [L|R] [ms]` picks one
+     * axis, defaulting (no L|R prefix -> axis_mask covers every present
+     * axis) to the first present axis rather than capturing all of them at
+     * once -- see foc_task.h, the capture is one axis at a time. */
+    int axis = -1;
+    for (int i = 0; i < AXIS_COUNT; ++i) {
+      if ((p.axis_mask & (1u << i)) && axes[i].present) {
+        axis = i;
+        break;
+      }
+    }
+    if (axis < 0) {
+      Serial.println("vcap: no present axis");
+      return;
+    }
+    uint32_t ms = 300;
+    if (p.has_value && p.value >= 1.0f) {
+      ms = (uint32_t)p.value;
+    }
+    vcapArm((uint8_t)axis, ms);
+  } else if (strcmp(p.cmd, "vdump") == 0) {
+    vcapDump();
+  } else if (strcmp(p.cmd, "jlog") == 0) {
+    for (int i = 0; i < AXIS_COUNT; ++i) {
+      if (!(p.axis_mask & (1u << i)) || !axes[i].present) {
+        continue;
+      }
+      const Axis &ax = axes[i];
+      Serial.printf("jlog %c: jumps=%lu overflow_events=%lu\n", ax.name,
+                    (unsigned long)ax.encoder.jumps(), (unsigned long)ax.encoder.overflowEvents());
+      const uint8_t cap = ax.encoder.jumpLogCap();
+      for (uint8_t j = 0; j < cap; ++j) {
+        const PcntEncoder::JumpEvent ev = ax.encoder.jumpLogAt(j);
+        if (ev.seq == 0) {
+          continue; /* never-written slot: ring buffer not full yet */
+        }
+        Serial.printf("  seq=%lu delta=%ld elapsed_us=%lu overflow_delta=%ld\n",
+                      (unsigned long)ev.seq, (long)ev.delta, (unsigned long)ev.elapsed_us,
+                      (long)ev.overflow_delta);
+      }
+    }
   } else if (strcmp(p.cmd, "selftest") == 0) {
     const SelfTestResult r = selfTestRun(selfTestReport, nullptr);
     Serial.printf("selftest: %d run, %d failed\n", r.run, r.failed);
@@ -377,6 +420,9 @@ void cliPrintHelp() {
   Serial.println("                     no L|R = every present axis (both wheels in dual)");
   Serial.println("  enc [0|1]          mon [0|1]      ota");
   Serial.println("  hz [Hz]            dt");
+  Serial.println("  vcap [L|R] [ms]    vdump          per-loop vel/Uq capture, default 300ms");
+  Serial.println("                     no L|R = first present axis (one axis at a time)");
+  Serial.println("  jlog [L|R]         encoder jump/overflow counters + jump ring buffer");
   Serial.println("  selftest           wifioff");
 }
 

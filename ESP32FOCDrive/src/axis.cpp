@@ -6,7 +6,22 @@
 
 #include "board.h"
 #include "cal_record.h"
+#include "failsafe.h"
 #include "foc_task.h"
+
+namespace {
+/** Shared body of axisDisarm() and axisFailsafeDisarm() below: both call
+ * this with boardMotorPowerLock() already held, so the guarded
+ * test-and-set of ax.armed plus the M_EN refcount update lives in exactly
+ * one place and the two disarm paths cannot drift apart. */
+void axisDisarmLocked(Axis &ax) {
+  if (ax.armed) {
+    ax.motor.disable();
+    boardMotorPowerRef(-1);
+    ax.armed = false;
+  }
+}
+}  // namespace
 
 Axis::Axis(int i)
     : name(kAxisName[i]),
@@ -86,10 +101,11 @@ void axisArm(Axis &ax) {
    * an already-armed motor would also stall the shaft on every command.
    *
    * The whole test-and-set is under boardMotorPowerLock(): since the
-   * task-7 failsafe, axisDisarm() is reachable from the core-0 FOC task as
-   * well as core 1, so "decide to arm" and "increment the M_EN refcount"
-   * must be one indivisible step or the refcount can lose an update to the
-   * other core doing the same for a different axis. */
+   * task-7 failsafe, axisDisarmLocked() (the guarded body axisDisarm() and
+   * the failsafe's axisFailsafeDisarm() share) is reachable from the core-0
+   * FOC task as well as core 1, so "decide to arm" and "increment the M_EN
+   * refcount" must be one indivisible step or the refcount can lose an
+   * update to the other core doing the same for a different axis. */
   boardMotorPowerLock();
   if (!ax.armed) {
     ax.motor.enable();
@@ -102,21 +118,41 @@ void axisArm(Axis &ax) {
 void axisDisarm(Axis &ax) {
   /* See axisArm() for why this is locked. */
   boardMotorPowerLock();
-  if (ax.armed) {
-    ax.motor.disable();
-    boardMotorPowerRef(-1);
-    ax.armed = false;
-  }
+  axisDisarmLocked(ax);
   boardMotorPowerUnlock();
   /* shaft_velocity/voltage.q are only ever written by motor.move(), which
    * stops running the instant mode is Off -- so without this, a published
    * AxisState snapshot (drive_api.cpp) would keep echoing the last spin's
    * velocity/Uq forever after a park, next to a live, still-updating angle:
    * a consumer would see the wheel "still turning" with zero volts on the
-   * phases. Covers both parking paths through this function: the failsafe
-   * (foc_task.cpp) and driveStop() (drive_api.cpp). */
+   * phases. Covers both parking paths through this function: driveStop()
+   * (drive_api.cpp) and the standalone-failure paths of axisZSearch()/
+   * axisCal() above. The failsafe (foc_task.cpp) goes through
+   * axisFailsafeDisarm() below instead, not this function directly, but
+   * repeats the same reset for the same reason. */
   ax.motor.shaft_velocity = 0.0f;
   ax.motor.voltage.q = 0.0f;
+}
+
+bool axisFailsafeDisarm(Axis &ax, uint32_t now_ms) {
+  /* See axis.h for the full rationale: the caller's own armed+expired test
+   * is unlocked and therefore stale the instant it passes, so this
+   * re-reads last_cmd_ms/cmd_timeout_ms itself, under the same lock the
+   * fast setpoint paths stamp a fresh command inside of, and only parks the
+   * axis if the deadline is STILL expired once that fresh read lands. */
+  boardMotorPowerLock();
+  const bool expired = ax.armed && failsafeExpired(now_ms, ax.last_cmd_ms, ax.cmd_timeout_ms);
+  if (expired) {
+    ax.motor.target = 0.0f;
+    axisDisarmLocked(ax);
+  }
+  boardMotorPowerUnlock();
+  if (expired) {
+    /* Same reset axisDisarm() does, and for the same reason -- see there. */
+    ax.motor.shaft_velocity = 0.0f;
+    ax.motor.voltage.q = 0.0f;
+  }
+  return expired;
 }
 
 void axisSetMode(Axis &ax, Mode m) {

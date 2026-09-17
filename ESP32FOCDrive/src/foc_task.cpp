@@ -27,6 +27,27 @@ volatile uint64_t s_loops = 0;
 volatile uint32_t s_seq = 0;
 volatile bool s_timer_paused = false;
 
+/* vcap/vdump: see foc_task.h for the rationale. kVCapMax*sizeof(VCapSample)
+ * (2500 * 12 bytes = ~29 KiB) is static RAM, not stack -- worth remembering
+ * before raising kVCapMax. */
+constexpr uint32_t kVCapMax = 2500;
+struct VCapSample {
+  int32_t dcount; /* counts since the previous kept sample: exact, no filter */
+  float vel;
+  float uq;
+};
+VCapSample s_vcap_buf[kVCapMax];
+/* Cross-core: armed from the CLI (core 1), consumed every tick by the FOC
+ * task (core 0) -- volatile for the same reason axis.h's mode/owner/etc are
+ * (see the comment there): nothing here is protected by a lock, so the
+ * qualifier is the only thing stopping a stale cached read/hoist. */
+volatile uint8_t s_vcap_axis = 0;
+volatile uint32_t s_vcap_idx = 0;
+volatile uint32_t s_vcap_target = 0;
+volatile uint32_t s_vcap_decim = 1;
+volatile uint32_t s_vcap_loop_ctr = 0;
+volatile int64_t s_vcap_last_count = 0;
+
 bool IRAM_ATTR focTimerCb(void *) {
   BaseType_t hpw = pdFALSE;
   if (s_task != nullptr) {
@@ -70,16 +91,47 @@ void focTask(void *) {
         /* Stale command: park the axis. The task disarms itself here, on its
          * own core, so there is nothing to sync -- unlike axisSetMode(),
          * which exists precisely because a CLI/API write to ax.mode from the
-         * other core needs the task to observe it. */
-        ax.motor.target = 0.0f;
-        axisDisarm(ax);
-        ax.mode = Mode::Off;
+         * other core needs the task to observe it.
+         *
+         * The test above is unlocked -- cheap, but by design stale the
+         * instant it passes: a fresh command can land on core 1 in the gap
+         * between this line and axisFailsafeDisarm() actually acquiring
+         * boardMotorPowerLock() below. axisFailsafeDisarm() re-reads
+         * last_cmd_ms/cmd_timeout_ms once it holds that same lock -- the one
+         * axisSetVelocity()/axisSetTorque()'s fast path also holds around
+         * their test+write+stamp -- and only parks the axis if the command
+         * is STILL expired under that lock, so it can never clobber a
+         * command that arrived in the window. Taking the lock here just to
+         * run the cheap test, every axis, every 250 us tick, would cost more
+         * than the race it closes -- only the disarm path pays for it, and
+         * only when the unlocked pre-check already says it is due. */
+        if (axisFailsafeDisarm(ax, now_ms)) {
+          ax.mode = Mode::Off;
+        }
       }
       if (ax.mode == Mode::Off) {
         ax.encoder.update();
       } else {
         ax.motor.loopFOC();
         ax.motor.move();
+        if (i == (int)s_vcap_axis) {
+          /* Per-iteration capture: a few array writes, nothing else -- see
+           * foc_task.h for why. Only while this axis is actually driving
+           * (this branch), matching the "vel 3 then vcap" bench flow. */
+          const uint32_t idx = s_vcap_idx;
+          if (idx < s_vcap_target) {
+            const uint32_t ctr = s_vcap_loop_ctr;
+            s_vcap_loop_ctr = ctr + 1;
+            if ((ctr % s_vcap_decim) == 0) {
+              const int64_t c = ax.encoder.count();
+              s_vcap_buf[idx].dcount = (int32_t)(c - s_vcap_last_count);
+              s_vcap_buf[idx].vel = ax.motor.shaft_velocity;
+              s_vcap_buf[idx].uq = ax.motor.voltage.q;
+              s_vcap_last_count = c;
+              s_vcap_idx = idx + 1;
+            }
+          }
+        }
       }
       drivePublishState(ax, i);
     }
@@ -162,4 +214,58 @@ FocMetrics focGetMetrics() {
 void focResetMetrics() {
   s_dt_max_us = 0;
   s_late = 0;
+}
+
+void vcapArm(uint8_t axis, uint32_t ms) {
+  if (axis >= (uint8_t)AXIS_COUNT) {
+    axis = 0;
+  }
+  if (ms == 0u) {
+    ms = 1u;
+  } else if (ms > 3600000u) { /* same 1 h ceiling cli.cpp's `fs` uses */
+    ms = 3600000u;
+  }
+  /* 64-bit: at the max hz (16 kHz) and ms (1 h), ms*hz overflows a 32-bit
+   * total well before decim/n bring it back down to kVCapMax. */
+  const uint64_t total_loops = (uint64_t)ms * (uint64_t)s_hz / 1000ull;
+  uint32_t decim = 1;
+  if (total_loops > (uint64_t)kVCapMax) {
+    decim = (uint32_t)((total_loops + kVCapMax - 1) / kVCapMax);
+  }
+  uint32_t n = (uint32_t)(total_loops / decim);
+  if (n > kVCapMax) {
+    n = kVCapMax;
+  }
+  /* Order matters for a capture already in flight when this re-arms it:
+   * axis/decim/last_count first, target LAST (it gates whether the task
+   * looks at any of the others), idx reset just ahead of target so the task
+   * never sees a stale idx>=new-target and calls a fresh session "done"
+   * before it starts. */
+  s_vcap_axis = axis;
+  s_vcap_loop_ctr = 0;
+  s_vcap_decim = decim;
+  s_vcap_last_count = axes[axis].encoder.count();
+  s_vcap_idx = 0;
+  s_vcap_target = n;
+  Serial.printf(
+      "vcap %c: arming %u samples, decim=%u (each dcount spans %.2f ms) covering ~%u ms -- vdump "
+      "when idx=target\n",
+      axes[axis].name, (unsigned)n, (unsigned)decim, (double)(decim * 1000.0 / (double)s_hz),
+      (unsigned)ms);
+}
+
+bool vcapDone() { return s_vcap_target > 0u && s_vcap_idx >= s_vcap_target; }
+
+void vcapDump() {
+  const uint8_t axis = s_vcap_axis;
+  const uint32_t idx = s_vcap_idx;
+  const uint32_t target = s_vcap_target;
+  Serial.printf("vdump %c: idx=%u target=%u decim=%u %s\n", axes[axis].name, (unsigned)idx,
+                (unsigned)target, (unsigned)s_vcap_decim,
+                (target > 0u && idx >= target) ? "(done)" : "(still capturing or empty)");
+  Serial.println("idx,dcount,vel,uq");
+  for (uint32_t i = 0; i < idx; ++i) {
+    Serial.printf("%u,%ld,%.4f,%.4f\n", (unsigned)i, (long)s_vcap_buf[i].dcount,
+                  (double)s_vcap_buf[i].vel, (double)s_vcap_buf[i].uq);
+  }
 }

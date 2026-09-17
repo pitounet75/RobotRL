@@ -15,8 +15,9 @@ bool boardMotorPowered();
  * Guards the M_EN refcount together with the caller's own armed flag. Before
  * the task-7 command failsafe, axisArm()/axisDisarm() (axis.cpp) were only
  * ever reachable from core 1 (the CLI): the refcount was single-threaded by
- * construction. The failsafe now calls axisDisarm() from the core-0 FOC task
- * too, so "read power_refs, add delta, write it back" in boardMotorPowerRef()
+ * construction. The failsafe now calls axisFailsafeDisarm() (axis.cpp, which
+ * shares axisDisarm()'s guarded body) from the core-0 FOC task too, so "read
+ * power_refs, add delta, write it back" in boardMotorPowerRef()
  * can interleave between the two cores and lose an update -- M_EN then stays
  * high with both axes disarmed, or drops while one is still being driven.
  * axisArm()/axisDisarm() take this lock around their whole test-and-set of

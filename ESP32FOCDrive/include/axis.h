@@ -44,8 +44,8 @@ struct Axis {
   float voltage_limit;
   float align_voltage;
   /* Read every iteration by the core-0 FOC task (the failsafe check in
-   * foc_task.cpp) and, since the failsafe made axisDisarm() reachable from
-   * that task, also read and written from core 1's fast setpoint paths
+   * foc_task.cpp) and, since the failsafe made axisFailsafeDisarm() reachable
+   * from that task, also read and written from core 1's fast setpoint paths
    * (axisSetVelocity()/axisSetTorque(), drive_api.cpp's driveSetOpenloop()):
    * volatile for the same reason as mode/owner/last_cmd_ms/cmd_timeout_ms
    * above -- it is inter-core state now, not just a formality against
@@ -80,6 +80,19 @@ void axisArm(Axis &ax);
 /** Drops the M_EN power reference (idempotent) and disables the motor.
  * See axisArm() for why ax.armed, not motor.enabled, is the guard. */
 void axisDisarm(Axis &ax);
+/**
+ * Failsafe disarm, called from the core-0 FOC task after its own unlocked
+ * "armed && expired" pre-check already found a command apparently stale
+ * (foc_task.cpp). That pre-check is cheap precisely because it does not
+ * lock, which also makes it stale the instant it passes: a fresh command
+ * can land on core 1, under boardMotorPowerLock(), in the gap before this
+ * function gets around to acquiring the same lock. So this re-reads
+ * last_cmd_ms/cmd_timeout_ms itself once it holds that lock and only parks
+ * the axis (zeroing motor.target, then the same disarm axisDisarm() does)
+ * if the command is STILL expired under the fresh read -- never on the
+ * strength of the caller's now-possibly-outdated pre-check. Returns true if
+ * it parked the axis, so the caller knows to also flip ax.mode to Off. */
+[[nodiscard]] bool axisFailsafeDisarm(Axis &ax, uint32_t now_ms);
 /** Writes ax.mode, then blocks until the FOC task has observed it. */
 void axisSetMode(Axis &ax, Mode m);
 
@@ -171,8 +184,14 @@ bool axisRequireCal(Axis &ax);
  * driveSetOpenloop() in drive_api.cpp) does one of:
  *  - call it from inside the same boardMotorPowerLock() critical section as
  *    the fast-path armed-test and target write, so test+write+stamp become
- *    one indivisible step and nothing can observe "armed, with the OLD
- *    deadline" in the gap; or
+ *    one indivisible step. The core-0 failsafe's own "armed && expired"
+ *    check (foc_task.cpp) still runs unlocked, every tick, so it CAN
+ *    transiently read an old deadline in the gap before this store lands --
+ *    but it only ever acts on that reading from inside
+ *    axisFailsafeDisarm(), which re-reads last_cmd_ms/cmd_timeout_ms under
+ *    this very lock before parking the axis. So a stamp made in here can be
+ *    momentarily READ as stale by the other core, but can never be raced by
+ *    an actual disarm decided on that stale reading; or
  *  - zero cmd_timeout_ms up front, before a slow path's mode change --
  *    disabling the failsafe for the whole transition, the same trick
  *    driveStop() uses -- then call this only once axisSetMode()+axisArm()
