@@ -944,7 +944,9 @@ git commit -m "feat(esp32focdrive): PCNT ABZ encoder with software 16-bit unfold
   - `enum class Mode : uint8_t { Off, Openloop, Velocity, Torque }`, `enum class Owner : uint8_t { Task, Cli }` ;
   - `struct Axis` avec `name`, `idx`, `cmd_sign`, `present`, `encoder`, `driver`, `motor`, `mode`, `owner`, `last_cmd_ms`, `cmd_timeout_ms`, `calibrated`, `voltage_limit`, `align_voltage`, `armed` ;
   - `Axis axes[AXIS_COUNT]`, `void axisInitAll()`, `void axisApplyLimits(Axis &)`, `void axisArm(Axis &)`, `void axisDisarm(Axis &)`, `void axisSetMode(Axis &, Mode)` ;
-  - `void focTaskStart()`, `void focSetHz(uint32_t)`, `uint32_t focHz()`, `void focSyncWithTask()`, `void focPauseTimer()`, `void focResumeTimer()`, `struct FocMetrics { uint32_t dt_us, dt_max_us, late, hz; uint64_t loops; }`, `FocMetrics focGetMetrics()`, `void focResetMetrics()`.
+  - `void focTaskStart()`, `void focSetHz(uint32_t)`, `uint32_t focHz()`, `[[nodiscard]] bool focSyncWithTask()`, `void focPauseTimer()`, `void focResumeTimer()`, `struct FocMetrics { uint32_t dt_us, dt_max_us, late, hz; uint64_t loops; }`, `FocMetrics focGetMetrics()`, `void focResetMetrics()`.
+
+**Signatures amendées pendant la ronde de correction de cette tâche, et qui font foi :** `focSyncWithTask()` renvoie un `[[nodiscard]] bool` — elle abandonne après 50 ms, et un appelant qui dépend du transfert doit pouvoir le savoir ; les appelants qui l'ignorent délibérément le font par un `(void)` commenté. La même ronde a ajouté la paire `[[nodiscard]] bool axisTakeOwnership(Axis &)` / `void axisReleaseOwnership(Axis &)`, qui encapsulent l'écriture de `owner` **et** la synchronisation, avec le contrat de relecture de l'encodeur documenté au-dessus. Le croquis de code ci-dessous précède cet amendement et montre encore la version sans valeur de retour.
 
 `axisArm` fait `axisApplyLimits`, arme le moteur seulement s'il ne l'est pas déjà, et appelle `boardMotorPowerRef(+1)` une seule fois par axe. `axisDisarm` fait l'inverse. `axisSetMode` écrit le mode **puis** appelle `focSyncWithTask()`.
 
@@ -1340,7 +1342,7 @@ git commit -m "feat(esp32focdrive): closed-loop velocity and voltage torque, est
 
 **Interfaces:**
 - Consomme : `axisSetVelocity`, `axisSetTorque`, `axisDisarm`, `Axis`.
-- Produit : `bool failsafeExpired(uint32_t now_ms, uint32_t last_ms, uint32_t timeout_ms)`, `void driveSetVelocity(uint8_t axis, float rad_s, uint32_t timeout_ms)`, `void driveSetTorque(uint8_t axis, float volts, uint32_t timeout_ms)`, `void driveSetOpenloop(uint8_t axis, float rad_s, uint32_t timeout_ms)`, `void driveStop(uint8_t axis)`, `struct AxisState { float angle, velocity, uq; bool armed, calibrated; }`, `bool driveGetState(uint8_t axis, AxisState *out)`.
+- Produit : `bool failsafeExpired(uint32_t now_ms, uint32_t last_ms, uint32_t timeout_ms)`, `bool driveSetVelocity(uint8_t axis, float rad_s, uint32_t timeout_ms)`, `bool driveSetTorque(uint8_t axis, float volts, uint32_t timeout_ms)`, `bool driveSetOpenloop(uint8_t axis, float rad_s, uint32_t timeout_ms)`, `void driveStop(uint8_t axis)`, `struct AxisState { float angle, velocity, uq; bool armed, calibrated; }`, `bool driveGetState(uint8_t axis, AxisState *out)`.
 
 `axis` est ici un **index** (0 ou 1), pas un masque : c'est l'API qu'utilisera la boucle d'équilibrage. La CLI convertit son masque en appels par axe.
 
@@ -1411,9 +1413,12 @@ Attendu : trois `SUCCESS`. L'exécution se fait ensuite par OTA, avec la command
  * with no lock and no handshake: at 400 Hz on two axes that is under 0.1% of
  * a core. focSyncWithTask() only runs on arm and disarm.
  */
-void driveSetVelocity(uint8_t axis, float rad_s, uint32_t timeout_ms);
-void driveSetTorque(uint8_t axis, float volts, uint32_t timeout_ms);
-void driveSetOpenloop(uint8_t axis, float rad_s, uint32_t timeout_ms);
+/* Return false when the command was refused (axis absent, not calibrated):
+ * the CLI must not confirm, and a control loop must be able to tell
+ * "commanded" from "refused" without polling the state snapshot. */
+bool driveSetVelocity(uint8_t axis, float rad_s, uint32_t timeout_ms);
+bool driveSetTorque(uint8_t axis, float volts, uint32_t timeout_ms);
+bool driveSetOpenloop(uint8_t axis, float rad_s, uint32_t timeout_ms);
 void driveStop(uint8_t axis);
 
 struct AxisState {
