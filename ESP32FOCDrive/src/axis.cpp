@@ -494,8 +494,26 @@ bool axisSetVelocity(Axis &ax, float rad_s) {
   ax.motor.controller = MotionControlType::velocity;
   ax.motor.torque_controller = TorqueControlType::voltage;
   ax.motor.target = rad_s;
-  ax.encoder.update();
-  (void)ax.encoder.getVelocity(); /* prime: avoid a spike from a stale sample */
+  if (ax.armed) {
+    /* Coming from another already-armed mode (ol/tq): axisArm() below is a
+     * no-op (it is guarded by ax.armed, see its own comment), so the
+     * PID_velocity.reset() a fresh enable() would give us never happens.
+     * Without this, the velocity loop would start from whatever integral
+     * and output a previous session left behind, instead of zero. */
+    ax.motor.PID_velocity.reset();
+  }
+  /* No priming read here (no encoder.update()/getVelocity() call): the
+   * encoder belongs to the core-0 FOC task for as long as ax.owner stays
+   * Owner::Task, which it does here -- this function never takes ownership.
+   * A core-1 call into update()/getVelocity() would race the task on state
+   * that count()'s internal lock does not cover, and once the axis is
+   * already armed in another mode (the branch above), move() is calling
+   * getVelocity() every tick on core 0 already: two unsynchronized callers
+   * of the same non-atomic 64-bit counter. It is also unnecessary: our
+   * getVelocity() derives velocity from the 64-bit count and a timestamp,
+   * so a stale previous sample just yields a very long elapsed interval,
+   * i.e. a velocity near zero for one cycle -- never a spike -- and the
+   * PID's output_ramp bounds the resulting step regardless. */
   axisSetMode(ax, Mode::Velocity);
   axisArm(ax);
   return true;
@@ -514,8 +532,22 @@ bool axisSetTorque(Axis &ax, float volts) {
   ax.motor.controller = MotionControlType::torque;
   ax.motor.torque_controller = TorqueControlType::voltage;
   ax.motor.target = volts;
-  ax.encoder.update();
-  (void)ax.encoder.getVelocity(); /* prime: avoid a spike from a stale sample */
+  /* No PID_velocity.reset() here: voltage torque control never reads
+   * PID_velocity, so a stale integral left over from a previous Velocity
+   * session cannot leak into it -- axisSetVelocity() resets it on its own
+   * way back in, which is the only path that consumes it.
+   *
+   * No priming read here either (no encoder.update()/getVelocity() call):
+   * the encoder belongs to the core-0 FOC task for as long as ax.owner
+   * stays Owner::Task, which it does here -- this function never takes
+   * ownership. A core-1 call into update()/getVelocity() would race the
+   * task on state that count()'s internal lock does not cover, and once the
+   * axis is already armed in another mode, move() is calling getVelocity()
+   * every tick on core 0 already: two unsynchronized callers of the same
+   * non-atomic 64-bit counter. It is also unnecessary: our getVelocity()
+   * derives velocity from the 64-bit count and a timestamp, so a stale
+   * previous sample just yields a very long elapsed interval, i.e. a
+   * velocity near zero for one cycle -- never a spike. */
   axisSetMode(ax, Mode::Torque);
   axisArm(ax);
   return true;
