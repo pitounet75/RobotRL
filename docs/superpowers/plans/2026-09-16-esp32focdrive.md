@@ -1273,8 +1273,11 @@ bool axisSetVelocity(Axis &ax, float rad_s) {
   ax.motor.controller = MotionControlType::velocity;
   ax.motor.torque_controller = TorqueControlType::voltage;
   ax.motor.target = rad_s;
-  ax.encoder.update();
-  (void)ax.encoder.getVelocity();  /* prime: avoid a spike from a stale sample */
+  /* No encoder priming here. The encoder belongs to the FOC task: calling
+   * update()/getVelocity() from core 1 races on fields the instance lock does
+   * not cover, and move() calls getVelocity() on every tick once armed. A
+   * stale sample is harmless anyway — getVelocity() divides by the elapsed
+   * time, so it reads near zero for one cycle, never a spike. */
   axisSetMode(ax, Mode::Velocity);
   axisArm(ax);
   return true;
