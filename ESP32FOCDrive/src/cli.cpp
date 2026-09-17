@@ -113,6 +113,27 @@ void printStatusLine() {
                 wifi_buf);
 }
 
+/**
+ * `axes`: static per-build info (pin map, PCNT unit, present/calibrated) for
+ * every axis, and the compile-time FOC_AXIS_MASK -- so a human at the
+ * console can tell which env (left/right/dual) is actually running without
+ * cross-checking against config.h. Unlike printStatusLine()'s per-axis line,
+ * this does NOT skip absent axes: the whole point is to show the mask
+ * itself, and an absent axis' pins/PCNT unit are still worth showing (they
+ * are wired on the board even when this build does not drive them).
+ */
+void printAxesLine() {
+  Serial.printf("axes: mask=0b%d%d", (int)AXIS_PRESENT(1), (int)AXIS_PRESENT(0));
+  for (int i = 0; i < AXIS_COUNT; ++i) {
+    const Axis &ax = axes[i];
+    Serial.print(i == 0 ? "  " : "\n                 ");
+    Serial.printf("%c pwm=%d/%d/%d abz=%d/%d/%d pcnt=%d present=%d cal=%d", ax.name,
+                  kAxisPwm[i][0], kAxisPwm[i][1], kAxisPwm[i][2], kAxisEnc[i][0], kAxisEnc[i][1],
+                  kAxisEnc[i][2], i, (int)ax.present, (int)ax.calibrated);
+  }
+  Serial.println();
+}
+
 void handleLine(const char *raw) {
   ParsedCmd p{};
   if (!parseCmd(raw, &p)) {
@@ -122,6 +143,8 @@ void handleLine(const char *raw) {
     cliPrintHelp();
   } else if (strcmp(p.cmd, "status") == 0) {
     printStatusLine();
+  } else if (strcmp(p.cmd, "axes") == 0) {
+    printAxesLine();
   } else if (strcmp(p.cmd, "vel") == 0) {
     if (!p.has_value) {
       Serial.println("usage: vel [L|R] <rad/s>");
@@ -345,7 +368,7 @@ void cliInit() { line_len = 0; }
 
 void cliPrintHelp() {
   Serial.println("ESP32FOCDrive  FS2804 x2  voltage FOC  MT6835 ABZ");
-  Serial.println("  help status");
+  Serial.println("  help status         axes  mask/pins/present/cal per axis");
   Serial.println("  ol [L|R] <rad/s>   idle [L|R]");
   Serial.println("  limit [L|R] <V>    alignv [L|R] <V>  download");
   Serial.println("  cal [L|R]          zsearch [L|R]  save [L|R]  forget [L|R]");

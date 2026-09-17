@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include "axis.h"
+#include "board.h"
 #include "config.h"
 
 namespace {
@@ -26,9 +27,19 @@ PubSlot s_pub[AXIS_COUNT];
  * that window can only ever make the deadline (last_ms + timeout_ms) look
  * LATER than intended -- never earlier. Written the other way around, the
  * task could observe a fresh timeout_ms paired with a stale (or zero, at
- * boot) last_cmd_ms and immediately fail the very command that just armed
- * the axis; that is exactly the first call the balance loop will make, going
- * from timeout_ms=0 to 10 ms.
+ * boot) last_cmd_ms and immediately fail a command that just armed the axis.
+ *
+ * That only rules out the race INSIDE this function's own two stores; it
+ * says nothing about when the caller calls it. driveSetVelocity()/
+ * driveSetTorque()/driveSetOpenloop() below all call this AFTER their
+ * delegation into axis.cpp has actually applied the setpoint, not before,
+ * because that delegation (axisSetMode() on a mode change, via
+ * focSyncWithTask()) can block up to 50 ms. Stamping first, ahead of that
+ * possible block, would let a 10 ms failsafe timeout -- the balance loop's
+ * case -- already be past its deadline by the time the axis is actually
+ * armed, parking the very command that just armed it. That is the bug this
+ * ordering (stamp-after-success, not just last_cmd_ms-before-cmd_timeout_ms)
+ * exists to avoid.
  */
 static inline void driveStampCmd(Axis &ax, uint32_t timeout_ms) {
   ax.last_cmd_ms = millis();
@@ -40,8 +51,11 @@ bool driveSetVelocity(uint8_t axis, float rad_s, uint32_t timeout_ms) {
     return false;
   }
   Axis &ax = axes[axis];
-  driveStampCmd(ax, timeout_ms);
-  return axisSetVelocity(ax, (float)ax.cmd_sign * rad_s);
+  const bool ok = axisSetVelocity(ax, (float)ax.cmd_sign * rad_s);
+  if (ok) {
+    driveStampCmd(ax, timeout_ms);
+  }
+  return ok;
 }
 
 bool driveSetTorque(uint8_t axis, float volts, uint32_t timeout_ms) {
@@ -49,8 +63,11 @@ bool driveSetTorque(uint8_t axis, float volts, uint32_t timeout_ms) {
     return false;
   }
   Axis &ax = axes[axis];
-  driveStampCmd(ax, timeout_ms);
-  return axisSetTorque(ax, (float)ax.cmd_sign * volts);
+  const bool ok = axisSetTorque(ax, (float)ax.cmd_sign * volts);
+  if (ok) {
+    driveStampCmd(ax, timeout_ms);
+  }
+  return ok;
 }
 
 bool driveSetOpenloop(uint8_t axis, float rad_s, uint32_t timeout_ms) {
@@ -64,10 +81,19 @@ bool driveSetOpenloop(uint8_t axis, float rad_s, uint32_t timeout_ms) {
   } else if (v < -FOC_VEL_LIMIT) {
     v = -FOC_VEL_LIMIT;
   }
-  driveStampCmd(ax, timeout_ms);
-  if (ax.armed && ax.mode == Mode::Openloop) {
+  /* Fast-path test-and-write under the power lock: see axisSetVelocity()
+   * (axis.cpp) for why a bare `if (ax.armed && ...)` here would race the
+   * core-0 failsafe disarming ax between the test and the ax.motor.target
+   * store. */
+  boardMotorPowerLock();
+  const bool fast_path = ax.armed && ax.mode == Mode::Openloop;
+  if (fast_path) {
     ax.motor.target = v; /* live setpoint: do NOT re-arm/resync, same fast
                            * path as axisSetVelocity()/axisSetTorque(). */
+  }
+  boardMotorPowerUnlock();
+  if (fast_path) {
+    driveStampCmd(ax, timeout_ms);
     return true;
   }
   ax.motor.controller = MotionControlType::velocity_openloop;
@@ -78,6 +104,9 @@ bool driveSetOpenloop(uint8_t axis, float rad_s, uint32_t timeout_ms) {
    * same as the other two setters. */
   axisSetMode(ax, Mode::Openloop);
   axisArm(ax);
+  /* Stamped after axisArm(), which can itself block briefly inside
+   * axisSetMode()'s focSyncWithTask() above -- see driveStampCmd(). */
+  driveStampCmd(ax, timeout_ms);
   return true;
 }
 

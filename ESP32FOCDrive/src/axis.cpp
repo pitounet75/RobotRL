@@ -303,6 +303,14 @@ int axisRunInitFoc(Axis &ax) {
 }  // namespace
 
 bool axisZSearch(Axis &ax, bool park) {
+  if (!ax.present) {
+    /* Defense in depth: cli.cpp already filters on axes[i].present before
+     * calling in, but this is also reachable straight from axisCal() below,
+     * and an absent axis still shares board.h's M_EN reference count with
+     * the real one -- arming it would power the real gate driver too. */
+    Serial.printf("zsearch %c: FAIL (axis not present in this build)\n", ax.name);
+    return false;
+  }
   if (park) {
     if (!axisTakeOwnership(ax)) {
       /* Best-effort handback: ax.owner was already written Cli inside the
@@ -372,6 +380,14 @@ bool axisZSearch(Axis &ax, bool park) {
 }
 
 bool axisCal(Axis &ax) {
+  if (!ax.present) {
+    /* Defense in depth: cli.cpp already filters on axes[i].present before
+     * calling in. An absent axis still shares board.h's M_EN reference count
+     * with the real one, so arming it here would power the real gate driver
+     * too. */
+    Serial.printf("cal %c: FAIL (axis not present in this build)\n", ax.name);
+    return false;
+  }
   if (!axisTakeOwnership(ax)) {
     axisReleaseOwnership(ax); /* best-effort handback, see axisZSearch(). */
     Serial.printf("cal %c: FAIL (ownership handshake timed out, FOC task not responding)\n",
@@ -443,6 +459,14 @@ bool axisSaveCal(Axis &ax) {
 }
 
 void axisForgetCal(Axis &ax) {
+  if (!ax.present) {
+    /* Defense in depth: cli.cpp already filters on axes[i].present before
+     * calling in. An absent axis still shares board.h's M_EN reference count
+     * with the real one, so arming it here would power the real gate driver
+     * too. */
+    Serial.printf("forget %c: FAIL (axis not present in this build)\n", ax.name);
+    return;
+  }
   if (!axisTakeOwnership(ax)) {
     axisReleaseOwnership(ax); /* best-effort handback, see axisZSearch(). */
     Serial.printf("forget %c: FAIL (ownership handshake timed out, FOC task not responding)\n",
@@ -507,10 +531,20 @@ bool axisSetVelocity(Axis &ax, float rad_s) {
   }
   rad_s = _constrain(rad_s, -FOC_VEL_LIMIT, FOC_VEL_LIMIT); /* SimpleFOC macro */
   axisApplyLimits(ax);
+  /* Test-and-write under the same power lock axisArm()/axisDisarm() use:
+   * ax.armed is volatile, but a bare `if (ax.armed && ...)` here would still
+   * race the core-0 failsafe, which can disarm ax between the test and the
+   * ax.motor.target store below and make this path report "applied" for a
+   * setpoint nothing will actually drive. Locking excludes axisDisarm() for
+   * the duration; nothing slow (no printf, no focSyncWithTask()) happens
+   * inside. */
+  boardMotorPowerLock();
   if (ax.armed && ax.mode == Mode::Velocity) {
     ax.motor.target = rad_s; /* live setpoint: do NOT re-arm */
+    boardMotorPowerUnlock();
     return true;
   }
+  boardMotorPowerUnlock();
   ax.motor.controller = MotionControlType::velocity;
   ax.motor.torque_controller = TorqueControlType::voltage;
   ax.motor.target = rad_s;
@@ -545,10 +579,14 @@ bool axisSetTorque(Axis &ax, float volts) {
   }
   volts = _constrain(volts, -ax.voltage_limit, ax.voltage_limit);
   axisApplyLimits(ax);
+  /* See axisSetVelocity() for why this test-and-write is locked. */
+  boardMotorPowerLock();
   if (ax.armed && ax.mode == Mode::Torque) {
     ax.motor.target = volts; /* live setpoint: do NOT re-arm */
+    boardMotorPowerUnlock();
     return true;
   }
+  boardMotorPowerUnlock();
   ax.motor.controller = MotionControlType::torque;
   ax.motor.torque_controller = TorqueControlType::voltage;
   ax.motor.target = volts;

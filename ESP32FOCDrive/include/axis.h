@@ -43,7 +43,17 @@ struct Axis {
   bool calibrated;
   float voltage_limit;
   float align_voltage;
-  bool armed;
+  /* Read every iteration by the core-0 FOC task (the failsafe check in
+   * foc_task.cpp) and, since the failsafe made axisDisarm() reachable from
+   * that task, also read and written from core 1's fast setpoint paths
+   * (axisSetVelocity()/axisSetTorque(), drive_api.cpp's driveSetOpenloop()):
+   * volatile for the same reason as mode/owner/last_cmd_ms/cmd_timeout_ms
+   * above -- it is inter-core state now, not just a formality against
+   * compiler hoisting. Being volatile does not by itself make a fast path's
+   * `if (ax.armed && ...)` test-then-write atomic with the other core's
+   * disarm; those call sites additionally take boardMotorPowerLock() around
+   * the test and the write for that reason (see axisSetVelocity()). */
+  volatile bool armed;
 
   explicit Axis(int i);
 };
