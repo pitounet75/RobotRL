@@ -7,15 +7,13 @@
 #include "board.h"
 #include "cmd_parse.h"
 #include "config.h"
+#include "drive_api.h"
 #include "foc_task.h"
 #include "net.h"
 #include "self_test.h"
 
-/* Temporary seam, replaced by drive_api.h in task 7. */
-void mainSetOpenloop(uint8_t axis_mask, float rad_s);
-void mainIdle(uint8_t axis_mask);
-float mainVoltageLimit(uint8_t axis_mask);
-void mainSetVoltageLimit(uint8_t axis_mask, float v);
+/* Still provided by main.cpp: not part of the core/core drive API, just the
+ * `enc` command's raw pin/count dump. */
 void mainPrintEncLine(uint8_t axis_mask);
 
 namespace {
@@ -26,6 +24,9 @@ uint8_t enc_stream_mask = (uint8_t)FOC_AXIS_MASK;
 uint32_t enc_last_print_ms = 0;
 bool mon_stream = false;
 uint32_t mon_last_print_ms = 0;
+/* Fixed demonstration setpoint for `fs <ms>` (see handleLine()): the same
+ * magnitude the bench validation in task-7-brief.md uses for `vel 3`. */
+constexpr float kFsTestVelRadS = 3.0f;
 
 void selfTestReport(const char *name, bool ok, void *) {
   Serial.printf("selftest: %s %s\n", name, ok ? "PASS" : "FAIL");
@@ -71,6 +72,12 @@ const char *dirName(Direction d) {
  * pass via motor.move(); a second, unsynchronized caller here would corrupt
  * the running velocity estimate the closed loops depend on. motor.shaft_velocity,
  * the value move() already computed and stored, is what's printed instead.
+ *
+ * tgt is motor.target, in the MOTOR frame the FOC loop actually drives.
+ * Since task 7, drive_api.h's setpoint calls apply cmd_sign in the ROBOT
+ * frame before writing motor.target (motor.target = cmd_sign * cmd), and
+ * cmd_sign is +-1, so cmd_sign is its own inverse: cmd = tgt * cmd_sign
+ * recovers the robot-frame command with no extra state to keep in sync.
  */
 void printStatusLine() {
   for (int i = 0; i < AXIS_COUNT; ++i) {
@@ -79,12 +86,13 @@ void printStatusLine() {
     }
     const Axis &ax = axes[i];
     Serial.printf(
-        "%c mode=%s armed=%d cal=%d idx=%d cnt=%lld ang=%.4f vel=%.3f tgt=%.3f Uq=%.3f "
-        "Iest=%.3f zero=%.4f dir=%s lim=%.2f\n",
+        "%c mode=%s armed=%d cal=%d idx=%d cnt=%lld ang=%.4f vel=%.3f tgt=%.3f cmd=%.3f "
+        "Uq=%.3f Iest=%.3f zero=%.4f dir=%s lim=%.2f\n",
         ax.name, modeName(ax.mode), (int)ax.armed, (int)ax.calibrated,
         (int)ax.encoder.indexFound(), (long long)ax.encoder.count(),
         (double)ax.encoder.countAngle(), (double)ax.motor.shaft_velocity,
-        (double)ax.motor.target, (double)ax.motor.voltage.q, (double)axisCurrentEstimate(ax),
+        (double)ax.motor.target, (double)(ax.motor.target * (float)ax.cmd_sign),
+        (double)ax.motor.voltage.q, (double)axisCurrentEstimate(ax),
         (double)ax.motor.zero_electric_angle, dirName(ax.motor.sensor_direction),
         (double)ax.voltage_limit);
   }
@@ -119,40 +127,43 @@ void handleLine(const char *raw) {
       Serial.println("usage: vel [L|R] <rad/s>");
       return;
     }
-    float v = p.value;
-    if (v > FOC_VEL_LIMIT) {
-      v = FOC_VEL_LIMIT;
-    } else if (v < -FOC_VEL_LIMIT) {
-      v = -FOC_VEL_LIMIT;
-    }
+    /* Robot frame: driveSetVelocity() applies cmd_sign once, per axis.
+     * timeout_ms=0 so a bench session is never cut off. */
     for (int i = 0; i < AXIS_COUNT; ++i) {
-      if (!(p.axis_mask & (1u << i)) || !axes[i].present) {
-        continue;
-      }
-      if (axisSetVelocity(axes[i], v)) {
-        Serial.printf("vel %c: tgt=%.3f rad/s\n", axes[i].name, (double)v);
+      if ((p.axis_mask & (1u << i)) && axes[i].present) {
+        driveSetVelocity((uint8_t)i, p.value, 0);
       }
     }
+    Serial.printf("vel: cmd=%.3f rad/s (robot frame)\n", (double)p.value);
   } else if (strcmp(p.cmd, "tq") == 0) {
     if (!p.has_value) {
       Serial.println("usage: tq [L|R] <V>");
       return;
     }
     for (int i = 0; i < AXIS_COUNT; ++i) {
-      if (!(p.axis_mask & (1u << i)) || !axes[i].present) {
-        continue;
-      }
-      Axis &ax = axes[i];
-      float v = p.value;
-      if (v > ax.voltage_limit) {
-        v = ax.voltage_limit;
-      } else if (v < -ax.voltage_limit) {
-        v = -ax.voltage_limit;
-      }
-      if (axisSetTorque(ax, v)) {
-        Serial.printf("tq %c: tgt=%.3f V\n", ax.name, (double)v);
+      if ((p.axis_mask & (1u << i)) && axes[i].present) {
+        driveSetTorque((uint8_t)i, p.value, 0);
       }
     }
+    Serial.printf("tq: cmd=%.3f V (robot frame)\n", (double)p.value);
+  } else if (strcmp(p.cmd, "fs") == 0) {
+    /* Failsafe demo/test: sends a fixed velocity setpoint with an expiring
+     * timeout, so `status` can be watched to confirm the axis parks itself
+     * (armed=0, MEN=0) once timeout_ms elapses. Documents the mechanism the
+     * balance loop will rely on; kept permanently, not just for this task's
+     * bench validation. */
+    if (!p.has_value) {
+      Serial.println("usage: fs [L|R] <ms>");
+      return;
+    }
+    const uint32_t timeout_ms = (uint32_t)(p.value < 0.0f ? 0.0f : p.value);
+    for (int i = 0; i < AXIS_COUNT; ++i) {
+      if ((p.axis_mask & (1u << i)) && axes[i].present) {
+        driveSetVelocity((uint8_t)i, kFsTestVelRadS, timeout_ms);
+      }
+    }
+    Serial.printf("fs: cmd=%.1f rad/s timeout=%lu ms\n", (double)kFsTestVelRadS,
+                  (unsigned long)timeout_ms);
   } else if (strcmp(p.cmd, "mon") == 0) {
     if (!p.has_value) {
       Serial.printf("mon: %d\n", (int)mon_stream);
@@ -174,14 +185,32 @@ void handleLine(const char *raw) {
     } else if (v < -FOC_VEL_LIMIT) {
       v = -FOC_VEL_LIMIT;
     }
-    mainSetOpenloop(p.axis_mask, v);
-    Serial.printf("ol: mask=%u tgt=%.2f rad/s\n", (unsigned)p.axis_mask, (double)v);
+    for (int i = 0; i < AXIS_COUNT; ++i) {
+      if ((p.axis_mask & (1u << i)) && axes[i].present) {
+        driveSetOpenloop((uint8_t)i, v, 0);
+      }
+    }
+    Serial.printf("ol: mask=%u cmd=%.2f rad/s (robot frame)\n", (unsigned)p.axis_mask, (double)v);
   } else if (strcmp(p.cmd, "idle") == 0 || strcmp(p.cmd, "stop") == 0) {
-    mainIdle(p.axis_mask);
+    for (int i = 0; i < AXIS_COUNT; ++i) {
+      if ((p.axis_mask & (1u << i)) && axes[i].present) {
+        driveStop((uint8_t)i);
+      }
+    }
     Serial.println("idle");
   } else if (strcmp(p.cmd, "limit") == 0) {
+    /* Voltage limit is per-axis configuration, not a drive-API setpoint: it
+     * has no robot/motor frame distinction, so it stays inline here rather
+     * than routing through drive_api.h (same pattern as `alignv` below). */
     if (!p.has_value) {
-      Serial.printf("limit: %.2f V\n", (double)mainVoltageLimit(p.axis_mask));
+      float v = FOC_VOLTAGE_LIMIT;
+      for (int i = 0; i < AXIS_COUNT; ++i) {
+        if ((p.axis_mask & (1u << i)) && axes[i].present) {
+          v = axes[i].voltage_limit;
+          break;
+        }
+      }
+      Serial.printf("limit: %.2f V\n", (double)v);
       return;
     }
     float v = p.value;
@@ -191,7 +220,13 @@ void handleLine(const char *raw) {
     if (v > FOC_VBUS) {
       v = FOC_VBUS;
     }
-    mainSetVoltageLimit(p.axis_mask, v);
+    for (int i = 0; i < AXIS_COUNT; ++i) {
+      if (!(p.axis_mask & (1u << i)) || !axes[i].present) {
+        continue;
+      }
+      axes[i].voltage_limit = v;
+      axisApplyLimits(axes[i]);
+    }
     Serial.printf("limit: %.2f V\n", (double)v);
   } else if (strcmp(p.cmd, "alignv") == 0) {
     if (!p.has_value) {
@@ -258,7 +293,9 @@ void handleLine(const char *raw) {
       enc_stream = false;
     }
   } else if (strcmp(p.cmd, "download") == 0 || strcmp(p.cmd, "dl") == 0) {
-    mainIdle(0b11);
+    for (int i = 0; i < AXIS_COUNT; ++i) {
+      driveStop((uint8_t)i);
+    }
     boardEnterDownload();
   } else if (strcmp(p.cmd, "ota") == 0) {
     netPrintInfo();
@@ -295,6 +332,7 @@ void cliPrintHelp() {
   Serial.println("  limit [L|R] <V>    alignv [L|R] <V>  download");
   Serial.println("  cal [L|R]          zsearch [L|R]  save [L|R]  forget [L|R]");
   Serial.println("  vel [L|R] <rad/s>  tq [L|R] <V>");
+  Serial.println("  fs [L|R] <ms>      failsafe test: 3 rad/s expiring after <ms>");
   Serial.println("  enc [0|1]          mon [0|1]      ota");
   Serial.println("  hz [Hz]            dt");
   Serial.println("  selftest           wifioff");

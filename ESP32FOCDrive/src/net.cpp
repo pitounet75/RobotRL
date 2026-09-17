@@ -10,13 +10,8 @@
 #include <WiFi.h>
 
 #include "config.h"
+#include "drive_api.h"
 #include "foc_task.h"
-
-/* Temporary seam, provided by main.cpp (task 2). At this position in the
- * execution order (task 8 runs third, right after the CLI) there is no FOC
- * task yet, so onStart only parks the motors via mainIdle; task 4 adds the
- * FOC timer pause and task 7 replaces this with the driveStop loop. */
-void mainIdle(uint8_t axis_mask);
 
 namespace {
 bool s_ota_active = false;
@@ -65,7 +60,9 @@ void netSetup() {
   ArduinoOTA.setTimeout(60000);
   ArduinoOTA.onStart([]() {
     s_ota_active = true;
-    mainIdle(0b11); /* task 7 swaps this for the driveStop loop */
+    for (uint8_t i = 0; i < AXIS_COUNT; ++i) {
+      driveStop(i);
+    }
     /* The FOC timer keeps ticking at FOC_LOOP_HZ (core 0) independently of
      * this OTA transfer (core 1); left running it would keep waking the FOC
      * task for no reason while the flash write is happening. */

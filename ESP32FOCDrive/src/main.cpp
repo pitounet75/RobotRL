@@ -11,57 +11,6 @@
 #include "foc_task.h"
 #include "net.h"
 
-/* Temporary seam, replaced by drive_api.h in task 7. */
-void mainSetOpenloop(uint8_t axis_mask, float rad_s) {
-  for (int i = 0; i < AXIS_COUNT; ++i) {
-    if (!(axis_mask & (1u << i)) || !axes[i].present) {
-      continue;
-    }
-    Axis &ax = axes[i];
-    ax.motor.controller = MotionControlType::velocity_openloop;
-    ax.motor.target = rad_s;
-    /* Settle the mode (and let the task observe it) before arming: mirrors
-     * the disarm ordering below, keeping mode and power state changes from
-     * racing the task on the other core. */
-    axisSetMode(ax, Mode::Openloop);
-    axisArm(ax);
-  }
-}
-
-void mainIdle(uint8_t axis_mask) {
-  for (int i = 0; i < AXIS_COUNT; ++i) {
-    if (!(axis_mask & (1u << i)) || !axes[i].present) {
-      continue;
-    }
-    Axis &ax = axes[i];
-    ax.motor.target = 0.0f;
-    /* Mode -> Off and synced BEFORE disarm: otherwise the task could still
-     * be mid-loopFOC()/move() when M_EN drops, and with M_EN shared between
-     * both gate drivers that is not harmless. */
-    axisSetMode(ax, Mode::Off);
-    axisDisarm(ax);
-  }
-}
-
-float mainVoltageLimit(uint8_t axis_mask) {
-  for (int i = 0; i < AXIS_COUNT; ++i) {
-    if ((axis_mask & (1u << i)) && axes[i].present) {
-      return axes[i].voltage_limit;
-    }
-  }
-  return FOC_VOLTAGE_LIMIT;
-}
-
-void mainSetVoltageLimit(uint8_t axis_mask, float v) {
-  for (int i = 0; i < AXIS_COUNT; ++i) {
-    if (!(axis_mask & (1u << i)) || !axes[i].present) {
-      continue;
-    }
-    axes[i].voltage_limit = v;
-    axisApplyLimits(axes[i]);
-  }
-}
-
 void mainPrintEncLine(uint8_t axis_mask) {
   for (int i = 0; i < AXIS_COUNT; ++i) {
     if (!(axis_mask & (1u << i)) || !axes[i].present) {
@@ -74,23 +23,6 @@ void mainPrintEncLine(uint8_t axis_mask) {
                   (int)digitalRead(kAxisEnc[ax.idx][1]), (int)digitalRead(kAxisEnc[ax.idx][2]),
                   (double)ax.encoder.getAngle());
   }
-}
-
-void cliPrintStatus() {
-  for (int i = 0; i < AXIS_COUNT; ++i) {
-    if (!axes[i].present) {
-      continue;
-    }
-    Axis &ax = axes[i];
-    Serial.printf("axis=%c tgt=%.2f rad/s Uq=%.2f V limit=%.2f V armed=%d cal=%d\n", ax.name,
-                  (double)ax.motor.target, (double)ax.motor.voltage.q, (double)ax.voltage_limit,
-                  (int)ax.armed, (int)ax.calibrated);
-  }
-  const FocMetrics m = focGetMetrics();
-  Serial.printf("MEN=%d hz=%lu dt=%lu us dtmax=%lu us late=%lu loops=%llu\n",
-                (int)boardMotorPowered(), (unsigned long)m.hz, (unsigned long)m.dt_us,
-                (unsigned long)m.dt_max_us, (unsigned long)m.late, (unsigned long long)m.loops);
-  netPrintInfo();
 }
 
 void setup() {

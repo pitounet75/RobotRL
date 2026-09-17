@@ -14,6 +14,8 @@
 
 #include "axis.h"
 #include "config.h"
+#include "drive_api.h"
+#include "failsafe.h"
 
 namespace {
 TaskHandle_t s_task = nullptr;
@@ -58,17 +60,28 @@ void focTask(void *) {
       s_late += n - 1u;
     }
     const int64_t t0 = esp_timer_get_time();
+    const uint32_t now_ms = millis();
     for (int i = 0; i < AXIS_COUNT; ++i) {
       Axis &ax = axes[i];
       if (!ax.present || ax.owner != Owner::Task) {
         continue;
       }
+      if (ax.armed && failsafeExpired(now_ms, ax.last_cmd_ms, ax.cmd_timeout_ms)) {
+        /* Stale command: park the axis. The task disarms itself here, on its
+         * own core, so there is nothing to sync -- unlike axisSetMode(),
+         * which exists precisely because a CLI/API write to ax.mode from the
+         * other core needs the task to observe it. */
+        ax.motor.target = 0.0f;
+        axisDisarm(ax);
+        ax.mode = Mode::Off;
+      }
       if (ax.mode == Mode::Off) {
         ax.encoder.update();
-        continue;
+      } else {
+        ax.motor.loopFOC();
+        ax.motor.move();
       }
-      ax.motor.loopFOC();
-      ax.motor.move();
+      drivePublishState(ax, i);
     }
     const uint32_t dt = (uint32_t)(esp_timer_get_time() - t0);
     s_dt_us = dt;

@@ -7,6 +7,7 @@
 #include "cal_record.h"
 #include "cmd_parse.h"
 #include "enc_math.h"
+#include "failsafe.h"
 
 /**
  * Pure-logic checks, shared by two runners: the Unity suite on target, and
@@ -89,6 +90,13 @@ inline SelfTestResult selfTestRun(SelfTestReport report, void *ctx) {
     bad.sensor_direction = 0;
     SELF_TEST_CHECK("cal_no_dir", !calRecordValid(bad, 'L', 16384));
   }
+
+  SELF_TEST_CHECK("fs_zero_never", !failsafeExpired(1000000u, 0u, 0u));
+  SELF_TEST_CHECK("fs_within", !failsafeExpired(1005u, 1000u, 10u));
+  SELF_TEST_CHECK("fs_after", failsafeExpired(1011u, 1000u, 10u));
+  /* millis() wraps every ~49.7 days; unsigned subtraction must carry it. */
+  SELF_TEST_CHECK("fs_wrap_ok", !failsafeExpired(0x00000005u, 0xFFFFFFF0u, 50u));
+  SELF_TEST_CHECK("fs_wrap_expired", failsafeExpired(0x00000040u, 0xFFFFFFF0u, 50u));
 
   return res;
 }

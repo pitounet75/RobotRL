@@ -4,4 +4,3 @@
 void cliInit();
 void cliPoll();
 void cliPrintHelp();
-void cliPrintStatus();
