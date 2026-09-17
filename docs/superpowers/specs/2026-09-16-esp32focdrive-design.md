@@ -81,8 +81,14 @@ Hors périmètre :
   shaft avant d'appliquer la nouvelle cible.
 - Changement de consigne « live » : si l'axe est déjà dans le bon mode, on
   n'écrit que la cible.
-- `primeEncoderMotion()` avant de passer en boucle fermée, pour que la vitesse
-  ne parte pas d'un échantillon périmé.
+- **Pas d'amorçage de l'estimation de vitesse.** Cette spec prescrivait à
+  l'origine un `primeEncoderMotion()` avant la boucle fermée ; l'implémentation
+  l'a retiré, à raison. Appeler `update()` ou `getVelocity()` depuis le cœur 1
+  court contre la tâche FOC sur des champs que le verrou de `count()` ne couvre
+  pas, et `move()` appelle `getVelocity()` à chaque tick dès qu'un axe est armé.
+  L'amorçage était en outre inutile : le calcul divise par le temps écoulé, donc
+  un échantillon périmé donne une vitesse proche de zéro pendant un cycle, jamais
+  un pic.
 
 ### 3.4 Calibration
 
@@ -146,7 +152,9 @@ struct Axis {
   BLDCMotor motor;
   volatile Mode mode;
   volatile Owner owner;
-  volatile uint32_t cmd_deadline_ms;         // 0 = pas de failsafe
+  volatile uint32_t last_cmd_ms;             // horodatage de la dernière consigne
+  volatile uint32_t cmd_timeout_ms;          // 0 = pas de failsafe
+  volatile bool armed;                       // détient la référence M_EN
   bool calibrated;
   float voltage_limit, align_voltage;
 };
@@ -212,8 +220,13 @@ que la boucle d'équilibrage utilisera de la même façon.
 
 ```cpp
 // Repère robot : cmd_sign est appliqué ici.
-void driveSetVelocity(uint8_t axis, float rad_s, uint32_t timeout_ms);
-void driveSetTorque  (uint8_t axis, float volts, uint32_t timeout_ms);
+// Les trois setters rendent false quand la commande est refusée — axe absent
+// ou non calibré : la ligne de commande ne doit pas confirmer, et une boucle de
+// contrôle doit pouvoir distinguer « commandé » de « refusé » sans interroger
+// l'instantané d'état.
+[[nodiscard]] bool driveSetVelocity(uint8_t axis, float rad_s, uint32_t timeout_ms);
+[[nodiscard]] bool driveSetTorque  (uint8_t axis, float volts, uint32_t timeout_ms);
+[[nodiscard]] bool driveSetOpenloop(uint8_t axis, float rad_s, uint32_t timeout_ms);
 void driveStop       (uint8_t axis);
 
 struct AxisState { float angle, velocity, uq; bool armed, calibrated; };
@@ -373,14 +386,20 @@ Les gains de vitesse sont un point de départ, à retuner au banc avec `vcap`.
 Préfixe d'axe optionnel partout : `L`, `R`, ou rien pour les deux.
 
 ```
-help  status  axes
+help (?)  status  axes  selftest
 enc [0|1]            ligne encodeur : une fois, ou en continu à 1 Hz
-ol <rad/s>           vel <rad/s>       tq <V>        idle
+ol <rad/s>           vel <rad/s>       tq <V>        idle (stop)
+fs <ms>              démonstration du failsafe : consigne qui expire
 cal  zsearch  save  forget
 limit <V>  alignv <V>  hz <Hz>  mon 0|1
 vcap [ms]  vdump  jlog  dt
-ota  wifioff  download
+ota  wifioff  download (dl)
 ```
+
+`selftest` exécute les vérifications de logique pure de `include/self_test.h`,
+depuis l'application elle-même : c'est le chemin de validation normal sur cette
+carte, dont le défaut matériel rend tout flash USB manuel. `fs` est le seul
+moyen de démontrer le failsafe tant que la boucle d'équilibrage n'existe pas.
 
 - `status` : une ligne par axe — mode, armement, calibration, index, compteur,
   angle, vitesse, cible, Uq, `I_est`, zéro, sens. Puis une ligne globale — `hz`,

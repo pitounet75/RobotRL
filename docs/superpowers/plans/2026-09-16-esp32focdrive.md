@@ -796,12 +796,16 @@ void test_fold_small_backward_delta() {
 
 /* PCNT resets to 0 at h_lim instead of wrapping two's-complement: going
  * forward past +16384 reappears near 0, which is a -16384 raw jump. */
+/* Les deux arguments sont des LECTURES SUCCESSIVES du compteur, pas un delta :
+ * +10 counts depuis 16380 atterrit à 6, -10 depuis -16380 atterrit à -6.
+ * Passer le delta brut (-16374) à la place de la lecture est l'erreur que ces
+ * deux vecteurs contenaient, et que `selftest` a révélée sur le matériel. */
 void test_fold_hlim_reset_reads_as_forward() {
-  TEST_ASSERT_EQUAL_INT32(10, encFoldDelta(16380, -16374, 16384));
+  TEST_ASSERT_EQUAL_INT32(10, encFoldDelta(16380, 6, 16384));
 }
 
 void test_fold_llim_reset_reads_as_backward() {
-  TEST_ASSERT_EQUAL_INT32(-10, encFoldDelta(-16380, 16374, 16384));
+  TEST_ASSERT_EQUAL_INT32(-10, encFoldDelta(-16380, -6, 16384));
 }
 
 void test_angle_from_count_positive() {
@@ -1803,8 +1807,11 @@ inline SelfTestResult selfTestRun(SelfTestReport report, void *ctx) {
 
   SELF_TEST_CHECK("fold_fwd", encFoldDelta(100, 105, 16384) == 5);
   SELF_TEST_CHECK("fold_back", encFoldDelta(105, 100, 16384) == -5);
-  SELF_TEST_CHECK("fold_hlim", encFoldDelta(16380, -16374, 16384) == 10);
-  SELF_TEST_CHECK("fold_llim", encFoldDelta(-16380, 16374, 16384) == -10);
+  /* The hardware counter RESETS to 0 at its limit instead of wrapping in
+   * two's complement, so both arguments are successive counter readings, not
+   * a delta: +10 counts from 16380 lands at 6, -10 from -16380 lands at -6. */
+  SELF_TEST_CHECK("fold_hlim", encFoldDelta(16380, 6, 16384) == 10);
+  SELF_TEST_CHECK("fold_llim", encFoldDelta(-16380, -6, 16384) == -10);
 
   int32_t rot = 0;
   float shaft = 0.0f;
