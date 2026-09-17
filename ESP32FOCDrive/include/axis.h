@@ -156,27 +156,64 @@ bool axisLoadCal(Axis &ax);
 bool axisRequireCal(Axis &ax);
 
 /**
+ * Stamps ax.last_cmd_ms then ax.cmd_timeout_ms, in that order, never
+ * reversed: the core-0 FOC task's failsafe check (foc_task.cpp) can run
+ * between the two stores at any time, with no lock on this specific pair.
+ * last_cmd_ms-first means that window can only ever push the deadline
+ * (last_cmd_ms + cmd_timeout_ms) LATER than intended, never earlier --
+ * reversed, the task could observe a fresh cmd_timeout_ms next to a stale
+ * (or zero, at boot) last_cmd_ms and immediately fail a command that had
+ * just been accepted.
+ *
+ * That ordering only rules out the race between these two stores
+ * themselves. Where the caller calls this from matters just as much, which
+ * is why every caller (axisSetVelocity()/axisSetTorque() below,
+ * driveSetOpenloop() in drive_api.cpp) does one of:
+ *  - call it from inside the same boardMotorPowerLock() critical section as
+ *    the fast-path armed-test and target write, so test+write+stamp become
+ *    one indivisible step and nothing can observe "armed, with the OLD
+ *    deadline" in the gap; or
+ *  - zero cmd_timeout_ms up front, before a slow path's mode change --
+ *    disabling the failsafe for the whole transition, the same trick
+ *    driveStop() uses -- then call this only once axisSetMode()+axisArm()
+ *    (which can block up to 50 ms in focSyncWithTask()) have completed.
+ * Calling this before either of those (stamping first, ahead of the
+ * delegation) leaves a real window on both paths: on a fast path, between
+ * releasing the lock and stamping, a stale deadline from a PREVIOUS call
+ * can already be due and the failsafe parks the axis under a
+ * freshly-accepted setpoint; on a slow path, the up-to-50 ms sync leaves
+ * the axis armed under the OLD deadline while the NEW mode is still being
+ * written, so the failsafe can fire mid-transition and overwrite the mode
+ * the caller just set.
+ */
+void axisStampCmd(Axis &ax, uint32_t timeout_ms);
+
+/**
  * Closed-loop velocity setpoint. The PID output is VOLTS, not amps: this
  * firmware has no current sense anywhere, so PID_velocity.limit is the same
  * ax.voltage_limit axisApplyLimits() already pushes everywhere else.
  *
- * Refuses (false, nothing changed) until axisRequireCal() passes. Rewrites
- * motor.target in place when ax is already armed in Mode::Velocity — SimpleFOC's
- * enable() always does setPwm(0,0,0) and resets the PIDs, so re-arming on
- * every command would stall the shaft before each new setpoint took effect.
+ * Refuses (false, nothing changed, no stamp) until axisRequireCal() passes.
+ * Rewrites motor.target in place when ax is already armed in Mode::Velocity
+ * -- SimpleFOC's enable() always does setPwm(0,0,0) and resets the PIDs, so
+ * re-arming on every command would stall the shaft before each new setpoint
+ * took effect; this fast path calls axisStampCmd() from inside the same
+ * lock as the armed test and the target write (see axisStampCmd()).
  * Otherwise (first use, or coming from another mode) it poses
  * motor.controller/torque_controller itself rather than trusting whatever
- * calibration or a previous mode left behind, primes the velocity estimate
- * with one encoder.update()+getVelocity() so the first closed-loop pass does
- * not react to a stale sample, then sets Mode::Velocity and arms.
+ * calibration or a previous mode left behind, deliberately WITHOUT a
+ * priming encoder read (see the comment at the call site for why), zeroes
+ * cmd_timeout_ms before touching mode/controller so the failsafe cannot
+ * fire mid-transition, sets Mode::Velocity, arms, then stamps for real with
+ * timeout_ms.
  */
-[[nodiscard]] bool axisSetVelocity(Axis &ax, float rad_s);
+[[nodiscard]] bool axisSetVelocity(Axis &ax, float rad_s, uint32_t timeout_ms);
 /**
  * Same contract as axisSetVelocity(), for Mode::Torque /
  * MotionControlType::torque. The target is volts, clamped to
  * +-ax.voltage_limit: there is no current sense, so torque is voltage-only.
  */
-[[nodiscard]] bool axisSetTorque(Axis &ax, float volts);
+[[nodiscard]] bool axisSetTorque(Axis &ax, float volts, uint32_t timeout_ms);
 /**
  * Display-only estimated phase current, I_est = (Uq - BEMF) / R, computed
  * alongside SimpleFOC from FOC_PHASE_R/FOC_KV. Never fed back into the

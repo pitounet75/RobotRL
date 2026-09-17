@@ -8,12 +8,16 @@ struct Axis; /* full definition in axis.h; only needed by reference here. */
  * Boundary between core 1 (CLI today, balance loop later) and the core 0 FOC
  * task. Commands are in the ROBOT frame: cmd_sign is applied here, once.
  *
- * In steady state a setpoint call is a bound plus two aligned 32-bit stores,
- * with no lock and no handshake: at 400 Hz on two axes that is under 0.1% of
- * a core. focSyncWithTask() only runs on arm and disarm -- and, for these
- * three setters, only on the FIRST call after a mode change or an axis
- * coming out of another mode: once armed in the matching mode, repeat calls
- * take the same lock-free fast path axisSetVelocity()/axisSetTorque() do.
+ * In steady state a setpoint call is a bound, a brief boardMotorPowerLock()
+ * critical section (test, target store, timestamp stamp -- no printf, no
+ * focSyncWithTask(), nothing slow) and nothing else: at 400 Hz on two axes
+ * that is under 0.1% of a core. focSyncWithTask() only runs on arm and
+ * disarm -- and, for these three setters, only on the FIRST call after a
+ * mode change or an axis coming out of another mode: once armed in the
+ * matching mode, repeat calls take the same short-locked fast path
+ * axisSetVelocity()/axisSetTorque() (axis.cpp) and driveSetOpenloop() below
+ * do -- see axisStampCmd() in axis.h for why the lock now also has to cover
+ * the timestamp stamp, not just the armed test and the target write.
  *
  * Return true if the setpoint was actually applied, false if it was refused
  * (bad axis index, axis absent from this build, or -- driveSetVelocity()/

@@ -525,26 +525,43 @@ bool axisRequireCal(Axis &ax) {
   return true;
 }
 
-bool axisSetVelocity(Axis &ax, float rad_s) {
+/* See axis.h for the full rationale: last_cmd_ms before cmd_timeout_ms,
+ * called only once a setpoint has actually been accepted, either from
+ * inside the same power lock as the fast-path armed-test+write or after a
+ * slow path has zeroed cmd_timeout_ms up front and finished its mode
+ * transition. */
+void axisStampCmd(Axis &ax, uint32_t timeout_ms) {
+  ax.last_cmd_ms = millis();
+  ax.cmd_timeout_ms = timeout_ms;
+}
+
+bool axisSetVelocity(Axis &ax, float rad_s, uint32_t timeout_ms) {
   if (!axisRequireCal(ax)) {
     return false;
   }
   rad_s = _constrain(rad_s, -FOC_VEL_LIMIT, FOC_VEL_LIMIT); /* SimpleFOC macro */
   axisApplyLimits(ax);
-  /* Test-and-write under the same power lock axisArm()/axisDisarm() use:
-   * ax.armed is volatile, but a bare `if (ax.armed && ...)` here would still
-   * race the core-0 failsafe, which can disarm ax between the test and the
-   * ax.motor.target store below and make this path report "applied" for a
-   * setpoint nothing will actually drive. Locking excludes axisDisarm() for
-   * the duration; nothing slow (no printf, no focSyncWithTask()) happens
-   * inside. */
+  /* Fast path: test, target write and stamp all happen under the same
+   * power lock axisArm()/axisDisarm() use, so the three are indivisible --
+   * see axisStampCmd() in axis.h for why the stamp has to be in here too,
+   * not after this function returns. Nothing slow (no printf, no
+   * focSyncWithTask()) happens inside the lock. */
   boardMotorPowerLock();
   if (ax.armed && ax.mode == Mode::Velocity) {
     ax.motor.target = rad_s; /* live setpoint: do NOT re-arm */
+    axisStampCmd(ax, timeout_ms);
     boardMotorPowerUnlock();
     return true;
   }
   boardMotorPowerUnlock();
+  /* Slow path (mode change / first arm): axisSetMode() below can block up
+   * to 50 ms in focSyncWithTask(). Zero cmd_timeout_ms FIRST -- disabling
+   * the failsafe for the whole transition, the same trick driveStop() uses
+   * -- so a deadline left over from ax's PREVIOUS mode cannot expire
+   * mid-transition and have the failsafe overwrite the mode this call is
+   * about to set. Stamped for real, with the caller's timeout_ms, only once
+   * the transition has fully completed below. */
+  ax.cmd_timeout_ms = 0;
   ax.motor.controller = MotionControlType::velocity;
   ax.motor.torque_controller = TorqueControlType::voltage;
   ax.motor.target = rad_s;
@@ -570,23 +587,29 @@ bool axisSetVelocity(Axis &ax, float rad_s) {
    * PID's output_ramp bounds the resulting step regardless. */
   axisSetMode(ax, Mode::Velocity);
   axisArm(ax);
+  axisStampCmd(ax, timeout_ms);
   return true;
 }
 
-bool axisSetTorque(Axis &ax, float volts) {
+bool axisSetTorque(Axis &ax, float volts, uint32_t timeout_ms) {
   if (!axisRequireCal(ax)) {
     return false;
   }
   volts = _constrain(volts, -ax.voltage_limit, ax.voltage_limit);
   axisApplyLimits(ax);
-  /* See axisSetVelocity() for why this test-and-write is locked. */
+  /* Fast path: see axisSetVelocity() for why the test, the target write and
+   * the stamp all happen under the same lock. */
   boardMotorPowerLock();
   if (ax.armed && ax.mode == Mode::Torque) {
     ax.motor.target = volts; /* live setpoint: do NOT re-arm */
+    axisStampCmd(ax, timeout_ms);
     boardMotorPowerUnlock();
     return true;
   }
   boardMotorPowerUnlock();
+  /* See axisSetVelocity() for why cmd_timeout_ms is zeroed before the mode
+   * transition and the real stamp happens only once it has completed. */
+  ax.cmd_timeout_ms = 0;
   ax.motor.controller = MotionControlType::torque;
   ax.motor.torque_controller = TorqueControlType::voltage;
   ax.motor.target = volts;
@@ -608,6 +631,7 @@ bool axisSetTorque(Axis &ax, float volts) {
    * velocity near zero for one cycle -- never a spike. */
   axisSetMode(ax, Mode::Torque);
   axisArm(ax);
+  axisStampCmd(ax, timeout_ms);
   return true;
 }
 

@@ -20,42 +20,16 @@ struct PubSlot {
 PubSlot s_pub[AXIS_COUNT];
 }  // namespace
 
-/**
- * Writes last_cmd_ms BEFORE cmd_timeout_ms (never the reverse): the FOC task
- * can run between the two stores at any time, since there is no lock and no
- * sync on this path (see the file header comment). last_cmd_ms-first means
- * that window can only ever make the deadline (last_ms + timeout_ms) look
- * LATER than intended -- never earlier. Written the other way around, the
- * task could observe a fresh timeout_ms paired with a stale (or zero, at
- * boot) last_cmd_ms and immediately fail a command that just armed the axis.
- *
- * That only rules out the race INSIDE this function's own two stores; it
- * says nothing about when the caller calls it. driveSetVelocity()/
- * driveSetTorque()/driveSetOpenloop() below all call this AFTER their
- * delegation into axis.cpp has actually applied the setpoint, not before,
- * because that delegation (axisSetMode() on a mode change, via
- * focSyncWithTask()) can block up to 50 ms. Stamping first, ahead of that
- * possible block, would let a 10 ms failsafe timeout -- the balance loop's
- * case -- already be past its deadline by the time the axis is actually
- * armed, parking the very command that just armed it. That is the bug this
- * ordering (stamp-after-success, not just last_cmd_ms-before-cmd_timeout_ms)
- * exists to avoid.
- */
-static inline void driveStampCmd(Axis &ax, uint32_t timeout_ms) {
-  ax.last_cmd_ms = millis();
-  ax.cmd_timeout_ms = timeout_ms;
-}
-
 bool driveSetVelocity(uint8_t axis, float rad_s, uint32_t timeout_ms) {
   if (axis >= AXIS_COUNT || !axes[axis].present) {
     return false;
   }
   Axis &ax = axes[axis];
-  const bool ok = axisSetVelocity(ax, (float)ax.cmd_sign * rad_s);
-  if (ok) {
-    driveStampCmd(ax, timeout_ms);
-  }
-  return ok;
+  /* Stamping is axisSetVelocity()'s job now, not this layer's: this layer
+   * cannot tell which internal path (fast/locked vs. slow/mode-change) the
+   * call took, and that distinction is exactly what decides where the
+   * stamp has to happen to stay race-free (see axisStampCmd() in axis.h). */
+  return axisSetVelocity(ax, (float)ax.cmd_sign * rad_s, timeout_ms);
 }
 
 bool driveSetTorque(uint8_t axis, float volts, uint32_t timeout_ms) {
@@ -63,11 +37,7 @@ bool driveSetTorque(uint8_t axis, float volts, uint32_t timeout_ms) {
     return false;
   }
   Axis &ax = axes[axis];
-  const bool ok = axisSetTorque(ax, (float)ax.cmd_sign * volts);
-  if (ok) {
-    driveStampCmd(ax, timeout_ms);
-  }
-  return ok;
+  return axisSetTorque(ax, (float)ax.cmd_sign * volts, timeout_ms);
 }
 
 bool driveSetOpenloop(uint8_t axis, float rad_s, uint32_t timeout_ms) {
@@ -81,21 +51,32 @@ bool driveSetOpenloop(uint8_t axis, float rad_s, uint32_t timeout_ms) {
   } else if (v < -FOC_VEL_LIMIT) {
     v = -FOC_VEL_LIMIT;
   }
-  /* Fast-path test-and-write under the power lock: see axisSetVelocity()
-   * (axis.cpp) for why a bare `if (ax.armed && ...)` here would race the
-   * core-0 failsafe disarming ax between the test and the ax.motor.target
-   * store. */
+  /* Fast path: test, target write and stamp all happen under the same
+   * power lock axisArm()/axisDisarm() use, so the three are indivisible --
+   * same pattern as axisSetVelocity()/axisSetTorque() (axis.cpp), and for
+   * the same reason: stamping after releasing the lock would leave a
+   * window where a stale deadline from a PREVIOUS call could already be
+   * due and the failsafe would park the axis under this freshly-accepted
+   * setpoint. See axisStampCmd() in axis.h. */
   boardMotorPowerLock();
   const bool fast_path = ax.armed && ax.mode == Mode::Openloop;
   if (fast_path) {
     ax.motor.target = v; /* live setpoint: do NOT re-arm/resync, same fast
                            * path as axisSetVelocity()/axisSetTorque(). */
+    axisStampCmd(ax, timeout_ms);
   }
   boardMotorPowerUnlock();
   if (fast_path) {
-    driveStampCmd(ax, timeout_ms);
     return true;
   }
+  /* Slow path (mode change / first arm): axisSetMode() below can block up
+   * to 50 ms in focSyncWithTask(). Zero cmd_timeout_ms FIRST -- disabling
+   * the failsafe for the whole transition, the same trick driveStop() uses
+   * -- so a deadline left over from ax's PREVIOUS mode cannot expire
+   * mid-transition and have the failsafe overwrite the mode this call is
+   * about to set. Stamped for real, with the caller's timeout_ms, only once
+   * the transition has fully completed below. */
+  ax.cmd_timeout_ms = 0;
   ax.motor.controller = MotionControlType::velocity_openloop;
   ax.motor.target = v;
   /* Settle the mode (and let the task observe it) before arming: mirrors
@@ -104,9 +85,7 @@ bool driveSetOpenloop(uint8_t axis, float rad_s, uint32_t timeout_ms) {
    * same as the other two setters. */
   axisSetMode(ax, Mode::Openloop);
   axisArm(ax);
-  /* Stamped after axisArm(), which can itself block briefly inside
-   * axisSetMode()'s focSyncWithTask() above -- see driveStampCmd(). */
-  driveStampCmd(ax, timeout_ms);
+  axisStampCmd(ax, timeout_ms);
   return true;
 }
 
