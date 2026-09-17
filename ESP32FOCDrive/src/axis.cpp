@@ -83,20 +83,40 @@ void axisArm(Axis &ax) {
    * axisDisarm() would see motor.enabled already false and skip the
    * decrement, leaving M_EN — shared by both gate drivers — stuck high.
    * enable() always does setPwm(0,0,0) and resets the PIDs, so re-arming
-   * an already-armed motor would also stall the shaft on every command. */
+   * an already-armed motor would also stall the shaft on every command.
+   *
+   * The whole test-and-set is under boardMotorPowerLock(): since the
+   * task-7 failsafe, axisDisarm() is reachable from the core-0 FOC task as
+   * well as core 1, so "decide to arm" and "increment the M_EN refcount"
+   * must be one indivisible step or the refcount can lose an update to the
+   * other core doing the same for a different axis. */
+  boardMotorPowerLock();
   if (!ax.armed) {
     ax.motor.enable();
     boardMotorPowerRef(+1);
     ax.armed = true;
   }
+  boardMotorPowerUnlock();
 }
 
 void axisDisarm(Axis &ax) {
+  /* See axisArm() for why this is locked. */
+  boardMotorPowerLock();
   if (ax.armed) {
     ax.motor.disable();
     boardMotorPowerRef(-1);
     ax.armed = false;
   }
+  boardMotorPowerUnlock();
+  /* shaft_velocity/voltage.q are only ever written by motor.move(), which
+   * stops running the instant mode is Off -- so without this, a published
+   * AxisState snapshot (drive_api.cpp) would keep echoing the last spin's
+   * velocity/Uq forever after a park, next to a live, still-updating angle:
+   * a consumer would see the wheel "still turning" with zero volts on the
+   * phases. Covers both parking paths through this function: the failsafe
+   * (foc_task.cpp) and driveStop() (drive_api.cpp). */
+  ax.motor.shaft_velocity = 0.0f;
+  ax.motor.voltage.q = 0.0f;
 }
 
 void axisSetMode(Axis &ax, Mode m) {

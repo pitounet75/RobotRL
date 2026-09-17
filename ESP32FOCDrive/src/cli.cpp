@@ -128,42 +128,56 @@ void handleLine(const char *raw) {
       return;
     }
     /* Robot frame: driveSetVelocity() applies cmd_sign once, per axis.
-     * timeout_ms=0 so a bench session is never cut off. */
+     * timeout_ms=0 so a bench session is never cut off. Printed only on
+     * success (bool return, task-7 fixup): on an uncalibrated axis
+     * axisSetVelocity() already prints "need cal L" through axisRequireCal(),
+     * and a bare unconditional confirmation right after that would read like
+     * the command went through anyway. */
     for (int i = 0; i < AXIS_COUNT; ++i) {
-      if ((p.axis_mask & (1u << i)) && axes[i].present) {
-        driveSetVelocity((uint8_t)i, p.value, 0);
+      if ((p.axis_mask & (1u << i)) && axes[i].present &&
+          driveSetVelocity((uint8_t)i, p.value, 0)) {
+        Serial.printf("vel %c: cmd=%.3f rad/s (robot frame)\n", axes[i].name, (double)p.value);
       }
     }
-    Serial.printf("vel: cmd=%.3f rad/s (robot frame)\n", (double)p.value);
   } else if (strcmp(p.cmd, "tq") == 0) {
     if (!p.has_value) {
       Serial.println("usage: tq [L|R] <V>");
       return;
     }
     for (int i = 0; i < AXIS_COUNT; ++i) {
-      if ((p.axis_mask & (1u << i)) && axes[i].present) {
-        driveSetTorque((uint8_t)i, p.value, 0);
+      if ((p.axis_mask & (1u << i)) && axes[i].present &&
+          driveSetTorque((uint8_t)i, p.value, 0)) {
+        Serial.printf("tq %c: cmd=%.3f V (robot frame)\n", axes[i].name, (double)p.value);
       }
     }
-    Serial.printf("tq: cmd=%.3f V (robot frame)\n", (double)p.value);
   } else if (strcmp(p.cmd, "fs") == 0) {
     /* Failsafe demo/test: sends a fixed velocity setpoint with an expiring
      * timeout, so `status` can be watched to confirm the axis parks itself
      * (armed=0, MEN=0) once timeout_ms elapses. Documents the mechanism the
      * balance loop will rely on; kept permanently, not just for this task's
-     * bench validation. */
+     * bench validation. No axis prefix -> every axis present in this build,
+     * same default as every other command's axis_mask. */
     if (!p.has_value) {
       Serial.println("usage: fs [L|R] <ms>");
       return;
     }
-    const uint32_t timeout_ms = (uint32_t)(p.value < 0.0f ? 0.0f : p.value);
+    /* Bound before the float->uint32_t cast below: a value outside the
+     * target range is undefined behavior, not just a clamp. 3600000 ms (1 h)
+     * is far past any sane failsafe test and well inside both ranges. */
+    float ms = p.value;
+    if (ms < 0.0f) {
+      ms = 0.0f;
+    } else if (ms > 3600000.0f) {
+      ms = 3600000.0f;
+    }
+    const uint32_t timeout_ms = (uint32_t)ms;
     for (int i = 0; i < AXIS_COUNT; ++i) {
-      if ((p.axis_mask & (1u << i)) && axes[i].present) {
-        driveSetVelocity((uint8_t)i, kFsTestVelRadS, timeout_ms);
+      if ((p.axis_mask & (1u << i)) && axes[i].present &&
+          driveSetVelocity((uint8_t)i, kFsTestVelRadS, timeout_ms)) {
+        Serial.printf("fs %c: cmd=%.1f rad/s timeout=%lu ms\n", axes[i].name,
+                      (double)kFsTestVelRadS, (unsigned long)timeout_ms);
       }
     }
-    Serial.printf("fs: cmd=%.1f rad/s timeout=%lu ms\n", (double)kFsTestVelRadS,
-                  (unsigned long)timeout_ms);
   } else if (strcmp(p.cmd, "mon") == 0) {
     if (!p.has_value) {
       Serial.printf("mon: %d\n", (int)mon_stream);
@@ -187,7 +201,11 @@ void handleLine(const char *raw) {
     }
     for (int i = 0; i < AXIS_COUNT; ++i) {
       if ((p.axis_mask & (1u << i)) && axes[i].present) {
-        driveSetOpenloop((uint8_t)i, v, 0);
+        /* Unlike vel/tq, open-loop has no calibration gate to refuse on --
+         * the guarded axis index above is the only way this could fail, and
+         * that is already excluded -- so an unconditional confirmation below
+         * stays accurate; (void) just silences [[nodiscard]] deliberately. */
+        (void)driveSetOpenloop((uint8_t)i, v, 0);
       }
     }
     Serial.printf("ol: mask=%u cmd=%.2f rad/s (robot frame)\n", (unsigned)p.axis_mask, (double)v);
@@ -333,6 +351,7 @@ void cliPrintHelp() {
   Serial.println("  cal [L|R]          zsearch [L|R]  save [L|R]  forget [L|R]");
   Serial.println("  vel [L|R] <rad/s>  tq [L|R] <V>");
   Serial.println("  fs [L|R] <ms>      failsafe test: 3 rad/s expiring after <ms>");
+  Serial.println("                     no L|R = every present axis (both wheels in dual)");
   Serial.println("  enc [0|1]          mon [0|1]      ota");
   Serial.println("  hz [Hz]            dt");
   Serial.println("  selftest           wifioff");

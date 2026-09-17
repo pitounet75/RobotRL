@@ -8,6 +8,11 @@
 
 namespace {
 int power_refs = 0;
+/* See boardMotorPowerLock() in board.h for why this exists: axisArm()/
+ * axisDisarm() (axis.cpp) are reachable from both cores since the task-7
+ * failsafe, and this spinlock is what makes their read-modify-write of
+ * power_refs indivisible across them. */
+portMUX_TYPE s_power_mux = portMUX_INITIALIZER_UNLOCKED;
 
 void holdPinLow(int pin) {
   pinMode(pin, OUTPUT);
@@ -45,6 +50,9 @@ void boardMotorPowerRef(int delta) {
 }
 
 bool boardMotorPowered() { return power_refs > 0; }
+
+void boardMotorPowerLock() { portENTER_CRITICAL(&s_power_mux); }
+void boardMotorPowerUnlock() { portEXIT_CRITICAL(&s_power_mux); }
 
 void boardEnterDownload() {
   Serial.println("download: IO0 held low + restart -> ROM");

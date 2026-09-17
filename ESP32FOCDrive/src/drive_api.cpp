@@ -19,29 +19,43 @@ struct PubSlot {
 PubSlot s_pub[AXIS_COUNT];
 }  // namespace
 
-void driveSetVelocity(uint8_t axis, float rad_s, uint32_t timeout_ms) {
-  if (axis >= AXIS_COUNT || !axes[axis].present) {
-    return;
-  }
-  Axis &ax = axes[axis];
-  ax.cmd_timeout_ms = timeout_ms;
+/**
+ * Writes last_cmd_ms BEFORE cmd_timeout_ms (never the reverse): the FOC task
+ * can run between the two stores at any time, since there is no lock and no
+ * sync on this path (see the file header comment). last_cmd_ms-first means
+ * that window can only ever make the deadline (last_ms + timeout_ms) look
+ * LATER than intended -- never earlier. Written the other way around, the
+ * task could observe a fresh timeout_ms paired with a stale (or zero, at
+ * boot) last_cmd_ms and immediately fail the very command that just armed
+ * the axis; that is exactly the first call the balance loop will make, going
+ * from timeout_ms=0 to 10 ms.
+ */
+static inline void driveStampCmd(Axis &ax, uint32_t timeout_ms) {
   ax.last_cmd_ms = millis();
-  (void)axisSetVelocity(ax, (float)ax.cmd_sign * rad_s);
+  ax.cmd_timeout_ms = timeout_ms;
 }
 
-void driveSetTorque(uint8_t axis, float volts, uint32_t timeout_ms) {
+bool driveSetVelocity(uint8_t axis, float rad_s, uint32_t timeout_ms) {
   if (axis >= AXIS_COUNT || !axes[axis].present) {
-    return;
+    return false;
   }
   Axis &ax = axes[axis];
-  ax.cmd_timeout_ms = timeout_ms;
-  ax.last_cmd_ms = millis();
-  (void)axisSetTorque(ax, (float)ax.cmd_sign * volts);
+  driveStampCmd(ax, timeout_ms);
+  return axisSetVelocity(ax, (float)ax.cmd_sign * rad_s);
 }
 
-void driveSetOpenloop(uint8_t axis, float rad_s, uint32_t timeout_ms) {
+bool driveSetTorque(uint8_t axis, float volts, uint32_t timeout_ms) {
   if (axis >= AXIS_COUNT || !axes[axis].present) {
-    return;
+    return false;
+  }
+  Axis &ax = axes[axis];
+  driveStampCmd(ax, timeout_ms);
+  return axisSetTorque(ax, (float)ax.cmd_sign * volts);
+}
+
+bool driveSetOpenloop(uint8_t axis, float rad_s, uint32_t timeout_ms) {
+  if (axis >= AXIS_COUNT || !axes[axis].present) {
+    return false;
   }
   Axis &ax = axes[axis];
   float v = (float)ax.cmd_sign * rad_s;
@@ -50,15 +64,21 @@ void driveSetOpenloop(uint8_t axis, float rad_s, uint32_t timeout_ms) {
   } else if (v < -FOC_VEL_LIMIT) {
     v = -FOC_VEL_LIMIT;
   }
-  ax.cmd_timeout_ms = timeout_ms;
-  ax.last_cmd_ms = millis();
+  driveStampCmd(ax, timeout_ms);
+  if (ax.armed && ax.mode == Mode::Openloop) {
+    ax.motor.target = v; /* live setpoint: do NOT re-arm/resync, same fast
+                           * path as axisSetVelocity()/axisSetTorque(). */
+    return true;
+  }
   ax.motor.controller = MotionControlType::velocity_openloop;
   ax.motor.target = v;
   /* Settle the mode (and let the task observe it) before arming: mirrors
    * driveStop()'s ordering below, keeping mode and power state changes from
-   * racing the task on the other core. */
+   * racing the task on the other core. Only reached once per mode entry,
+   * same as the other two setters. */
   axisSetMode(ax, Mode::Openloop);
   axisArm(ax);
+  return true;
 }
 
 void driveStop(uint8_t axis) {

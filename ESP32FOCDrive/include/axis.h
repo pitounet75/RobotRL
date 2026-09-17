@@ -32,8 +32,14 @@ struct Axis {
    * since it is exactly the field a future task will flip across cores. */
   volatile Mode mode;
   volatile Owner owner;
-  uint32_t last_cmd_ms;
-  uint32_t cmd_timeout_ms;
+  /* Written by core 1 (drive_api.cpp), read every iteration by the core-0
+   * FOC task via failsafeExpired() (foc_task.cpp): volatile for the same
+   * reason as mode/owner above. failsafeExpired() is `inline` in a header,
+   * so its two loads inline straight into the task's loop body -- without
+   * volatile, nothing stops a sufficiently aggressive build from hoisting
+   * cmd_timeout_ms out of the loop and silently disabling the failsafe. */
+  volatile uint32_t last_cmd_ms;
+  volatile uint32_t cmd_timeout_ms;
   bool calibrated;
   float voltage_limit;
   float align_voltage;

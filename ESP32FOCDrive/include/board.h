@@ -7,8 +7,23 @@
  * owns M_EN instead.
  */
 void boardInit();
-/** delta = +1 when an axis arms, -1 when it disarms. Clamped at zero. */
+/** delta = +1 when an axis arms, -1 when it disarms. Clamped at zero. Not
+ * safe to call bare from two cores at once -- see boardMotorPowerLock(). */
 void boardMotorPowerRef(int delta);
 bool boardMotorPowered();
+/**
+ * Guards the M_EN refcount together with the caller's own armed flag. Before
+ * the task-7 command failsafe, axisArm()/axisDisarm() (axis.cpp) were only
+ * ever reachable from core 1 (the CLI): the refcount was single-threaded by
+ * construction. The failsafe now calls axisDisarm() from the core-0 FOC task
+ * too, so "read power_refs, add delta, write it back" in boardMotorPowerRef()
+ * can interleave between the two cores and lose an update -- M_EN then stays
+ * high with both axes disarmed, or drops while one is still being driven.
+ * axisArm()/axisDisarm() take this lock around their whole test-and-set of
+ * ax.armed plus the boardMotorPowerRef() call, so "decide to (dis)arm" and
+ * "update the refcount" happen as one indivisible step regardless of which
+ * core is calling. */
+void boardMotorPowerLock();
+void boardMotorPowerUnlock();
 /** Hold GPIO0 low across a restart so the ROM enters download mode. */
 void boardEnterDownload();
