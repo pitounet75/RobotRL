@@ -25,8 +25,10 @@ seulement quand plus aucun n'est armé. Armer un seul axe alimente donc les
 deux demi-ponts ; désarmer un seul axe ne coupe rien tant que l'autre tourne.
 
 GPIO5 (A de l'axe droit) et GPIO12 (`M_EN`) sont des broches de strap au
-boot : `boardInit()` tient `M_EN` bas avant toute autre initialisation, et le
-boot a été vérifié propre avec le MT6835 branché sur GPIO5 (tâche 9).
+boot : `boardInit()` tient `M_EN` bas avant toute autre initialisation. **Risque** :
+avant la mise en service, vérifier que plusieurs redémarrages consécutifs avec
+le MT6835 branché sur GPIO5 ne déclenchent ni mode téléchargement ni boucle de
+resets — ce contrôle ne peut être effectué que sur le matériel réel.
 
 Un axe absent du masque de build (`FOC_AXIS_MASK`, voir §6) a ses trois
 broches PWM tenues basses et ne reçoit ni PCNT ni ISR.
@@ -86,8 +88,11 @@ est donc le chemin normal d'itération, pas une commodité.** La séquence :
    Plus jamais de câble ensuite, tant que la carte reste alimentée et que le
    WiFi répond. `ArduinoOTA` coupe les deux axes, met le timer FOC en pause
    et désactive le watchdog du cœur 1 le temps du transfert
-   (`net.cpp:onStart`), et les réactive à la fin ou en cas d'erreur
-   (`onError`).
+   (`net.cpp:onStart`). **Après un upload réussi, la bibliothèque redémarre la
+   carte complètement** — pas de réactivation progressive du timer et du watchdog.
+   En conséquence, le redémarrage invalide l'index Z courant : vous devez exécuter
+   `zsearch` (étape 6 de la séquence §4) après chaque flash OTA réussi pour
+   retrouver l'index et réappliquer le zéro électrique depuis la NVS.
 
 ## 3. `selftest` : valider sans câble
 
@@ -284,8 +289,8 @@ s'ajoute donc aux flags existants au lieu de les remplacer.
 
 **Le port COM1 n'est jamais la carte.** C'est l'UART de la carte mère (port
 série hérité du PC), pas le CH340 de la carte ESP32FOCDrive. Le CH340
-apparaît sous un autre numéro (par exemple `COM6` au moment de ce chantier,
-confirmé au Gestionnaire de périphériques sous « USB-SERIAL CH340K ») —
+apparaît sous un autre numéro (par exemple `COM6`, noté dans le README du
+projet précédent `ESP32FOCHardwareCheck` pour la même carte physique) —
 **à revérifier à chaque branchement**, Windows peut en changer. Envoyer un
 flash ou ouvrir le moniteur sur COM1 échoue silencieusement ou parle à autre
 chose ; ce n'est jamais un symptôme du défaut matériel décrit au §2.
