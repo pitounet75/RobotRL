@@ -66,8 +66,11 @@ inline SelfTestResult selfTestRun(SelfTestReport report, void *ctx) {
 
   SELF_TEST_CHECK("fold_fwd", encFoldDelta(100, 105, 16384) == 5);
   SELF_TEST_CHECK("fold_back", encFoldDelta(105, 100, 16384) == -5);
-  SELF_TEST_CHECK("fold_hlim", encFoldDelta(16380, -16374, 16384) == 10);
-  SELF_TEST_CHECK("fold_llim", encFoldDelta(-16380, 16374, 16384) == -10);
+  /* The hardware counter RESETS to 0 at its limit instead of wrapping in
+   * two's complement, so both arguments are successive counter readings, not
+   * a delta: +10 counts from 16380 lands at 6, -10 from -16380 lands at -6. */
+  SELF_TEST_CHECK("fold_hlim", encFoldDelta(16380, 6, 16384) == 10);
+  SELF_TEST_CHECK("fold_llim", encFoldDelta(-16380, -6, 16384) == -10);
 
   int32_t rot = 0;
   float shaft = 0.0f;
