@@ -1100,7 +1100,7 @@ git commit -m "feat(esp32focdrive): isochronous FOC task on core 0 with ownershi
 **Files:**
 - Create: `ESP32FOCDrive/include/cal_record.h`
 - Modify: `ESP32FOCDrive/include/self_test.h`
-- Modify: `ESP32FOCDrive/include/axis.h`, `ESP32FOCDrive/src/axis.cpp`, `ESP32FOCDrive/src/cli.cpp`
+- Modify: `ESP32FOCDrive/include/axis.h`, `ESP32FOCDrive/src/axis.cpp`, `ESP32FOCDrive/src/cli.cpp`, `ESP32FOCDrive/src/main.cpp`
 
 **Interfaces:**
 - Consomme : `Axis`, `focSyncWithTask`.
@@ -1228,6 +1228,8 @@ NVS : namespace `drive`, clés `cal0` et `cal1`, `Preferences::putBytes` et `get
 - [ ] **Step 6 : câbler `cal`, `zsearch`, `save`, `forget`, `alignv` dans la CLI**
 
 Avec préfixe d'axe : sans préfixe, les axes sont traités **l'un après l'autre**, jamais en parallèle. `vel` et `tq` n'existent pas encore ; `axisRequireCal` est écrite ici et servira à la tâche 6.
+
+**`status` doit aussi gagner un champ `cal=`**, par axe. `cliPrintStatus()` vit dans `main.cpp` — d'où sa présence dans la liste des fichiers ci-dessus. Sans ce champ, l'étape 7 n'est pas vérifiable : c'est en lisant `cal=0` après un redémarrage puis `cal=1` après `zsearch` qu'on prouve que la calibration a bien été rechargée depuis la mémoire non volatile.
 
 - [ ] **Step 7 : valider au banc**
 
