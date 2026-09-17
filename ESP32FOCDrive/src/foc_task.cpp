@@ -108,18 +108,22 @@ void focSetHz(uint32_t hz) {
 
 uint32_t focHz() { return s_hz; }
 
-void focSyncWithTask() {
+bool focSyncWithTask() {
   if (s_task == nullptr || s_timer_paused) {
-    return;
+    /* Nothing to wait for: with no task started yet, or the timer
+     * deliberately paused, the task cannot be touching any axis right now
+     * either way, so there is no observation to fail. */
+    return true;
   }
   const uint32_t start = s_seq;
   const uint32_t t0 = millis();
   while ((s_seq - start) < 2u) {
     if ((millis() - t0) > 50u) {
-      return; /* timer stopped or starved: do not block the CLI */
+      return false; /* timer stopped or starved: do not block the CLI */
     }
     vTaskDelay(1);
   }
+  return true;
 }
 
 void focPauseTimer() {

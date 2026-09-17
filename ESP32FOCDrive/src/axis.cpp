@@ -76,36 +76,45 @@ void axisInitAll() {
 
 void axisArm(Axis &ax) {
   axisApplyLimits(ax);
-  /* enable() always does setPwm(0,0,0) and resets the PIDs: re-arming an
-   * already-armed motor would stall the shaft on every command. */
-  if (!ax.motor.enabled) {
+  /* Guarded by ax.armed, which only axisArm()/axisDisarm() ever write —
+   * NOT motor.enabled, which SimpleFOC also flips on its own (initFOC()
+   * calls disable() internally on failure). Gating on motor.enabled would
+   * let such a library-internal disable desync the M_EN refcount: a later
+   * axisDisarm() would see motor.enabled already false and skip the
+   * decrement, leaving M_EN — shared by both gate drivers — stuck high.
+   * enable() always does setPwm(0,0,0) and resets the PIDs, so re-arming
+   * an already-armed motor would also stall the shaft on every command. */
+  if (!ax.armed) {
     ax.motor.enable();
     boardMotorPowerRef(+1);
+    ax.armed = true;
   }
-  ax.armed = true;
 }
 
 void axisDisarm(Axis &ax) {
-  if (ax.motor.enabled) {
+  if (ax.armed) {
     ax.motor.disable();
     boardMotorPowerRef(-1);
+    ax.armed = false;
   }
-  ax.armed = false;
 }
 
 void axisSetMode(Axis &ax, Mode m) {
   ax.mode = m;
-  focSyncWithTask();
+  (void)focSyncWithTask(); /* best-effort: mode is re-read every task pass. */
 }
 
-void axisTakeOwnership(Axis &ax) {
+bool axisTakeOwnership(Axis &ax) {
   ax.owner = Owner::Cli;
-  focSyncWithTask();
+  return focSyncWithTask();
 }
 
 void axisReleaseOwnership(Axis &ax) {
   ax.owner = Owner::Task;
-  focSyncWithTask();
+  /* No safety issue in the false case: nobody keeps writing ax once
+   * released, so a missed observation only delays the task picking the
+   * axis back up, it does not create a race. */
+  (void)focSyncWithTask();
 }
 
 /**
@@ -275,7 +284,15 @@ int axisRunInitFoc(Axis &ax) {
 
 bool axisZSearch(Axis &ax, bool park) {
   if (park) {
-    axisTakeOwnership(ax);
+    if (!axisTakeOwnership(ax)) {
+      /* Best-effort handback: ax.owner was already written Cli inside the
+       * failed axisTakeOwnership(); do not leave it stuck there. Nothing
+       * is armed yet, so there is nothing else to undo. */
+      axisReleaseOwnership(ax);
+      Serial.printf(
+          "zsearch %c: FAIL (ownership handshake timed out, FOC task not responding)\n", ax.name);
+      return false;
+    }
   }
   ax.encoder.clearIndex();
   ax.motor.controller = MotionControlType::velocity_openloop;
@@ -291,6 +308,13 @@ bool axisZSearch(Axis &ax, bool park) {
     ax.motor.loopFOC();
     ax.motor.move();
   }
+  /* velocity_openloop's move() always drives phases at up to voltage_limit
+   * regardless of target: target=0 alone (with no further move()/loopFOC()
+   * call) would leave the last full-voltage setpoint applied to a now-fixed
+   * electrical angle for as long as the axis stays owned — through this
+   * function's printf, through axisSetMode()'s up-to-50ms sync, even through
+   * axisLoadCal()'s flash read. Cut the phases explicitly instead. */
+  ax.motor.setPhaseVoltage(0.0f, 0.0f, 0.0f);
   const bool ok = ax.encoder.indexFound();
   ax.motor.target = 0.0f;
   Serial.printf("zsearch %c: %s  cnt=%lld\n", ax.name, ok ? "ok" : "FAIL (no index)",
@@ -298,7 +322,8 @@ bool axisZSearch(Axis &ax, bool park) {
 
   if (!park) {
     /* axisCal() already owns ax and continues straight into direction/zero
-     * detection: stay armed, stay owned, let the caller finish the job. */
+     * detection: stay armed, stay owned, let the caller finish the job
+     * (including restoring motor.controller before it eventually idles). */
     return ok;
   }
 
@@ -314,6 +339,12 @@ bool axisZSearch(Axis &ax, bool park) {
       Serial.printf("zsearch %c: ok, no nvs electrical zero - run cal\n", ax.name);
     }
   }
+  /* Standalone zsearch is done either way: undo the velocity_openloop mode
+   * axisRunInitFoc()/axisOpenloopDirectionAndZero() may have left behind so
+   * a later mode change that only touches ax.mode (not ax.motor.controller)
+   * cannot leave the axis spinning open-loop at full voltage under torque
+   * control's name. */
+  ax.motor.controller = MotionControlType::torque;
   axisSetMode(ax, Mode::Off);
   axisDisarm(ax);
   axisReleaseOwnership(ax);
@@ -321,12 +352,18 @@ bool axisZSearch(Axis &ax, bool park) {
 }
 
 bool axisCal(Axis &ax) {
-  axisTakeOwnership(ax);
+  if (!axisTakeOwnership(ax)) {
+    axisReleaseOwnership(ax); /* best-effort handback, see axisZSearch(). */
+    Serial.printf("cal %c: FAIL (ownership handshake timed out, FOC task not responding)\n",
+                  ax.name);
+    return false;
+  }
   Serial.printf("cal %c: Z search then ol %.1f for dir/zero - motor will spin\n", ax.name,
                 (double)kAlignOlRadS);
 
   if (!axisZSearch(ax, false)) {
     ax.calibrated = false;
+    ax.motor.controller = MotionControlType::torque; /* undo the Z-search's velocity_openloop */
     axisSetMode(ax, Mode::Off);
     axisDisarm(ax);
     axisReleaseOwnership(ax);
@@ -337,6 +374,7 @@ bool axisCal(Axis &ax) {
   ax.motor.sensor_direction = Direction::UNKNOWN;
   ax.motor.zero_electric_angle = NOT_SET;
   const int ok = axisRunInitFoc(ax);
+  ax.motor.controller = MotionControlType::torque; /* undo open-loop dir/zero detection's mode */
   axisSetMode(ax, Mode::Off);
   axisDisarm(ax);
   ax.calibrated = (ok != 0) && ax.encoder.indexFound() &&
@@ -385,7 +423,12 @@ bool axisSaveCal(Axis &ax) {
 }
 
 void axisForgetCal(Axis &ax) {
-  axisTakeOwnership(ax);
+  if (!axisTakeOwnership(ax)) {
+    axisReleaseOwnership(ax); /* best-effort handback, see axisZSearch(). */
+    Serial.printf("forget %c: FAIL (ownership handshake timed out, FOC task not responding)\n",
+                  ax.name);
+    return;
+  }
   axisSetMode(ax, Mode::Off);
   axisDisarm(ax);
   ax.calibrated = false;
@@ -410,6 +453,16 @@ bool axisLoadCal(Axis &ax) {
   const size_t n = prefs.getBytes(calKey(ax), &rec, sizeof(rec));
   prefs.end();
   if (n != sizeof(rec) || !calRecordValid(rec, ax.name, (uint16_t)ENC_PPR)) {
+    return false;
+  }
+  /* calRecordValid()'s signature is fixed by the record format and only
+   * knows about axis/ENC_PPR; pole_pairs needs the exact same treatment
+   * (reject before applying anything) but has nowhere else to live. A
+   * firmware rebuilt for a different motor — different FOC_POLE_PAIRS —
+   * must not silently keep applying an old electrical zero taken at the
+   * wrong pole count, the same way a changed ENC_PPR already invalidates
+   * the record above. */
+  if (rec.pole_pairs != (uint8_t)FOC_POLE_PAIRS) {
     return false;
   }
   ax.motor.pole_pairs = rec.pole_pairs;

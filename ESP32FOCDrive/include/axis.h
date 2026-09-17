@@ -55,9 +55,14 @@ void axisInitAll();
  * cannot leave calibration driving more volts than just asked for. Callable
  * any time, including while the axis is armed. */
 void axisApplyLimits(Axis &ax);
-/** Arms the motor (idempotent) and takes one M_EN power reference. */
+/** Arms the motor (idempotent) and takes one M_EN power reference. Guarded
+ * by ax.armed, not motor.enabled: SimpleFOC's initFOC() can call disable()
+ * on the motor itself on failure, which would flip motor.enabled without
+ * going through axisDisarm() and desync the shared M_EN refcount if that
+ * were the guard instead. */
 void axisArm(Axis &ax);
-/** Drops the M_EN power reference (idempotent) and disables the motor. */
+/** Drops the M_EN power reference (idempotent) and disables the motor.
+ * See axisArm() for why ax.armed, not motor.enabled, is the guard. */
 void axisDisarm(Axis &ax);
 /** Writes ax.mode, then blocks until the FOC task has observed it. */
 void axisSetMode(Axis &ax, Mode m);
@@ -78,13 +83,22 @@ void axisSetMode(Axis &ax, Mode m);
  * take ownership.
  *
  * Both functions write ax.owner and call focSyncWithTask() so no caller has
- * to remember to pair the two: axisTakeOwnership() only returns once the
- * task has observed the axis is no longer its to touch; axisReleaseOwnership
- * only returns once the task is guaranteed to pick the axis back up on its
- * next iteration. axisCal()/axisZSearch()/axisForgetCal() (task 5) are their
+ * to remember to pair the two: axisTakeOwnership() only returns true once
+ * the task has observed the axis is no longer its to touch; axisReleaseOwnership
+ * blocks the same way but does not report failure (nothing is still writing
+ * ax once released, so a missed observation there is not a safety issue,
+ * only a delay). axisCal()/axisZSearch()/axisForgetCal() (task 5) are their
  * first users.
+ *
+ * axisTakeOwnership() can return false: focSyncWithTask() is bounded to
+ * 50 ms so a starved or stopped FOC task never blocks the CLI forever, but
+ * that also means the caller cannot assume the task has actually stopped
+ * touching the axis. A caller that goes on to drive the motor directly
+ * (loopFOC()/move()/setPhaseVoltage()) after a false return would then race
+ * the FOC task on the same axis — every caller here checks the return value
+ * and aborts, arming nothing, if it is false.
  */
-void axisTakeOwnership(Axis &ax);
+[[nodiscard]] bool axisTakeOwnership(Axis &ax);
 void axisReleaseOwnership(Axis &ax);
 
 /**
@@ -114,8 +128,12 @@ bool axisSaveCal(Axis &ax);
 /** Clears the stored NVS record and the axis' in-RAM electrical zero. */
 void axisForgetCal(Axis &ax);
 /** Loads a stored NVS record and applies it to ax.motor if it validates
- * against calRecordValid() for this axis' name and the live ENC_PPR. Does
- * not run initFOC(). */
+ * against calRecordValid() for this axis' name and the live ENC_PPR, AND
+ * its pole_pairs matches the live FOC_POLE_PAIRS — calRecordValid()'s
+ * signature is fixed by the record format itself and only knows about
+ * axis/ENC_PPR, so the pole_pairs guard (symmetric with the ENC_PPR one:
+ * a firmware rebuilt for a different motor must not silently keep applying
+ * the old pole count) lives here instead. Does not run initFOC(). */
 bool axisLoadCal(Axis &ax);
 /** Prints "need cal" and returns false unless ax is calibrated and its
  * encoder currently holds an index. */

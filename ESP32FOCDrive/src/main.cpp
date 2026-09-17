@@ -82,9 +82,9 @@ void cliPrintStatus() {
       continue;
     }
     Axis &ax = axes[i];
-    Serial.printf("axis=%c tgt=%.2f rad/s Uq=%.2f V limit=%.2f V armed=%d\n", ax.name,
+    Serial.printf("axis=%c tgt=%.2f rad/s Uq=%.2f V limit=%.2f V armed=%d cal=%d\n", ax.name,
                   (double)ax.motor.target, (double)ax.motor.voltage.q, (double)ax.voltage_limit,
-                  (int)ax.armed);
+                  (int)ax.armed, (int)ax.calibrated);
   }
   const FocMetrics m = focGetMetrics();
   Serial.printf("MEN=%d hz=%lu dt=%lu us dtmax=%lu us late=%lu loops=%llu\n",

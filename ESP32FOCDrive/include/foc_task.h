@@ -16,8 +16,18 @@ uint32_t focHz();
  * one, so a write made just before calling this is guaranteed seen by a
  * complete task pass. Bounded to 50 ms so a stopped/paused timer never
  * blocks the CLI.
+ *
+ * Returns true once that pass is confirmed observed (or when there is
+ * nothing to observe: the task has not started yet, or the timer is
+ * deliberately paused, in both of which cases the task cannot be mid-loop
+ * on any axis either). Returns false on the 50 ms timeout — a starved or
+ * stopped timer that never ticked the two passes this call waited for.
+ * [[nodiscard]] because a caller relying on the handoff (axisTakeOwnership,
+ * in particular) must not silently proceed as if it had been observed;
+ * callers that don't care are expected to say so with an explicit
+ * `(void)focSyncWithTask();`.
  */
-void focSyncWithTask();
+[[nodiscard]] bool focSyncWithTask();
 /** Stops the hardware timer (used across an OTA flash write). */
 void focPauseTimer();
 void focResumeTimer();
