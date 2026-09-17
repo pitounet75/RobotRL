@@ -114,26 +114,30 @@ void focTask(void *) {
       } else {
         ax.motor.loopFOC();
         ax.motor.move();
-        if (i == (int)s_vcap_axis) {
-          /* Per-iteration capture: a few array writes, nothing else -- see
-           * foc_task.h for why. Only while this axis is actually driving
-           * (this branch), matching the "vel 3 then vcap" bench flow. */
-          const uint32_t idx = s_vcap_idx;
-          if (idx < s_vcap_target) {
-            const uint32_t ctr = s_vcap_loop_ctr;
-            s_vcap_loop_ctr = ctr + 1;
-            if ((ctr % s_vcap_decim) == 0) {
-              const int64_t c = ax.encoder.count();
-              s_vcap_buf[idx].dcount = (int32_t)(c - s_vcap_last_count);
-              s_vcap_buf[idx].vel = ax.motor.shaft_velocity;
-              s_vcap_buf[idx].uq = ax.motor.voltage.q;
-              s_vcap_last_count = c;
-              s_vcap_idx = idx + 1;
-            }
+      }
+      drivePublishState(ax, i);
+      if (ax.mode != Mode::Off && i == (int)s_vcap_axis) {
+        /* Per-iteration capture: a few array writes, nothing else -- see
+         * foc_task.h for why. Only while this axis is actually driving
+         * (same condition as before this moved), matching the "vel 3 then
+         * vcap" bench flow. Moved after drivePublishState(): the capture
+         * does not feed anything the publish needs, so running it first
+         * only delayed the published snapshot for no benefit -- strictly
+         * better placed here instead. */
+        const uint32_t idx = s_vcap_idx;
+        if (idx < s_vcap_target) {
+          const uint32_t ctr = s_vcap_loop_ctr;
+          s_vcap_loop_ctr = ctr + 1;
+          if ((ctr % s_vcap_decim) == 0) {
+            const int64_t c = ax.encoder.count();
+            s_vcap_buf[idx].dcount = (int32_t)(c - s_vcap_last_count);
+            s_vcap_buf[idx].vel = ax.motor.shaft_velocity;
+            s_vcap_buf[idx].uq = ax.motor.voltage.q;
+            s_vcap_last_count = c;
+            s_vcap_idx = idx + 1;
           }
         }
       }
-      drivePublishState(ax, i);
     }
     const uint32_t dt = (uint32_t)(esp_timer_get_time() - t0);
     s_dt_us = dt;

@@ -22,6 +22,12 @@ void holdPinLow(int pin) {
 }  // namespace
 
 void boardInit() {
+  /* M_EN feeds BOTH gate drivers (see board.h): it must be the very first
+   * write this function makes, ahead of the GPIO0 hold release below, even
+   * though that release has no real exposure window of its own today. */
+  holdPinLow(FOC_PIN_MEN);
+  power_refs = 0;
+
   /* boardEnterDownload() leaves GPIO0 held low via the RTC pad hold across
    * esp_restart() so the ROM samples download mode. Nothing ever released
    * that hold on a normal boot, so the board stayed stuck in download mode
@@ -30,8 +36,6 @@ void boardInit() {
   rtc_gpio_hold_dis(GPIO_NUM_0);
   rtc_gpio_deinit(GPIO_NUM_0);
 
-  holdPinLow(FOC_PIN_MEN);
-  power_refs = 0;
   for (int i = 0; i < AXIS_COUNT; ++i) {
     if (AXIS_PRESENT(i)) {
       continue;

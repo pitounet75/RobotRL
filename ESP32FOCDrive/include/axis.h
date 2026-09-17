@@ -75,7 +75,9 @@ void axisApplyLimits(Axis &ax);
  * by ax.armed, not motor.enabled: SimpleFOC's initFOC() can call disable()
  * on the motor itself on failure, which would flip motor.enabled without
  * going through axisDisarm() and desync the shared M_EN refcount if that
- * were the guard instead. */
+ * were the guard instead. Also a no-op on an absent axis: the Axis setters
+ * are public, and an absent axis still shares board.h's M_EN reference count
+ * with the real one, so arming it would power the real gate driver too. */
 void axisArm(Axis &ax);
 /** Drops the M_EN power reference (idempotent) and disables the motor.
  * See axisArm() for why ax.armed, not motor.enabled, is the guard. */
@@ -99,7 +101,16 @@ void axisSetMode(Axis &ax, Mode m);
 /**
  * Ownership handover. The FOC task only calls loopFOC()/move() for an axis
  * whose owner is Owner::Task (see foc_task.cpp); while owner is Owner::Cli
- * the task skips that axis entirely, encoder included.
+ * the task skips that axis entirely -- and with it, the per-tick failsafe
+ * check in foc_task.cpp, which only ever looks at axes the task is currently
+ * touching. Taking ownership therefore suspends that axis' failsafe for the
+ * whole time it stays owned -- up to several seconds for axisCal()'s dual-
+ * axis sequence. This is exactly why axisCal()/axisZSearch()/axisForgetCal()
+ * (below) refuse to run on an axis that is already armed or has a live
+ * command deadline (ax.cmd_timeout_ms != 0): taking ownership of an axis a
+ * control loop is actively driving would silently disable its failsafe out
+ * from under it, then immediately re-arm it at the calibration open-loop
+ * speed, with nothing left to park it if the caller goes away.
  *
  * That last part is the contract a caller taking ownership must honor:
  * while an axis is owned by core 1, ITS OWNER is responsible for reading the
@@ -141,6 +152,11 @@ void axisReleaseOwnership(Axis &ax);
  * check against the commanded open-loop speed, a gently ramped electrical
  * zero capture, then initFOC(). Leaves ax idle (mode Off, disarmed) and
  * ownership released either way; sets ax.calibrated on success.
+ *
+ * Refuses (false, nothing touched) if ax is already armed or has a live
+ * command deadline (ax.cmd_timeout_ms != 0): see axisTakeOwnership() above
+ * for why taking ownership of an axis a control loop is actively driving is
+ * unsafe, not just disruptive.
  */
 bool axisCal(Axis &ax);
 /**
@@ -149,12 +165,23 @@ bool axisCal(Axis &ax);
  * With park=true (the standalone CLI `zsearch`), axisZSearch() manages its
  * own ownership: on success it also tries to reload a saved NVS zero via
  * axisLoadCal() and re-run initFOC(), then idles and releases ax.
+ *
+ * With park=true, refuses (false) under the same armed/cmd_timeout_ms
+ * condition as axisCal() above, for the same reason. Not checked when
+ * park=false: that call is made from inside axisCal(), which has already
+ * passed its own check and taken ownership.
  */
 bool axisZSearch(Axis &ax, bool park);
 /** Persists the axis' current electrical zero/direction/pole pairs to NVS
- * (namespace "drive", key "cal0"/"cal1"), guarded by ax.calibrated. */
+ * (namespace "drive", key "cal0"/"cal1"), guarded by ax.calibrated. Also
+ * refuses (false) if ANY axis in this build is currently armed -- see the
+ * comment on anyAxisArmed() in axis.cpp for why an NVS write while an axis
+ * is spinning is not just slow but silently corrupting. */
 bool axisSaveCal(Axis &ax);
-/** Clears the stored NVS record and the axis' in-RAM electrical zero. */
+/** Clears the stored NVS record and the axis' in-RAM electrical zero.
+ * Refuses (no-op) under the same two conditions as axisCal() above (this
+ * axis armed or mid-command) plus axisSaveCal()'s any-axis-armed NVS guard,
+ * since this also writes NVS. */
 void axisForgetCal(Axis &ax);
 /** Loads a stored NVS record and applies it to ax.motor if it validates
  * against calRecordValid() for this axis' name and the live ENC_PPR, AND
@@ -164,8 +191,14 @@ void axisForgetCal(Axis &ax);
  * a firmware rebuilt for a different motor must not silently keep applying
  * the old pole count) lives here instead. Does not run initFOC(). */
 bool axisLoadCal(Axis &ax);
-/** Prints "need cal" and returns false unless ax is calibrated and its
- * encoder currently holds an index. */
+/** Returns false, silently, unless ax is calibrated and its encoder
+ * currently holds an index. Deliberately prints nothing: this is called as
+ * the very first thing axisSetVelocity()/axisSetTorque() do, and at 400 Hz
+ * on two uncalibrated axes an unconditional printf here would mean 800
+ * lines/s -- and Serial.printf() blocks once its buffer fills, which would
+ * stall core 1 on its own refusal message. The caller (drive_api.h's
+ * setters return bool for exactly this) is responsible for telling the user;
+ * the CLI does so from the setpoint commands' own return-value check. */
 bool axisRequireCal(Axis &ax);
 
 /**

@@ -47,6 +47,25 @@ const char *modeName(Mode m) {
   return "?";
 }
 
+/**
+ * True if axes[i] is present in this build. If it is not, but the command
+ * still targeted it (an explicit `L`/`R` prefix naming an axis this binary
+ * was not built for -- the default, no-prefix axis_mask only ever covers
+ * axes that ARE present, see cmd_parse.h), prints an explicit failure line
+ * instead of the command silently doing nothing. Every per-axis command
+ * loop below calls this once it has already confirmed the axis was actually
+ * targeted (the axis_mask bit test), so a genuinely un-targeted axis on a
+ * dual-build command (e.g. `cal L` targeting only L) still skips the other
+ * axis with no message, exactly as before.
+ */
+bool cliCheckPresent(int i, const char *cmd) {
+  if (axes[i].present) {
+    return true;
+  }
+  Serial.printf("%s %c: FAIL (axis not present in this build)\n", cmd, axes[i].name);
+  return false;
+}
+
 /* Duplicated from axis.cpp's own dirName() (kept file-local there): trivial
  * enough, and axis.cpp's copy lives in an anonymous namespace on purpose. */
 const char *dirName(Direction d) {
@@ -152,15 +171,21 @@ void handleLine(const char *raw) {
       return;
     }
     /* Robot frame: driveSetVelocity() applies cmd_sign once, per axis.
-     * timeout_ms=0 so a bench session is never cut off. Printed only on
-     * success (bool return, task-7 fixup): on an uncalibrated axis
-     * axisSetVelocity() already prints "need cal L" through axisRequireCal(),
-     * and a bare unconditional confirmation right after that would read like
-     * the command went through anyway. */
+     * timeout_ms=0 so a bench session is never cut off. axisRequireCal()
+     * (axis.cpp) is silent by contract -- see axis.h -- so the CLI is the
+     * one that prints "need cal" on refusal now, from the bool return, not
+     * axis.cpp printing it 800 times/s at 400 Hz on two uncalibrated axes. */
     for (int i = 0; i < AXIS_COUNT; ++i) {
-      if ((p.axis_mask & (1u << i)) && axes[i].present &&
-          driveSetVelocity((uint8_t)i, p.value, 0)) {
+      if (!(p.axis_mask & (1u << i))) {
+        continue;
+      }
+      if (!cliCheckPresent(i, "vel")) {
+        continue;
+      }
+      if (driveSetVelocity((uint8_t)i, p.value, 0)) {
         Serial.printf("vel %c: cmd=%.3f rad/s (robot frame)\n", axes[i].name, (double)p.value);
+      } else {
+        Serial.printf("need cal %c (or zsearch after save)\n", axes[i].name);
       }
     }
   } else if (strcmp(p.cmd, "tq") == 0) {
@@ -168,10 +193,18 @@ void handleLine(const char *raw) {
       Serial.println("usage: tq [L|R] <V>");
       return;
     }
+    /* See `vel` above for why the refusal message is printed here now. */
     for (int i = 0; i < AXIS_COUNT; ++i) {
-      if ((p.axis_mask & (1u << i)) && axes[i].present &&
-          driveSetTorque((uint8_t)i, p.value, 0)) {
+      if (!(p.axis_mask & (1u << i))) {
+        continue;
+      }
+      if (!cliCheckPresent(i, "tq")) {
+        continue;
+      }
+      if (driveSetTorque((uint8_t)i, p.value, 0)) {
         Serial.printf("tq %c: cmd=%.3f V (robot frame)\n", axes[i].name, (double)p.value);
+      } else {
+        Serial.printf("need cal %c (or zsearch after save)\n", axes[i].name);
       }
     }
   } else if (strcmp(p.cmd, "fs") == 0) {
@@ -196,10 +229,17 @@ void handleLine(const char *raw) {
     }
     const uint32_t timeout_ms = (uint32_t)ms;
     for (int i = 0; i < AXIS_COUNT; ++i) {
-      if ((p.axis_mask & (1u << i)) && axes[i].present &&
-          driveSetVelocity((uint8_t)i, kFsTestVelRadS, timeout_ms)) {
+      if (!(p.axis_mask & (1u << i))) {
+        continue;
+      }
+      if (!cliCheckPresent(i, "fs")) {
+        continue;
+      }
+      if (driveSetVelocity((uint8_t)i, kFsTestVelRadS, timeout_ms)) {
         Serial.printf("fs %c: cmd=%.1f rad/s timeout=%lu ms\n", axes[i].name,
                       (double)kFsTestVelRadS, (unsigned long)timeout_ms);
+      } else {
+        Serial.printf("need cal %c (or zsearch after save)\n", axes[i].name);
       }
     }
   } else if (strcmp(p.cmd, "mon") == 0) {
@@ -224,20 +264,28 @@ void handleLine(const char *raw) {
       v = -FOC_VEL_LIMIT;
     }
     for (int i = 0; i < AXIS_COUNT; ++i) {
-      if ((p.axis_mask & (1u << i)) && axes[i].present) {
-        /* Unlike vel/tq, open-loop has no calibration gate to refuse on --
-         * the guarded axis index above is the only way this could fail, and
-         * that is already excluded -- so an unconditional confirmation below
-         * stays accurate; (void) just silences [[nodiscard]] deliberately. */
-        (void)driveSetOpenloop((uint8_t)i, v, 0);
+      if (!(p.axis_mask & (1u << i))) {
+        continue;
       }
+      if (!cliCheckPresent(i, "ol")) {
+        continue;
+      }
+      /* Unlike vel/tq, open-loop has no calibration gate to refuse on --
+       * the guarded axis index above is the only way this could fail, and
+       * that is already excluded -- so an unconditional confirmation below
+       * stays accurate; (void) just silences [[nodiscard]] deliberately. */
+      (void)driveSetOpenloop((uint8_t)i, v, 0);
     }
     Serial.printf("ol: mask=%u cmd=%.2f rad/s (robot frame)\n", (unsigned)p.axis_mask, (double)v);
   } else if (strcmp(p.cmd, "idle") == 0 || strcmp(p.cmd, "stop") == 0) {
     for (int i = 0; i < AXIS_COUNT; ++i) {
-      if ((p.axis_mask & (1u << i)) && axes[i].present) {
-        driveStop((uint8_t)i);
+      if (!(p.axis_mask & (1u << i))) {
+        continue;
       }
+      if (!cliCheckPresent(i, p.cmd)) {
+        continue;
+      }
+      driveStop((uint8_t)i);
     }
     Serial.println("idle");
   } else if (strcmp(p.cmd, "limit") == 0) {
@@ -246,11 +294,21 @@ void handleLine(const char *raw) {
      * than routing through drive_api.h (same pattern as `alignv` below). */
     if (!p.has_value) {
       float v = FOC_VOLTAGE_LIMIT;
+      bool found = false;
       for (int i = 0; i < AXIS_COUNT; ++i) {
         if ((p.axis_mask & (1u << i)) && axes[i].present) {
           v = axes[i].voltage_limit;
+          found = true;
           break;
         }
+      }
+      if (!found) {
+        for (int i = 0; i < AXIS_COUNT; ++i) {
+          if (p.axis_mask & (1u << i)) {
+            (void)cliCheckPresent(i, "limit");
+          }
+        }
+        return;
       }
       Serial.printf("limit: %.2f V\n", (double)v);
       return;
@@ -263,7 +321,10 @@ void handleLine(const char *raw) {
       v = FOC_VBUS;
     }
     for (int i = 0; i < AXIS_COUNT; ++i) {
-      if (!(p.axis_mask & (1u << i)) || !axes[i].present) {
+      if (!(p.axis_mask & (1u << i))) {
+        continue;
+      }
+      if (!cliCheckPresent(i, "limit")) {
         continue;
       }
       axes[i].voltage_limit = v;
@@ -273,14 +334,21 @@ void handleLine(const char *raw) {
   } else if (strcmp(p.cmd, "alignv") == 0) {
     if (!p.has_value) {
       for (int i = 0; i < AXIS_COUNT; ++i) {
-        if ((p.axis_mask & (1u << i)) && axes[i].present) {
-          Serial.printf("alignv %c: %.2f V\n", axes[i].name, (double)axes[i].align_voltage);
+        if (!(p.axis_mask & (1u << i))) {
+          continue;
         }
+        if (!cliCheckPresent(i, "alignv")) {
+          continue;
+        }
+        Serial.printf("alignv %c: %.2f V\n", axes[i].name, (double)axes[i].align_voltage);
       }
       return;
     }
     for (int i = 0; i < AXIS_COUNT; ++i) {
-      if (!(p.axis_mask & (1u << i)) || !axes[i].present) {
+      if (!(p.axis_mask & (1u << i))) {
+        continue;
+      }
+      if (!cliCheckPresent(i, "alignv")) {
         continue;
       }
       Axis &ax = axes[i];
@@ -297,28 +365,40 @@ void handleLine(const char *raw) {
      * shaft open-loop, so two axes at once would be two motors moving at
      * once for no reason and would make each ratio warning ambiguous. */
     for (int i = 0; i < AXIS_COUNT; ++i) {
-      if (!(p.axis_mask & (1u << i)) || !axes[i].present) {
+      if (!(p.axis_mask & (1u << i))) {
+        continue;
+      }
+      if (!cliCheckPresent(i, "cal")) {
         continue;
       }
       axisCal(axes[i]);
     }
   } else if (strcmp(p.cmd, "zsearch") == 0) {
     for (int i = 0; i < AXIS_COUNT; ++i) {
-      if (!(p.axis_mask & (1u << i)) || !axes[i].present) {
+      if (!(p.axis_mask & (1u << i))) {
+        continue;
+      }
+      if (!cliCheckPresent(i, "zsearch")) {
         continue;
       }
       axisZSearch(axes[i], true);
     }
   } else if (strcmp(p.cmd, "save") == 0) {
     for (int i = 0; i < AXIS_COUNT; ++i) {
-      if (!(p.axis_mask & (1u << i)) || !axes[i].present) {
+      if (!(p.axis_mask & (1u << i))) {
+        continue;
+      }
+      if (!cliCheckPresent(i, "save")) {
         continue;
       }
       axisSaveCal(axes[i]);
     }
   } else if (strcmp(p.cmd, "forget") == 0) {
     for (int i = 0; i < AXIS_COUNT; ++i) {
-      if (!(p.axis_mask & (1u << i)) || !axes[i].present) {
+      if (!(p.axis_mask & (1u << i))) {
+        continue;
+      }
+      if (!cliCheckPresent(i, "forget")) {
         continue;
       }
       axisForgetCal(axes[i]);
@@ -381,7 +461,10 @@ void handleLine(const char *raw) {
     vcapDump();
   } else if (strcmp(p.cmd, "jlog") == 0) {
     for (int i = 0; i < AXIS_COUNT; ++i) {
-      if (!(p.axis_mask & (1u << i)) || !axes[i].present) {
+      if (!(p.axis_mask & (1u << i))) {
+        continue;
+      }
+      if (!cliCheckPresent(i, "jlog")) {
         continue;
       }
       const Axis &ax = axes[i];

@@ -90,6 +90,12 @@ void axisInitAll() {
 }
 
 void axisArm(Axis &ax) {
+  if (!ax.present) {
+    /* Defense in depth: the Axis setters are public, and an absent axis
+     * still shares board.h's M_EN reference count with the real one, so
+     * arming it would power the real gate driver too. */
+    return;
+  }
   axisApplyLimits(ax);
   /* Guarded by ax.armed, which only axisArm()/axisDisarm() ever write —
    * NOT motor.enabled, which SimpleFOC also flips on its own (initFOC()
@@ -190,6 +196,40 @@ constexpr const char *kNvsNs = "drive";
 
 const char *calKey(const Axis &ax) { return ax.idx == 0 ? "cal0" : "cal1"; }
 
+/**
+ * True if any axis (not just the one about to be touched) is currently
+ * armed. Guards axisSaveCal()/axisForgetCal() below: a Preferences write
+ * disables the flash cache on BOTH cores for the duration of the write.
+ * Neither the encoder update, nor the core-0 FOC loop, nor even the PCNT
+ * hardware-counter read is in IRAM, so the FOC task simply stops running for
+ * that whole window -- while the PCNT hardware counter keeps counting
+ * underneath it regardless, cache or no cache. Past 8192 counts (an eighth
+ * of a turn, ~10 ms at full speed) the software unwrap in PcntEncoder loses
+ * a whole +-16384-count wrap: a silent quarter mechanical turn, after which
+ * commutation is permanently wrong with no error message anywhere. An NVS
+ * write is refused outright while any axis is armed rather than gambling on
+ * the window being short enough this time.
+ */
+bool anyAxisArmed() {
+  for (int i = 0; i < AXIS_COUNT; ++i) {
+    if (axes[i].armed) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * True if ax is not safe for axisCal()/axisZSearch()/axisForgetCal() to take
+ * ownership of: either already armed, or mid-command (a live
+ * ax.cmd_timeout_ms). See axisTakeOwnership() in axis.h for why taking
+ * ownership of either is unsafe, not just disruptive -- it silently
+ * suspends this axis' failsafe for as long as ownership is held, and these
+ * three functions then go on to arm the axis themselves at the calibration
+ * open-loop speed.
+ */
+bool axisBusyElsewhere(const Axis &ax) { return ax.armed || ax.cmd_timeout_ms != 0u; }
+
 const char *dirName(Direction d) {
   if (d == Direction::CW) {
     return "CW";
@@ -282,7 +322,14 @@ bool axisOpenloopDirectionAndZero(Axis &ax) {
   const int64_t dcnt = cnt1 - cnt0;
   const float moved = (float)dcnt * (_2PI / ax.encoder.cpr());
   ax.motor.target = 0.0f;
-  ax.motor.move();
+  /* move() in velocity_openloop always drives the phases at up to
+   * voltage_limit regardless of target -- setting target=0 alone leaves the
+   * rotor energized at whatever electrical angle the spin above stopped on.
+   * Cut the phases explicitly instead (same fix as axisZSearch(), a few
+   * lines below in this file) so the rotor is not left powered through the
+   * two prints and the ratio check below, and -- on the early FAIL return
+   * just after them -- for as long as the caller keeps the axis owned. */
+  ax.motor.setPhaseVoltage(0.0f, 0.0f, 0.0f);
   Serial.printf("align %c: ol moved=%.4f rad  dcnt=%lld\n", ax.name, (double)moved,
                 (long long)dcnt);
 
@@ -345,6 +392,14 @@ bool axisZSearch(Axis &ax, bool park) {
      * and an absent axis still shares board.h's M_EN reference count with
      * the real one -- arming it would power the real gate driver too. */
     Serial.printf("zsearch %c: FAIL (axis not present in this build)\n", ax.name);
+    return false;
+  }
+  if (park && axisBusyElsewhere(ax)) {
+    /* Not checked when park=false: that call is axisCal()'s own, made after
+     * axisCal() has already passed this same check and taken ownership. See
+     * axisTakeOwnership() in axis.h for why taking ownership of an axis a
+     * control loop is actively driving is unsafe, not just disruptive. */
+    Serial.printf("zsearch %c: FAIL (axis armed or mid-command - stop it first)\n", ax.name);
     return false;
   }
   if (park) {
@@ -424,6 +479,14 @@ bool axisCal(Axis &ax) {
     Serial.printf("cal %c: FAIL (axis not present in this build)\n", ax.name);
     return false;
   }
+  if (axisBusyElsewhere(ax)) {
+    /* See axisTakeOwnership() in axis.h: taking ownership of an axis a
+     * control loop is actively driving would silently disable its
+     * failsafe, then immediately re-arm it at the calibration open-loop
+     * speed. */
+    Serial.printf("cal %c: FAIL (axis armed or mid-command - stop it first)\n", ax.name);
+    return false;
+  }
   if (!axisTakeOwnership(ax)) {
     axisReleaseOwnership(ax); /* best-effort handback, see axisZSearch(). */
     Serial.printf("cal %c: FAIL (ownership handshake timed out, FOC task not responding)\n",
@@ -469,6 +532,12 @@ bool axisSaveCal(Axis &ax) {
     Serial.printf("save %c: not calibrated\n", ax.name);
     return false;
   }
+  if (anyAxisArmed()) {
+    /* See anyAxisArmed() above for why an NVS write while any axis is
+     * armed is refused outright rather than just slow. */
+    Serial.printf("save %c: FAIL (an axis is armed - disarm it first)\n", ax.name);
+    return false;
+  }
   CalRecord rec{};
   rec.magic = kCalMagic;
   rec.zero_electric_angle = ax.motor.zero_electric_angle;
@@ -501,6 +570,17 @@ void axisForgetCal(Axis &ax) {
      * with the real one, so arming it here would power the real gate driver
      * too. */
     Serial.printf("forget %c: FAIL (axis not present in this build)\n", ax.name);
+    return;
+  }
+  if (axisBusyElsewhere(ax)) {
+    /* See axisCal() above for why. */
+    Serial.printf("forget %c: FAIL (axis armed or mid-command - stop it first)\n", ax.name);
+    return;
+  }
+  if (anyAxisArmed()) {
+    /* See anyAxisArmed() above: this function writes NVS too (the remove()
+     * below), so it needs the same any-axis guard as axisSaveCal(). */
+    Serial.printf("forget %c: FAIL (an axis is armed - disarm it first)\n", ax.name);
     return;
   }
   if (!axisTakeOwnership(ax)) {
@@ -554,11 +634,11 @@ bool axisLoadCal(Axis &ax) {
 }
 
 bool axisRequireCal(Axis &ax) {
-  if (!ax.calibrated || !ax.encoder.indexFound()) {
-    Serial.printf("need cal %c (or zsearch after save)\n", ax.name);
-    return false;
-  }
-  return true;
+  /* Silent by contract -- see axis.h. The caller (axisSetVelocity()/
+   * axisSetTorque() below) returns false on refusal; drive_api.h's setters
+   * pass that bool straight through, and the CLI is the one that prints
+   * "need cal" now, only once per typed command instead of once per tick. */
+  return ax.calibrated && ax.encoder.indexFound();
 }
 
 /* See axis.h for the full rationale: last_cmd_ms before cmd_timeout_ms,

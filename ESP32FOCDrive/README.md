@@ -97,14 +97,21 @@ est donc le chemin normal d'itération, pas une commodité.** La séquence :
 ## 3. `selftest` : valider sans câble
 
 Cette carte ne peut pas être flashée en USB sans le geste BOOT+RESET
-manuel décrit ci-dessus. Faire tourner la suite Unity sur cible coûterait
-donc **deux** manipulations physiques par exécution (flasher le binaire de
-test, puis reflasher l'application). Les vérifications de logique pure
-(parsing de commande, dépliage d'encodeur, validité d'un enregistrement de
-calibration, expiration du failsafe) vivent donc dans un en-tête partagé,
+manuel décrit ci-dessus. Faire tourner la suite Unity sur cible coûte donc
+**deux** manipulations physiques par exécution (flasher le binaire de test,
+puis reflasher l'application) : `platformio.ini` ne définit aucun
+environnement hôte (`native` ou équivalent), et `test/test_logic/test_main.cpp`
+inclut `<Arduino.h>` — la suite Unity ne peut donc **pas** tourner en local
+sans cible, contrairement à ce qu'affirmait une version précédente de ce
+paragraphe ; elle exige le flash USB physique, exactement les deux gestes
+manuels qu'on cherche à éviter. Les vérifications de logique pure (parsing de
+commande, dépliage d'encodeur, validité d'un enregistrement de calibration,
+expiration du failsafe) vivent donc dans un en-tête partagé,
 `include/self_test.h`, appelé par **deux** exécuteurs : la suite Unity
-(`test/test_logic/`, toujours utilisable en local, sans cible) et la
-commande `selftest` de l'application elle-même, qui elle arrive par OTA.
+(`test/test_logic/`, qui exige toujours le flash USB décrit ci-dessus) et la
+commande `selftest` de l'application elle-même, qui elle arrive par OTA une
+fois un premier firmware amorcé — **c'est cette seconde voie, pas la suite
+Unity, qui évite toute manipulation physique après le premier flash.**
 
 ```
 > selftest
@@ -129,16 +136,35 @@ pour un seul axe) :
 |---|---|---|
 | 1 | `selftest` | `N run, 0 failed` — la logique pure (parsing, dépliage d'encodeur, validité de calibration, failsafe) est correcte sur ce binaire avant de toucher au moteur |
 | 2 | `enc` (ou `enc L` / `enc R`) | `cnt` bouge quand on tourne l'arbre à la main ; `idx` passe à 1 au premier passage par l'index Z ; les niveaux `A`/`B`/`Z` affichés cohérents avec le sens de rotation |
-| 3 | `cal` (ou `cal L` / `cal R`) | Séquence : recherche Z en open-loop, rotation courte pour détecter le sens, montée en rampe et alignement électrique — le shaft bouge à chaque étape. Message final `cal L: ok ...` (pas `FAIL`), et le ratio mouvement mesuré / attendu affiché reste proche de 1 (avertissement hors de 0.7–1.3, sans faire échouer la calibration) |
-| 4 | `save` (ou `save L` / `save R`) | Message `save L: zero=... dir=... pp=7 ppr=16384 (reboot: zsearch then this zero)`, pas `nvs fail` ni `write fail` |
-| 5 | redémarrage (reset physique, ou coupure/remise sous tension) | `status` affiche `cal=1` avant tout `zsearch` — c'est la calibration NVS rechargée depuis `axisInitAll()`, pas encore l'index Z du boot en cours |
-| 6 | `zsearch` (ou `zsearch L` / `zsearch R`) | Message `zsearch L: ok  cnt=...` puis `zsearch L: electrical ok  initFOC=1` — l'index Z est retrouvé et le zéro électrique déjà connu est réappliqué sans nouvelle rotation d'alignement |
-| 7 | `vel 3` (ou `vel L 3` / `vel R 3`) | La roue tourne rond, sans à-coups ni bruit de commutation excessif ; `status` montre `mode=VEL armed=1` et `vel≈3.0` qui se stabilise |
-| 8 | `tq 1` puis `tq 0` | `tq 1` : couple perceptible au doigt qui résiste à un freinage léger. `tq 0` : la roue tourne presque librement à la main (couple résiduel de cogging/frottement seulement) |
+| 3 | `ol 5` (ou `ol L 5` / `ol R 5`), puis `idle` pour arrêter | **La seule commande de mouvement utilisable avant toute calibration** — c'est exprès qu'elle vient avant `cal` : c'est la validation la moins risquée du câblage PWM et de `M_EN` avant d'aller plus loin. Succès : la roue tourne (même en à-coups, sans commutation correcte c'est attendu en open-loop non calé), `status` montre `mode=OL armed=1` et `MEN=1` ; `idle` la stoppe et repasse `MEN=0` |
+| 4 | `ol 20` en continu, port série laissé actif (moniteur ouvert, ou `mon 1`), quelques minutes | `status`/`hz` : `dtmax` et `late` restent bas et stables pendant que la console série reste active — un port série qui bloque ou qui interrompt la tâche `foc` se verrait ici avant même la calibration. Voir §7 pour la procédure complète de relevé |
+| 5 | `cal` (ou `cal L` / `cal R`) | Séquence : recherche Z en open-loop, rotation courte pour détecter le sens, montée en rampe et alignement électrique — le shaft bouge à chaque étape. Message final `cal L: ok ...` (pas `FAIL`), et le ratio mouvement mesuré / attendu affiché reste proche de 1 (avertissement hors de 0.7–1.3, sans faire échouer la calibration). **Pendant toute la séquence la console est bloquée — voir l'avertissement juste après ce tableau** |
+| 6 | `save` (ou `save L` / `save R`) | Message `save L: zero=... dir=... pp=7 ppr=16384 (reboot: zsearch then this zero)`, pas `nvs fail` ni `write fail`. Refusée si un axe quelconque est armé — voir l'avertissement juste après ce tableau |
+| 7 | redémarrage (reset physique, ou coupure/remise sous tension) | `status` affiche `cal=0` juste après le boot — **rien ne relit la NVS au démarrage** (`axisInitAll()`, `src/axis.cpp`, ne l'appelle jamais ; vérifié aussi côté `src/main.cpp::setup()`). C'est `zsearch` (étape suivante) qui retrouve l'index Z **et** recharge le zéro électrique depuis la NVS en un seul geste — pas `axisInitAll()` |
+| 8 | `zsearch` (ou `zsearch L` / `zsearch R`) | Message `zsearch L: ok  cnt=...` puis `zsearch L: electrical ok  initFOC=1` — l'index Z est retrouvé et le zéro électrique déjà connu est réappliqué sans nouvelle rotation d'alignement |
+| 9 | `vel 3` (ou `vel L 3` / `vel R 3`) | La roue tourne rond, sans à-coups ni bruit de commutation excessif ; `status` montre `mode=VEL armed=1` et `vel≈3.0` qui se stabilise |
+| 10 | `tq 1` puis `tq 0` | `tq 1` : couple perceptible au doigt qui résiste à un freinage léger. `tq 0` : la roue tourne presque librement à la main (couple résiduel de cogging/frottement seulement) |
+| 11 | `fs 2000` (ou `fs L 2000` / `fs R 2000`), puis observer `status` sans taper d'autre commande | Démonstration du failsafe : la roue part à 3 rad/s, puis se pare **d'elle-même** environ 2 s plus tard, sans `idle` — `status` finit par montrer `armed=0` et `MEN=0` sans intervention. C'est le mécanisme dont dépendra la boucle d'équilibrage |
 
 `vel` et `tq` refusent de s'exécuter tant que l'axe n'est pas à la fois
 calibré et indexé (`requireCal`, voir la spec §8) — `need cal L` sur la
 console signale ce refus.
+
+**Deux avertissements avant de lancer une calibration :**
+- **Pendant `cal`, la console série est bloquée plusieurs secondes** (jusqu'à
+  ~8 s pour une calibration double axe) : `axisCal()` tourne en boucle
+  fermée sur le cœur 1 pendant toute la séquence, aucune commande n'est lue
+  entre-temps. **Le seul moyen d'arrêter le moteur pendant ce laps de temps
+  est le reset matériel de la carte** — aucune commande série ne peut
+  interrompre une calibration en cours.
+- **`save` et `forget` refusent désormais d'écrire en NVS si un axe
+  quelconque de la carte est armé**, même un axe différent de celui visé
+  (message `FAIL (an axis is armed - disarm it first)`) : une écriture NVS
+  coupe le cache flash des deux cœurs, la tâche `foc` s'arrête pendant ce
+  temps alors que le compteur PCNT continue de compter, et au-delà d'un
+  huitième de tour le dépliage logiciel de l'encodeur perd un quart de tour
+  mécanique de façon définitive et silencieuse. Désarmer (`idle`) avant
+  `save`/`forget`.
 
 ## 5. Commandes, par usage
 

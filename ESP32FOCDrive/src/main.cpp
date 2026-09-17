@@ -13,7 +13,15 @@
 
 void mainPrintEncLine(uint8_t axis_mask) {
   for (int i = 0; i < AXIS_COUNT; ++i) {
-    if (!(axis_mask & (1u << i)) || !axes[i].present) {
+    if (!(axis_mask & (1u << i))) {
+      continue;
+    }
+    if (!axes[i].present) {
+      /* An explicit L/R prefix named an axis this binary was not built for
+       * (the default, no-prefix axis_mask only ever covers axes that ARE
+       * present -- see cmd_parse.h): say so instead of silently printing
+       * nothing. */
+      Serial.printf("enc %c: FAIL (axis not present in this build)\n", axes[i].name);
       continue;
     }
     Axis &ax = axes[i];

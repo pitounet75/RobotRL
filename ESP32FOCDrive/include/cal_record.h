@@ -21,7 +21,11 @@ inline bool calRecordValid(const CalRecord &rec, char axis, uint16_t ppr) {
   if (rec.magic != kCalMagic || rec.axis != axis) {
     return false;
   }
-  if (rec.pole_pairs == 0 || rec.sensor_direction == 0) {
+  /* sensor_direction multiplies the angle throughout the SimpleFOC library:
+   * only exactly +1 or -1 is a valid value. "non-zero" was not strict
+   * enough -- a corrupted byte that happens to be nonzero but isn't +-1
+   * would still pass and commutate with the wrong scale. */
+  if (rec.pole_pairs == 0 || (rec.sensor_direction != 1 && rec.sensor_direction != -1)) {
     return false;
   }
   if (rec.enc_ppr != ppr) {
