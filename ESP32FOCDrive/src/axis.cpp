@@ -480,3 +480,51 @@ bool axisRequireCal(Axis &ax) {
   }
   return true;
 }
+
+bool axisSetVelocity(Axis &ax, float rad_s) {
+  if (!axisRequireCal(ax)) {
+    return false;
+  }
+  rad_s = _constrain(rad_s, -FOC_VEL_LIMIT, FOC_VEL_LIMIT); /* SimpleFOC macro */
+  axisApplyLimits(ax);
+  if (ax.armed && ax.mode == Mode::Velocity) {
+    ax.motor.target = rad_s; /* live setpoint: do NOT re-arm */
+    return true;
+  }
+  ax.motor.controller = MotionControlType::velocity;
+  ax.motor.torque_controller = TorqueControlType::voltage;
+  ax.motor.target = rad_s;
+  ax.encoder.update();
+  (void)ax.encoder.getVelocity(); /* prime: avoid a spike from a stale sample */
+  axisSetMode(ax, Mode::Velocity);
+  axisArm(ax);
+  return true;
+}
+
+bool axisSetTorque(Axis &ax, float volts) {
+  if (!axisRequireCal(ax)) {
+    return false;
+  }
+  volts = _constrain(volts, -ax.voltage_limit, ax.voltage_limit);
+  axisApplyLimits(ax);
+  if (ax.armed && ax.mode == Mode::Torque) {
+    ax.motor.target = volts; /* live setpoint: do NOT re-arm */
+    return true;
+  }
+  ax.motor.controller = MotionControlType::torque;
+  ax.motor.torque_controller = TorqueControlType::voltage;
+  ax.motor.target = volts;
+  ax.encoder.update();
+  (void)ax.encoder.getVelocity(); /* prime: avoid a spike from a stale sample */
+  axisSetMode(ax, Mode::Torque);
+  axisArm(ax);
+  return true;
+}
+
+float axisCurrentEstimate(const Axis &ax) {
+  /* Display only. Setting motor.phase_resistance in SimpleFOC would also
+   * change the sign convention of the velocity PID gains, so this is kept
+   * entirely separate from anything SimpleFOC touches. */
+  const float bemf = ax.motor.shaft_velocity / (FOC_KV * _SQRT3) / _RPM_TO_RADS;
+  return (ax.motor.voltage.q - bemf) / FOC_PHASE_R;
+}

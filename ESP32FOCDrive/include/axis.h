@@ -138,3 +138,34 @@ bool axisLoadCal(Axis &ax);
 /** Prints "need cal" and returns false unless ax is calibrated and its
  * encoder currently holds an index. */
 bool axisRequireCal(Axis &ax);
+
+/**
+ * Closed-loop velocity setpoint. The PID output is VOLTS, not amps: this
+ * firmware has no current sense anywhere, so PID_velocity.limit is the same
+ * ax.voltage_limit axisApplyLimits() already pushes everywhere else.
+ *
+ * Refuses (false, nothing changed) until axisRequireCal() passes. Rewrites
+ * motor.target in place when ax is already armed in Mode::Velocity — SimpleFOC's
+ * enable() always does setPwm(0,0,0) and resets the PIDs, so re-arming on
+ * every command would stall the shaft before each new setpoint took effect.
+ * Otherwise (first use, or coming from another mode) it poses
+ * motor.controller/torque_controller itself rather than trusting whatever
+ * calibration or a previous mode left behind, primes the velocity estimate
+ * with one encoder.update()+getVelocity() so the first closed-loop pass does
+ * not react to a stale sample, then sets Mode::Velocity and arms.
+ */
+[[nodiscard]] bool axisSetVelocity(Axis &ax, float rad_s);
+/**
+ * Same contract as axisSetVelocity(), for Mode::Torque /
+ * MotionControlType::torque. The target is volts, clamped to
+ * +-ax.voltage_limit: there is no current sense, so torque is voltage-only.
+ */
+[[nodiscard]] bool axisSetTorque(Axis &ax, float volts);
+/**
+ * Display-only estimated phase current, I_est = (Uq - BEMF) / R, computed
+ * alongside SimpleFOC from FOC_PHASE_R/FOC_KV. Never fed back into the
+ * motor: setting motor.phase_resistance would also flip the sign convention
+ * SimpleFOC applies to the velocity PID gains, making the loop reason in
+ * unmeasured amps instead of the volts it actually commands.
+ */
+float axisCurrentEstimate(const Axis &ax);
