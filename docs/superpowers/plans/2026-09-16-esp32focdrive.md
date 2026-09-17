@@ -1432,7 +1432,14 @@ struct AxisState {
 bool driveGetState(uint8_t axis, AxisState *out);
 ```
 
-Dans `drive_api.cpp`, chaque consigne applique `kAxisCmdSign[axis]`, écrit `ax.cmd_timeout_ms` et `ax.last_cmd_ms = millis()`, puis délègue à `axisSetVelocity` / `axisSetTorque`. L'instantané est publié par la tâche FOC avec un compteur pair/impair :
+Dans `drive_api.cpp`, chaque consigne applique `kAxisCmdSign[axis]`, borne, puis délègue à `axisSetVelocity` / `axisSetTorque`.
+
+**L'estampillage — `last_cmd_ms` puis `cmd_timeout_ms` — est le point délicat de cette tâche, et il n'a pas la même règle selon le chemin :**
+
+- **Chemin rapide** (axe déjà armé dans le bon mode) : l'estampille doit être **dans la même section critique** que le test de `armed` et l'écriture de la consigne. Sinon le failsafe du cœur 0 peut désarmer entre l'écriture et l'estampille, et l'appel rend `true` sur un axe parqué.
+- **Chemin lent** (changement de mode) : mettre `cmd_timeout_ms` **à zéro avant** la transition — un délai nul désactive le failsafe, donc la synchronisation, qui peut durer 50 ms, devient non expirable — puis estampiller après l'armement. Sans cela, le failsafe expire pendant la synchronisation, désarme, et **écrase le mode** que le cœur 1 vient d'écrire : on finit armé, en mode repos, alimentation prise, moteur jamais piloté.
+
+Estampiller simplement « avant » ou « après » la délégation échange une fenêtre contre l'autre au lieu de les fermer toutes les deux. L'instantané est publié par la tâche FOC avec un compteur pair/impair :
 
 ```cpp
 /* Publisher, FOC task only. */
