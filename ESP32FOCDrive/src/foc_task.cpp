@@ -37,9 +37,10 @@ struct VCapSample {
   float uq;
 };
 VCapSample s_vcap_buf[kVCapMax];
-/* Cross-core: armed from the CLI (core 1), consumed every tick by the FOC
- * task (core 0) -- volatile for the same reason axis.h's mode/owner/etc are
- * (see the comment there): nothing here is protected by a lock, so the
+/* Armed from the CLI, consumed every tick by the FOC task. Both now run on
+ * core 1, but the FOC task preempts the CLI at any instruction, so this is
+ * still shared state -- volatile for the same reason axis.h's mode/owner/etc
+ * are (see the comment there): nothing here is protected by a lock, so the
  * qualifier is the only thing stopping a stale cached read/hoist. */
 volatile uint8_t s_vcap_axis = 0;
 volatile uint32_t s_vcap_idx = 0;
@@ -73,7 +74,14 @@ void startFocTimer() {
 }
 
 void focTask(void *) {
-  disableCore0WDT();
+  /* No watchdog is disabled here any more. On core 0 this task used to turn
+   * off the IDLE0 watchdog, because an overrun storm could starve the idle
+   * task. On core 1 it blocks on every tick and uses roughly a quarter of the
+   * core per axis, so IDLE1 always runs: the watchdog stays armed and becomes
+   * a hang detector for the motor loop -- a stuck task resets the board, and
+   * boardInit() then holds M_EN low. Consequence: an `hz` setting the loop
+   * cannot sustain (period shorter than dt) now trips the watchdog instead of
+   * degrading silently. */
   startFocTimer();
   for (;;) {
     const uint32_t n = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -154,10 +162,16 @@ void focTask(void *) {
 }  // namespace
 
 void focTaskStart() {
-  /* Created from core 1 (setup() runs there) but pinned to core 0: the
-   * timer is started from inside focTask() itself so its ISR gets
-   * allocated on core 0, not wherever focTaskStart() happened to run. */
-  xTaskCreatePinnedToCore(focTask, "foc", 4096, nullptr, 20, &s_task, 0);
+  /* Pinned to core 1, away from WiFi. The WiFi and lwIP tasks are pinned to
+   * core 0 by the precompiled Arduino SDK (CONFIG_ESP32_WIFI_TASK_PINNED_TO_CORE_0,
+   * CONFIG_LWIP_TCPIP_TASK_AFFINITY=0x0) at a priority above this task, and
+   * cannot be moved without rebuilding the SDK. Measured on the bench with
+   * the loop on core 0: 0.636% late ticks and dtmax 1378 us with WiFi on,
+   * zero late ticks with WiFi off. Priority 20 still puts this task above
+   * everything else on core 1: the Arduino event task (19) and loop() (1).
+   * The timer is started from inside focTask() itself so its ISR is
+   * allocated on this task's core, whichever core that is. */
+  xTaskCreatePinnedToCore(focTask, "foc", 4096, nullptr, 20, &s_task, 1);
 }
 
 void focSetHz(uint32_t hz) {
