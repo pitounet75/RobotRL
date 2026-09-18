@@ -7,12 +7,15 @@
 #include "config.h"
 
 namespace {
-/* One seqlock slot per axis. seq is volatile: written by the core-0 FOC
- * task, read by core 1 (CLI today, the balance loop later) -- the same
- * cross-core contract axis.h documents for Axis::mode/owner. The payload
- * (st) does not need its own volatile: the __sync_synchronize() barriers
- * around every write/read of it are full compiler+hardware barriers, so
- * nothing can be hoisted across them regardless. */
+/* One seqlock slot per axis. seq is volatile: written by the FOC task, read
+ * by the CLI today (the balance loop later) -- both on core 1, but the FOC
+ * task preempts the reader at any instruction, the same contract axis.h
+ * documents for Axis::mode/owner, and one that has to hold regardless of
+ * which core either side ends up on -- the balance loop will be a third
+ * reader here too. The payload (st) does not need its own volatile: the
+ * __sync_synchronize() barriers around every write/read of it are full
+ * compiler+hardware barriers, so nothing can be hoisted across them
+ * regardless. */
 struct PubSlot {
   /* Starts at 1 (odd), not the static default of 0 (even): 0 is a valid
    * "readable" value under the odd=write-in-progress/even=readable rule

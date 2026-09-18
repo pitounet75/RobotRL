@@ -3,9 +3,9 @@
 #include <stdint.h>
 
 /**
- * Isochronous FOC loop on core 0, driven by a hardware timer (TIMER_GROUP_1,
+ * Isochronous FOC loop on core 1, driven by a hardware timer (TIMER_GROUP_1,
  * TIMER_0). Started from focTaskStart(); the timer itself is armed from
- * inside the task so its ISR is allocated on core 0.
+ * inside the task so its ISR is allocated on core 1.
  */
 void focTaskStart();
 void focSetHz(uint32_t hz);
@@ -48,7 +48,7 @@ void focResetMetrics();
  * status line samples an estimate that moves every FOC loop tick at a
  * essentially random phase -- it cannot tell a genuine mechanical
  * oscillation from an artifact of the velocity estimator. This instead
- * grabs one sample straight from inside the core-0 FOC task on every
+ * grabs one sample straight from inside the core-1 FOC task on every
  * iteration it runs (or every Nth, once decimated -- see vcapArm()), so a
  * captured run can be inspected for exactly that: if `vel` swings while
  * `dcount` (the exact encoder count delta since the previous kept sample)

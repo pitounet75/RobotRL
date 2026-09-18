@@ -5,8 +5,12 @@
 struct Axis; /* full definition in axis.h; only needed by reference here. */
 
 /**
- * Boundary between core 1 (CLI today, balance loop later) and the core 0 FOC
- * task. Commands are in the ROBOT frame: cmd_sign is applied here, once.
+ * Boundary between the CLI (balance loop later) and the FOC task. All three
+ * run on core 1 today -- the FOC task preempts at priority 20, above the
+ * balance loop's planned 19 and the CLI's loop() at 1 -- so this is a task
+ * boundary, not a core boundary, and the protections it relies on have to
+ * hold under preemption alone, whether or not the FOC task ever moves back
+ * to core 0. Commands are in the ROBOT frame: cmd_sign is applied here, once.
  *
  * ============================================================================
  * SINGLE WRITER PER AXIS, ENFORCED BY CONVENTION ONLY -- READ BEFORE ADDING
@@ -68,7 +72,7 @@ struct AxisState {
  * out of range or absent from this build.
  *
  * FROZEN, NOT STALE-MARKED, WHILE THE CLI OWNS THE AXIS: drivePublishState()
- * is only ever called by the core-0 FOC task's per-axis loop, which skips an
+ * is only ever called by the core-1 FOC task's per-axis loop, which skips an
  * axis entirely for as long as ax.owner is Owner::Cli (axisTakeOwnership(),
  * axis.h) -- e.g. for the whole duration of `cal`, up to several seconds on
  * a dual-axis run, during which axisCal() arms the axis and spins it
@@ -86,7 +90,7 @@ struct AxisState {
 bool driveGetState(uint8_t axis, AxisState *out);
 
 /**
- * Publishes one axis' snapshot under the seqlock. Called by the core-0 FOC
+ * Publishes one axis' snapshot under the seqlock. Called by the core-1 FOC
  * task only, once per axis per iteration, for exactly the reason
  * driveGetState()'s callers must never touch the encoder themselves: this is
  * the one legitimate reader, because it *is* the FOC task.

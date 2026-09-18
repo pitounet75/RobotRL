@@ -1,5 +1,5 @@
 /**
- * Core-0 FOC task. Body and timer setup ported from
+ * Core-1 FOC task. Body and timer setup ported from
  * ESP32FOCHardwareCheck/src/main.cpp:1146-1241, extended to loop over both
  * axes with an ownership check.
  */

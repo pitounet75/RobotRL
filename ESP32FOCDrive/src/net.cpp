@@ -63,9 +63,9 @@ void netSetup() {
     for (uint8_t i = 0; i < AXIS_COUNT; ++i) {
       driveStop(i);
     }
-    /* The FOC timer keeps ticking at FOC_LOOP_HZ (core 0) independently of
-     * this OTA transfer (core 1); left running it would keep waking the FOC
-     * task for no reason while the flash write is happening. */
+    /* The FOC timer keeps ticking at FOC_LOOP_HZ independently of this OTA
+     * transfer; left running it would keep waking the FOC task for no reason
+     * while the flash write is happening. */
     focPauseTimer();
     disableCore1WDT();
     Serial.println("ota: start - motors off, FOC timer paused");

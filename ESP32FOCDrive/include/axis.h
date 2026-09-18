@@ -7,7 +7,11 @@
 #include "pcnt_encoder.h"
 
 /**
- * Per-axis state shared between core 1 (CLI) and the core-0 FOC task.
+ * Per-axis state shared between the CLI and the FOC task. Both run on
+ * core 1 today (the FOC task at priority 20, above the CLI), but nothing
+ * here relies on that: the FOC task preempts the CLI at any instruction
+ * regardless of which core either ends up on, so the protections below
+ * (volatile, locks) hold either way.
  * Ownership is the guard rail: the task only touches loopFOC()/move() for an
  * axis whose owner is Task. Nothing in this build ever sets owner to Cli yet
  * (that lands with zero-search / calibration in a later task) but the field
@@ -24,16 +28,19 @@ struct Axis {
   PcntEncoder encoder;
   BLDCDriver3PWM driver;
   BLDCMotor motor;
-  /* Written by core 1, read every iteration by the core-0 FOC task: the
-   * volatile qualifier is the contract, not a formality. It happens to work
-   * without it today because the task's reads are separated by non-inlinable
-   * calls into other translation units (no LTO), but nothing stops a future
-   * change from letting the compiler hoist a stale copy — owner especially,
-   * since it is exactly the field a future task will flip across cores. */
+  /* Written by the CLI, read every iteration by the FOC task -- both on
+   * core 1, but the FOC task preempts the CLI at any instruction, so a write
+   * can land mid-sequence just as surely as it could from a different core:
+   * the volatile qualifier is the contract, not a formality. It happens to
+   * work without it today because the task's reads are separated by
+   * non-inlinable calls into other translation units (no LTO), but nothing
+   * stops a future change from letting the compiler hoist a stale copy —
+   * owner especially, since it is exactly the field ownership handover flips
+   * between the two. */
   volatile Mode mode;
   volatile Owner owner;
-  /* Written by core 1 (drive_api.cpp), read every iteration by the core-0
-   * FOC task via failsafeExpired() (foc_task.cpp): volatile for the same
+  /* Written by the CLI (drive_api.cpp), read every iteration by the FOC
+   * task via failsafeExpired() (foc_task.cpp): volatile for the same
    * reason as mode/owner above. failsafeExpired() is `inline` in a header,
    * so its two loads inline straight into the task's loop body -- without
    * volatile, nothing stops a sufficiently aggressive build from hoisting
@@ -43,14 +50,15 @@ struct Axis {
   bool calibrated;
   float voltage_limit;
   float align_voltage;
-  /* Read every iteration by the core-0 FOC task (the failsafe check in
+  /* Read every iteration by the FOC task (the failsafe check in
    * foc_task.cpp) and, since the failsafe made axisFailsafeDisarm() reachable
-   * from that task, also read and written from core 1's fast setpoint paths
-   * (axisSetVelocity()/axisSetTorque(), drive_api.cpp's driveSetOpenloop()):
-   * volatile for the same reason as mode/owner/last_cmd_ms/cmd_timeout_ms
-   * above -- it is inter-core state now, not just a formality against
-   * compiler hoisting. Being volatile does not by itself make a fast path's
-   * `if (ax.armed && ...)` test-then-write atomic with the other core's
+   * from that task, also read and written from the CLI's fast setpoint paths
+   * (axisSetVelocity()/axisSetTorque(), drive_api.cpp's driveSetOpenloop())
+   * -- both on core 1: volatile for the same reason as
+   * mode/owner/last_cmd_ms/cmd_timeout_ms above -- it is state shared with a
+   * higher-priority, preempting task, not just a formality against compiler
+   * hoisting. Being volatile does not by itself make a fast path's
+   * `if (ax.armed && ...)` test-then-write atomic with the FOC task's
    * disarm; those call sites additionally take boardMotorPowerLock() around
    * the test and the write for that reason (see axisSetVelocity()). */
   volatile bool armed;
@@ -83,7 +91,7 @@ void axisArm(Axis &ax);
  * See axisArm() for why ax.armed, not motor.enabled, is the guard. */
 void axisDisarm(Axis &ax);
 /**
- * Failsafe disarm, called from the core-0 FOC task after its own unlocked
+ * Failsafe disarm, called from the core-1 FOC task after its own unlocked
  * "armed && expired" pre-check already found a command apparently stale
  * (foc_task.cpp). That pre-check is cheap precisely because it does not
  * lock, which also makes it stale the instant it passes: a fresh command
@@ -147,7 +155,7 @@ void axisReleaseOwnership(Axis &ax);
  * (this firmware has no current sense: torque is voltage-only).
  *
  * axisCal() takes ownership of ax for its whole duration and drives it
- * directly (loopFOC()/move()/setPhaseVoltage()), never through the core-0
+ * directly (loopFOC()/move()/setPhaseVoltage()), never through the core-1
  * FOC task: index search, open-loop direction detection with a sanity
  * check against the commanded open-loop speed, a gently ramped electrical
  * zero capture, then initFOC(). Leaves ax idle (mode Off, disarmed) and
@@ -203,8 +211,11 @@ bool axisRequireCal(Axis &ax);
 
 /**
  * Stamps ax.last_cmd_ms then ax.cmd_timeout_ms, in that order, never
- * reversed: the core-0 FOC task's failsafe check (foc_task.cpp) can run
- * between the two stores at any time, with no lock on this specific pair.
+ * reversed: the FOC task's failsafe check (foc_task.cpp) -- both this call
+ * and the task run on core 1 today, but the task preempts at any
+ * instruction, so this is just as real a race as it would be from a
+ * different core -- can run between the two stores at any time, with no
+ * lock on this specific pair.
  * last_cmd_ms-first means that window can only ever push the deadline
  * (last_cmd_ms + cmd_timeout_ms) LATER than intended, never earlier --
  * reversed, the task could observe a fresh cmd_timeout_ms next to a stale
@@ -217,13 +228,13 @@ bool axisRequireCal(Axis &ax);
  * driveSetOpenloop() in drive_api.cpp) does one of:
  *  - call it from inside the same boardMotorPowerLock() critical section as
  *    the fast-path armed-test and target write, so test+write+stamp become
- *    one indivisible step. The core-0 failsafe's own "armed && expired"
+ *    one indivisible step. The FOC task's own "armed && expired"
  *    check (foc_task.cpp) still runs unlocked, every tick, so it CAN
  *    transiently read an old deadline in the gap before this store lands --
  *    but it only ever acts on that reading from inside
  *    axisFailsafeDisarm(), which re-reads last_cmd_ms/cmd_timeout_ms under
  *    this very lock before parking the axis. So a stamp made in here can be
- *    momentarily READ as stale by the other core, but can never be raced by
+ *    momentarily READ as stale by the FOC task, but can never be raced by
  *    an actual disarm decided on that stale reading; or
  *  - zero cmd_timeout_ms up front, before a slow path's mode change --
  *    disabling the failsafe for the whole transition, the same trick

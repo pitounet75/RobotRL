@@ -10,9 +10,11 @@ namespace {
 int power_refs = 0;
 /* See boardMotorPowerLock() in board.h for why this exists: axisArm() is
  * core-1-only, but axisDisarmLocked() (axis.cpp, the guarded body shared by
- * axisDisarm() and the core-0 failsafe's axisFailsafeDisarm()) is reachable
- * from both cores since the task-7 failsafe, and this spinlock is what makes
- * its read-modify-write of power_refs indivisible across them. */
+ * axisDisarm() and the FOC task's failsafe axisFailsafeDisarm()) is reachable
+ * from both the CLI and the FOC task since the task-7 failsafe -- both run
+ * on core 1 today, but the FOC task preempts the CLI at any instruction --
+ * and this spinlock is what makes its read-modify-write of power_refs
+ * indivisible against that. */
 portMUX_TYPE s_power_mux = portMUX_INITIALIZER_UNLOCKED;
 
 void holdPinLow(int pin) {

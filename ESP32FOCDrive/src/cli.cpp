@@ -88,7 +88,7 @@ const char *dirName(Direction d) {
  * Every per-axis field read here is either a plain struct member or a pure,
  * lock-protected read (encoder.count()/countAngle()) — never
  * encoder.getVelocity(), which is stateful (it advances vel_count_prev_) and
- * whose only safe caller is the core-0 FOC task already calling it every
+ * whose only safe caller is the core-1 FOC task already calling it every
  * pass via motor.move(); a second, unsynchronized caller here would corrupt
  * the running velocity estimate the closed loops depend on. motor.shaft_velocity,
  * the value move() already computed and stored, is what's printed instead.

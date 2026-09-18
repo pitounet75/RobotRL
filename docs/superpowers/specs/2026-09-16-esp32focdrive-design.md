@@ -17,7 +17,10 @@ l'anticogging construit dessus n'a pas montré de gain. Le reste — PCNT, timer
 plus tâche dédiée, calibration persistante, OTA — a fonctionné.
 
 `ESP32FOCDrive` garde ce qui a marché, en mode voltage uniquement, avec deux
-axes et une frontière nette entre le core 0 temps réel et le core 1 applicatif.
+axes et une frontière nette entre la tâche temps réel (`foc`, priorité la
+plus haute) et l'applicatif (ligne de commande, OTA) — les deux épinglés sur
+le core 1 en pratique (voir §5.1 et §13), le WiFi et la pile TCP/IP restant
+seuls sur le core 0 sans jamais toucher à l'état moteur.
 
 `ESP32FOCHardwareCheck` et `ESP32FOC` restent intacts comme référence.
 
@@ -29,7 +32,7 @@ Dans le périmètre :
 - FOC voltage : `ol`, `vel`, `tq` en volts ;
 - encodeurs MT6835 en ABZ par PCNT, index Z ;
 - calibration persistante en NVS, par axe ;
-- tâche FOC isochrone sur le core 0, avec métriques ;
+- tâche FOC isochrone sur le core 1, avec métriques ;
 - API de commande utilisable par la ligne de commande et, plus tard, par la
   boucle d'équilibrage, avec failsafe ;
 - OTA, ligne de commande série, outillage de flash ;
@@ -65,8 +68,14 @@ Hors périmètre :
 ### 3.2 Boucle temps réel
 
 - Timer TG1_T0, ISR enregistrée **depuis la tâche** pour qu'elle soit allouée
-  sur le core 0, puis `vTaskNotifyGiveFromISR`.
-- Tâche `foc` épinglée sur le core 0, priorité 20, `disableCore0WDT`.
+  sur le core de la tâche, quel qu'il soit (le core 1 en pratique — voir
+  ci-dessous), puis `vTaskNotifyGiveFromISR`.
+- Tâche `foc` épinglée sur le **core 1**, priorité 20 (voir §13 : le WiFi et
+  la pile TCP/IP, épinglés sur le core 0 par le SDK Arduino précompilé à une
+  priorité supérieure, préemptaient la tâche quand elle vivait là). Plus de
+  `disableCore0WDT` : sur le core 1 la tâche bloque à chaque tick et laisse
+  tourner IDLE1, donc le watchdog reste armé de lui-même et sert de détecteur
+  de blocage de la boucle moteur au lieu d'être désactivé.
 - Métriques `dt`, `dtmax`, `late`, et purge du backlog de notifications en fin
   d'itération. Sans cette purge, un dépassement fait que `ulTaskNotifyTake`
   rend la main immédiatement, la tâche IDLE0 ne tourne plus et le watchdog
@@ -130,9 +139,15 @@ L'enregistrement NVS permet de ne refaire qu'un `zsearch` au boot.
 
 | Core | Priorité | Tâche | Rôle |
 |------|----------|-------|------|
-| 0 | 20 | `foc` | encodeurs, `loopFOC`, `move`, failsafe, instantané d'état |
+| 1 | 20 | `foc` | encodeurs, `loopFOC`, `move`, failsafe, instantané d'état |
 | 1 | 19 | `ctrl` | IMU et équilibrage — **pas dans ce firmware** |
 | 1 | 1 | `loop()` Arduino | ligne de commande, OTA |
+
+Toutes les trois sur le même core : `foc`, à la priorité la plus haute,
+préempte `ctrl` et `loop()` à n'importe quelle instruction plutôt que de
+tourner en parallèle d'elles. Voir §13 pour la mesure qui a mené à ce choix
+(le core 0 est resté au WiFi et à la pile TCP/IP, qui ne touchent à aucun
+état moteur) et pour ce que ça implique une fois `ctrl` en jeu.
 
 La boucle d'équilibrage aura sa propre tâche sur le core 1, pas `loop()` :
 sinon un `Serial.printf` bloquant ou l'OTA la retardent. C'est la même raison
@@ -459,9 +474,13 @@ avec le MT6835 branché.
 **Charge à 4 kHz sur deux axes.** À valider par `dtmax` avant d'aller plus haut
 en fréquence.
 
-**Gigue d'ordonnancement, WiFi actif.** C'est la contrainte qui décidera de la
-qualité de l'équilibrage, bien avant le débit de consignes. Relevé dans le SDK
-de ce framework :
+**Gigue d'ordonnancement — traité par le déplacement de `foc` sur le core 1
+(commit `64e15bf`).** C'est la contrainte qui décidera de la qualité de
+l'équilibrage, bien avant le débit de consignes.
+
+Relevé dans le SDK de ce framework, y compris les priorités du core 1
+vérifiées dans ses sources (la version précédente de cette spec donnait la
+tâche d'événements Arduino à 20 avant vérification ; elle est en fait à 19) :
 
 | Élément | Valeur |
 |---|---|
@@ -469,19 +488,37 @@ de ce framework :
 | Tick FreeRTOS | 1 kHz |
 | Tâches WiFi | épinglées **core 0** |
 | Tâche TCP/IP (lwIP) | priorité 18, **core 0** |
-| `esp_timer` | priorité 22 |
-| `loop()` et tâche d'événements Arduino | core 1 |
+| `esp_timer` | priorité 22, core 0 |
+| Tâche `foc` | priorité 20, **core 1** |
+| Tâche d'événements Arduino | priorité 19, core 1 |
+| `loop()` Arduino | priorité 1, core 1 |
 
-Sur le core 0, la tâche FOC à la priorité 20 peut donc être préemptée par
-`esp_timer` (22) et par la tâche WiFi (priorité 23 d'après la documentation
-IDF, valeur non vérifiable ici car elle vit dans les blobs précompilés). C'est
-ce que `dtmax` et `late` mesurent, et c'est la raison d'être de `wifioff`.
-Leviers, dans l'ordre : mesurer, puis monter la tâche FOC à 23 ou 24, puis
-couper le WiFi pendant l'équilibrage.
+Historiquement, avant `64e15bf`, la tâche `foc` vivait sur le core 0, sous le
+WiFi et `esp_timer` à des priorités supérieures, qui la préemptaient. Mesuré
+au banc le 18 septembre 2026, un axe en boucle ouverte à 20 rad/s :
 
-Sur le core 1, la tâche d'événements Arduino tourne à la priorité 20. `ctrl`
-est donc prévue à **19** : elle ne sera décalée que par un événement réseau,
-par exemple une reconnexion WiFi.
+| Condition | Ticks en retard | `dtmax` |
+|---|---|---|
+| boucle sur le core 0, WiFi actif | 0,636 % | 1378 µs |
+| boucle sur le core 0, WiFi coupé | 0 | 710 µs |
+| boucle sur le core 1, WiFi actif | 0 | 156 µs |
+
+Résolu en déplaçant la tâche sur le core 1, **pas** en coupant le WiFi : sur
+le core 1, `foc` (priorité 20) est au-dessus de tout ce qui s'y trouve — la
+tâche d'événements Arduino (19) et `loop()` (1) — et les préempte, plutôt que
+l'inverse. Le WiFi et `esp_timer`, restés seuls sur le core 0, ne touchent
+plus à aucun état moteur. `wifioff` reste disponible mais n'est plus le
+mécanisme de protection retenu contre ce risque.
+
+Corollaire : plus rien du chemin moteur ne tourne en parallèle vrai — `foc`,
+la ligne de commande, l'OTA, l'ISR du timer, celle de l'index d'encodeur, et
+plus tard `ctrl`, partagent tous le core 1 et ne font que se préempter entre
+eux. Reste à mesurer : la même procédure avec les deux axes actifs
+simultanément (au lieu d'un seul axe en boucle ouverte), puis, plus tard,
+avec `ctrl` une fois qu'elle existe. Au passage, la priorité prévue pour
+`ctrl` (19, voir §5.1) coïncide avec celle, maintenant vérifiée, de la tâche
+d'événements Arduino — à réexaminer à ce moment-là plutôt qu'à supposer sans
+frottement.
 
 ## 14. Mise au point, étape par étape
 

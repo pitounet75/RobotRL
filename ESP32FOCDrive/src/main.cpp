@@ -1,4 +1,4 @@
-/** ESP32FOCDrive — step 4: isochronous FOC task on core 0, CLI on core 1. */
+/** ESP32FOCDrive — step 4: isochronous FOC task and CLI, both on core 1. */
 
 #include <Arduino.h>
 #include <freertos/FreeRTOS.h>
@@ -58,7 +58,7 @@ void loop() {
     vTaskDelay(1);
     return;
   }
-  /* No encoder.update()/motor.move() here: the core-0 FOC task does both,
+  /* No encoder.update()/motor.move() here: the core-1 FOC task does both,
    * in every mode including Off, so the PCNT count is re-read often enough
    * to unwrap before it hits the +-8192 hardware limit. */
   cliPoll();

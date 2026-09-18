@@ -21,11 +21,13 @@ class PcntEncoder : public Sensor {
   /** Computed straight from count()/micros(), not the base class's
    * full_rotations wrap-detection heuristic — see getAngle()'s same
    * reasoning. That heuristic depends on update() being called at a
-   * steady rate; it isn't (core0 in Velocity/Torque/Accal, core1 in
-   * Enc/Idle), and a single misfire at a mode-switch boundary leaves
-   * full_rotations permanently wrong, so getVelocity() silently reports
-   * whatever that error implies forever after — while getAngle() stays
-   * correct throughout, since it never uses full_rotations. */
+   * steady rate; it isn't -- this firmware only calls it explicitly in
+   * Mode::Off (foc_task.cpp), while Openloop/Velocity/Torque drive the
+   * sensor indirectly, at a different cadence, through loopFOC()/move() --
+   * and a single misfire at a mode-switch boundary leaves full_rotations
+   * permanently wrong, so getVelocity() silently reports whatever that
+   * error implies forever after — while getAngle() stays correct
+   * throughout, since it never uses full_rotations. */
   float getVelocity() override;
   int needsSearch() override;
 

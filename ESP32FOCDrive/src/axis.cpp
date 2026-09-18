@@ -108,10 +108,11 @@ void axisArm(Axis &ax) {
    *
    * The whole test-and-set is under boardMotorPowerLock(): since the
    * task-7 failsafe, axisDisarmLocked() (the guarded body axisDisarm() and
-   * the failsafe's axisFailsafeDisarm() share) is reachable from the core-0
-   * FOC task as well as core 1, so "decide to arm" and "increment the M_EN
-   * refcount" must be one indivisible step or the refcount can lose an
-   * update to the other core doing the same for a different axis. */
+   * the failsafe's axisFailsafeDisarm() share) is reachable from the core-1
+   * FOC task as well as the CLI on that same core, so "decide to arm" and
+   * "increment the M_EN refcount" must be one indivisible step or a
+   * preemption between the two can lose an update to a concurrent
+   * arm/disarm of a different axis. */
   boardMotorPowerLock();
   if (!ax.armed) {
     ax.motor.enable();
@@ -187,7 +188,7 @@ void axisReleaseOwnership(Axis &ax) {
  * dropped: this firmware has no current sense at all, voltage torque only.
  *
  * All of it runs while the caller owns ax (Owner::Cli): it drives the motor
- * directly via loopFOC()/move()/setPhaseVoltage(), never through the core-0
+ * directly via loopFOC()/move()/setPhaseVoltage(), never through the core-1
  * FOC task.
  */
 namespace {
@@ -200,7 +201,7 @@ const char *calKey(const Axis &ax) { return ax.idx == 0 ? "cal0" : "cal1"; }
  * True if any axis (not just the one about to be touched) is currently
  * armed. Guards axisSaveCal()/axisForgetCal() below: a Preferences write
  * disables the flash cache on BOTH cores for the duration of the write.
- * Neither the encoder update, nor the core-0 FOC loop, nor even the PCNT
+ * Neither the encoder update, nor the core-1 FOC loop, nor even the PCNT
  * hardware-counter read is in IRAM, so the FOC task simply stops running for
  * that whole window -- while the PCNT hardware counter keeps counting
  * underneath it regardless, cache or no cache. Past 8192 counts (an eighth
@@ -690,13 +691,15 @@ bool axisSetVelocity(Axis &ax, float rad_s, uint32_t timeout_ms) {
     ax.motor.PID_velocity.reset();
   }
   /* No priming read here (no encoder.update()/getVelocity() call): the
-   * encoder belongs to the core-0 FOC task for as long as ax.owner stays
+   * encoder belongs to the FOC task for as long as ax.owner stays
    * Owner::Task, which it does here -- this function never takes ownership.
-   * A core-1 call into update()/getVelocity() would race the task on state
-   * that count()'s internal lock does not cover, and once the axis is
+   * A call from here into update()/getVelocity() would race the task --
+   * both run on core 1 today, but the FOC task (priority 20) preempts this
+   * one at any instruction, same hazard as a different core would be -- on
+   * state that count()'s internal lock does not cover, and once the axis is
    * already armed in another mode (the branch above), move() is calling
-   * getVelocity() every tick on core 0 already: two unsynchronized callers
-   * of the same non-atomic 64-bit counter. It is also unnecessary: our
+   * getVelocity() every tick from the FOC task already: two unsynchronized
+   * callers of the same non-atomic 64-bit counter. It is also unnecessary: our
    * getVelocity() derives velocity from the 64-bit count and a timestamp,
    * so a stale previous sample just yields a very long elapsed interval,
    * i.e. a velocity near zero for one cycle -- never a spike -- and the
@@ -735,13 +738,15 @@ bool axisSetTorque(Axis &ax, float volts, uint32_t timeout_ms) {
    * way back in, which is the only path that consumes it.
    *
    * No priming read here either (no encoder.update()/getVelocity() call):
-   * the encoder belongs to the core-0 FOC task for as long as ax.owner
+   * the encoder belongs to the FOC task for as long as ax.owner
    * stays Owner::Task, which it does here -- this function never takes
-   * ownership. A core-1 call into update()/getVelocity() would race the
-   * task on state that count()'s internal lock does not cover, and once the
-   * axis is already armed in another mode, move() is calling getVelocity()
-   * every tick on core 0 already: two unsynchronized callers of the same
-   * non-atomic 64-bit counter. It is also unnecessary: our getVelocity()
+   * ownership. A call from here into update()/getVelocity() would race the
+   * task -- both run on core 1 today, but the FOC task (priority 20)
+   * preempts this one at any instruction, same hazard as a different core
+   * would be -- on state that count()'s internal lock does not cover, and
+   * once the axis is already armed in another mode, move() is calling
+   * getVelocity() every tick from the FOC task already: two unsynchronized
+   * callers of the same non-atomic 64-bit counter. It is also unnecessary: our getVelocity()
    * derives velocity from the 64-bit count and a timestamp, so a stale
    * previous sample just yields a very long elapsed interval, i.e. a
    * velocity near zero for one cycle -- never a spike. */

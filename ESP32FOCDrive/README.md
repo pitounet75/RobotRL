@@ -259,40 +259,41 @@ et non d'un essai roue levée. À retoucher en observant la roue, avec `vel`
 et `vcap`/`vdump` pour visualiser une oscillation ou un dépassement, avant
 tout montage sur le robot.
 
-## 7. Gigue d'ordonnancement — à relever au banc
+## 7. Gigue d'ordonnancement
 
-**Pas encore mesuré. Ne pas se fier à une valeur qui ne serait pas
-relevée ici avec la date de la mesure.**
+**Mesuré au banc le 18 septembre 2026, un axe seul en boucle ouverte à
+20 rad/s (`ol 20`, roue levée), avant et après le déplacement de la tâche
+`foc` du cœur 0 au cœur 1 (commit `64e15bf`).**
 
-Procédure exacte (env `dual`, roues levées) :
+| Condition | `dtmax` (µs) | Ticks en retard |
+|---|---|---|
+| boucle sur le cœur 0, WiFi actif | 1378 | 0,636 % |
+| boucle sur le cœur 0, WiFi coupé | 710 | 0 |
+| boucle sur le cœur 1, WiFi actif | 156 | 0 |
+
+Le problème identifié — la tâche `foc` préemptée par les tâches WiFi/lwIP,
+épinglées sur le même cœur qu'elle à une priorité supérieure — est résolu en
+déplaçant la boucle sur le cœur 1, **pas** en coupant le WiFi : la troisième
+ligne, WiFi actif, tourne déjà avec un `dtmax` plus bas que la deuxième ligne
+WiFi coupé de l'ancienne configuration. `wifioff` reste disponible mais n'est
+plus la solution retenue pour ce risque.
+
+**Reste à mesurer** : la même procédure avec les deux axes actifs
+simultanément, puis, plus tard, avec la boucle d'équilibrage à 400 Hz une
+fois qu'elle existe — la tâche `foc`, la ligne de commande, l'OTA et cette
+future boucle partagent désormais tous le cœur 1, donc la marge relevée
+ci-dessus avec un seul axe en boucle ouverte n'est pas garantie être celle
+qu'on aura une fois que tout ce monde s'y préempte réellement. Procédure
+(env `dual`, roues levées) :
 
 ```
 vel 3
 dt                  (remet dtmax et late à zéro)
                     ... attendre 5 minutes ...
 status              (noter dtmax et late)
-wifioff
-dt
-                    ... attendre 5 minutes ...
-status              (noter dtmax et late)
 ```
 
-Emplacements à compléter :
-
-| Condition | `dtmax` (µs) | `late` |
-|---|---|---|
-| WiFi actif, 5 min à `vel 3` | *à relever au banc — voir la procédure ci-dessus* | *à relever au banc* |
-| Après `wifioff`, 5 min à `vel 3` | *à relever au banc — voir la procédure ci-dessus* | *à relever au banc* |
-
-Ce que ces deux chiffres décident : la tâche `foc` tourne à la priorité 20
-sur le cœur 0, sous la tâche WiFi (épinglée sur le même cœur, priorité
-documentée supérieure à 20 côté IDF, non vérifiable directement dans ce
-projet car elle vit dans les blobs précompilés) et sous `esp_timer`
-(priorité 22). Si l'écart entre les deux lignes du tableau est significatif,
-deux leviers, dans l'ordre : monter la priorité de la tâche `foc` (20 → 23
-ou 24), puis, si ça ne suffit pas, couper le WiFi pendant l'équilibrage
-(`wifioff`, ou ne jamais l'activer sur le firmware embarqué). Voir la spec
-§13 pour le détail de l'arbitrage de priorités FreeRTOS sur ce SDK.
+Voir la spec §13 pour le détail des priorités FreeRTOS vérifiées sur ce SDK.
 
 ## 8. Deux pièges déjà payés une fois
 
