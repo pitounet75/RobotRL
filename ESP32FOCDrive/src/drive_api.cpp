@@ -95,8 +95,9 @@ bool driveSetOpenloop(uint8_t axis, float rad_s, uint32_t timeout_ms) {
   ax.motor.target = v;
   /* Settle the mode (and let the task observe it) before arming: mirrors
    * driveStop()'s ordering below, keeping mode and power state changes from
-   * racing the task on the other core. Only reached once per mode entry,
-   * same as the other two setters. */
+   * racing the FOC task, which runs on this same core at a higher priority
+   * and can preempt this sequence at any instruction. Only reached once per
+   * mode entry, same as the other two setters. */
   axisSetMode(ax, Mode::Openloop);
   axisArm(ax);
   axisStampCmd(ax, timeout_ms);

@@ -78,8 +78,8 @@ Hors périmètre :
   de blocage de la boucle moteur au lieu d'être désactivé.
 - Métriques `dt`, `dtmax`, `late`, et purge du backlog de notifications en fin
   d'itération. Sans cette purge, un dépassement fait que `ulTaskNotifyTake`
-  rend la main immédiatement, la tâche IDLE0 ne tourne plus et le watchdog
-  abat la tâche.
+  rend la main immédiatement, la tâche d'inactivité du core de la boucle —
+  IDLE1 désormais — ne tourne plus et le watchdog abat la tâche.
 - `hz` réglable à chaud, borné entre 4 kHz et 16 kHz.
 - Rien sur le port série depuis la tâche FOC.
 

@@ -8,7 +8,9 @@
  */
 void boardInit();
 /** delta = +1 when an axis arms, -1 when it disarms. Clamped at zero. Not
- * safe to call bare from two cores at once -- see boardMotorPowerLock(). */
+ * safe to call bare: the FOC task's failsafe disarm can preempt the CLI in
+ * the middle of an update (same core 1, higher priority), and the design must
+ * stay correct if the task ever moves core again -- see boardMotorPowerLock(). */
 void boardMotorPowerRef(int delta);
 bool boardMotorPowered();
 /**

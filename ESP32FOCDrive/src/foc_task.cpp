@@ -96,10 +96,12 @@ void focTask(void *) {
         continue;
       }
       if (ax.armed && failsafeExpired(now_ms, ax.last_cmd_ms, ax.cmd_timeout_ms)) {
-        /* Stale command: park the axis. The task disarms itself here, on its
-         * own core, so there is nothing to sync -- unlike axisSetMode(),
-         * which exists precisely because a CLI/API write to ax.mode from the
-         * other core needs the task to observe it.
+        /* Stale command: park the axis. The task disarms itself here, from
+         * inside its own iteration, so there is nothing to sync -- unlike
+         * axisSetMode(), which exists precisely because a CLI/API write to
+         * ax.mode can be preempted mid-sequence by this task (same core 1,
+         * higher priority) and needs the task to have observed it before
+         * the caller acts on the motor.
          *
          * The test above is unlocked -- cheap, but by design stale the
          * instant it passes: a fresh command can land on core 1 in the gap
@@ -154,8 +156,9 @@ void focTask(void *) {
     }
     s_loops += 1;
     s_seq += 1;
-    /* Overrun: notifications pile up, Take returns immediately, IDLE0 never
-     * runs and the task WDT aborts. Drop the backlog, wait for a fresh tick. */
+    /* Overrun: notifications pile up, Take returns immediately, the idle task
+     * of this core (IDLE1) never runs and the task WDT aborts. Drop the
+     * backlog, wait for a fresh tick. */
     (void)ulTaskNotifyTake(pdTRUE, 0);
   }
 }
