@@ -52,7 +52,7 @@ def main() -> int:
         params_path.write_text(format_snapshot(snap) + "\n", encoding="utf-8")
         print(f"PARAMS -> {params_path}")
         print(format_snapshot(snap, keys=[
-            "cascade_vel_kp", "cascade_vel_ki", "cascade_vel_kd",
+            "cascade_vel_kp", "cascade_vel_kd",
             "cascade_vel_err_ema_alpha", "cascade_vel_ema_kp",
             "cascade_pitch_ref_max_rad", "vel_ref_turns_s",
             "ff_grav_k", "ff_fb_k_pitch", "ff_fb_k_rate", "ff_output_alpha",

@@ -6,69 +6,57 @@ import struct
 from dataclasses import dataclass
 from typing import Dict, Iterable, Tuple
 
+SNAPSHOT_VERSION = 12
+
 PARAM_NAMES: Dict[str, int] = {
     "strategy": 0,
     "pitch_ref_rad": 1,
     "vel_ref_turns_s": 2,
     "pitch_failsafe_rad": 3,
-    "pitch_kp": 4,
-    "pitch_ki": 5,
-    "pitch_kd": 6,
-    "vel_kp": 7,
-    "vel_ki": 8,
-    "vel_kd": 9,
-    "cmd_max_torque_nm": 10,
-    "linear_theta_func": 11,
-    "linear_k_pitch": 12,
-    "linear_k_pitch_rate": 13,
-    "linear_k_vel": 14,
-    "linear_output_alpha": 15,
-    "cascade_vel_kp": 16,
-    "cascade_vel_ki": 17,
-    "cascade_vel_kd": 18,
-    "cascade_pitch_ref_max_rad": 19,
-    "ff_grav_k": 20,
-    "ff_fb_k_pitch": 21,
-    "ff_fb_k_rate": 22,
-    "ff_output_alpha": 23,
-    "wheel_encoder_vel_lpf_alpha": 24,
-    "torque_deadband_nm": 25,
-    "torque_deadband_pitch_max_rad": 26,
-    "torque_deadband_rate_max_rads": 27,
-    "alpha_kp": 28,
-    "alpha_max_nm": 29,
-    "motor_J": 30,
-    "motor_friction_c": 31,
-    "alpha_pitch_max_rad": 32,
-    "alpha_rate_max_rads": 33,
-    "alpha_vel_max_turns_s": 34,
-    "alpha_lpf": 35,
-    "pos_kp": 36,
-    "pos_kd": 37,
-    "pos_pitch_kp": 38,
-    "pos_x_ref_m": 39,
-    "pos_v_max_turns_s": 40,
-    "pos_pitch_max_rad": 41,
-    "wheel_radius_m": 42,
-    "pos_reset": 43,
-    "pos_err_ema_alpha": 44,
-    "pos_ema_kp": 45,
-    "outer_mode": 46,
-    "heading_kp": 47,
-    "heading_kd": 48,
-    "heading_ref_rad": 49,
-    "heading_torque_max_nm": 50,
-    "heading_reset": 51,
-    "cascade_vel_err_ema_alpha": 52,
-    "cascade_vel_ema_kp": 53,
-    "vel_ref_slew_turns_s2": 54,
-    "cascade_vel_accel_kp": 55,
-    "heading_inc": 56,
-    "heading_dec": 57,
-    "friction_mode": 58,
-    "friction_static_nm": 59,
-    "friction_kinetic_nm": 60,
-    "friction_vel_eps_turns_s": 61,
+    "cmd_max_torque_nm": 4,
+    "cascade_vel_kp": 5,
+    "cascade_vel_kd": 6,
+    "cascade_pitch_ref_max_rad": 7,
+    "ff_grav_k": 8,
+    "ff_fb_k_pitch": 9,
+    "ff_fb_k_rate": 10,
+    "ff_output_alpha": 11,
+    "wheel_encoder_vel_lpf_alpha": 12,
+    "torque_deadband_nm": 13,
+    "torque_deadband_pitch_max_rad": 14,
+    "torque_deadband_rate_max_rads": 15,
+    "alpha_kp": 16,
+    "alpha_max_nm": 17,
+    "motor_J": 18,
+    "motor_friction_c": 19,
+    "alpha_pitch_max_rad": 20,
+    "alpha_rate_max_rads": 21,
+    "alpha_vel_max_turns_s": 22,
+    "alpha_lpf": 23,
+    "pos_kp": 24,
+    "pos_kd": 25,
+    "pos_x_ref_m": 26,
+    "pos_v_max_turns_s": 27,
+    "wheel_radius_m": 28,
+    "pos_reset": 29,
+    "pos_err_ema_alpha": 30,
+    "pos_ema_kp": 31,
+    "outer_mode": 32,
+    "heading_kp": 33,
+    "heading_kd": 34,
+    "heading_ref_rad": 35,
+    "heading_torque_max_nm": 36,
+    "heading_reset": 37,
+    "cascade_vel_err_ema_alpha": 38,
+    "cascade_vel_ema_kp": 39,
+    "vel_ref_slew_turns_s2": 40,
+    "cascade_vel_accel_kp": 41,
+    "heading_inc": 42,
+    "heading_dec": 43,
+    "friction_mode": 44,
+    "friction_static_nm": 45,
+    "friction_kinetic_nm": 46,
+    "friction_vel_eps_turns_s": 47,
 }
 
 NAME_BY_ID = {v: k for k, v in PARAM_NAMES.items()}
@@ -76,22 +64,7 @@ NAME_BY_ID = {v: k for k, v in PARAM_NAMES.items()}
 SNAPSHOT_STRUCT = struct.Struct(
     "<"
     "II"  # version, strategy_id
-    "fff"  # pitch_ref, vel_ref, pitch_failsafe
-    "fffffff"  # pitch/vel pid + cmd_max
-    "Iffff"  # linear
-    "ffff"  # cascade vel
-    "ffff"  # ff
-    "f"  # wheel lpf
-    "fff"  # torque deadband + gates
-    "ffffffff"  # alpha P loop (v3)
-    "ffffffff"  # position hold (v4)
-    "ff"  # pos EMA (v5)
-    "f"  # outer_mode (v6)
-    "fffff"  # heading (v7)
-    "ff"  # cascade vel EMA (v8)
-    "ff"  # vel_ref slew + accel FF (v9)
-    "ff"  # heading_inc + heading_dec (v10)
-    "ffff"  # friction two-level (v11)
+    + "f" * 47
 )
 
 SET_PARAM_STRUCT = struct.Struct("<Hf")
@@ -104,20 +77,8 @@ class ControlParamsSnapshot:
     pitch_ref_rad: float
     vel_ref_turns_s: float
     pitch_failsafe_rad: float
-    pitch_kp: float
-    pitch_ki: float
-    pitch_kd: float
-    vel_kp: float
-    vel_ki: float
-    vel_kd: float
     cmd_max_torque_nm: float
-    linear_theta_func: int
-    linear_k_pitch: float
-    linear_k_pitch_rate: float
-    linear_k_vel: float
-    linear_output_alpha: float
     cascade_vel_kp: float
-    cascade_vel_ki: float
     cascade_vel_kd: float
     cascade_pitch_ref_max_rad: float
     ff_grav_k: float
@@ -138,10 +99,8 @@ class ControlParamsSnapshot:
     alpha_lpf: float
     pos_kp: float
     pos_kd: float
-    pos_pitch_kp: float
     pos_x_ref_m: float
     pos_v_max_turns_s: float
-    pos_pitch_max_rad: float
     wheel_radius_m: float
     pos_reset: float
     pos_err_ema_alpha: float
@@ -169,20 +128,8 @@ class ControlParamsSnapshot:
             "pitch_ref_rad": self.pitch_ref_rad,
             "vel_ref_turns_s": self.vel_ref_turns_s,
             "pitch_failsafe_rad": self.pitch_failsafe_rad,
-            "pitch_kp": self.pitch_kp,
-            "pitch_ki": self.pitch_ki,
-            "pitch_kd": self.pitch_kd,
-            "vel_kp": self.vel_kp,
-            "vel_ki": self.vel_ki,
-            "vel_kd": self.vel_kd,
             "cmd_max_torque_nm": self.cmd_max_torque_nm,
-            "linear_theta_func": self.linear_theta_func,
-            "linear_k_pitch": self.linear_k_pitch,
-            "linear_k_pitch_rate": self.linear_k_pitch_rate,
-            "linear_k_vel": self.linear_k_vel,
-            "linear_output_alpha": self.linear_output_alpha,
             "cascade_vel_kp": self.cascade_vel_kp,
-            "cascade_vel_ki": self.cascade_vel_ki,
             "cascade_vel_kd": self.cascade_vel_kd,
             "cascade_pitch_ref_max_rad": self.cascade_pitch_ref_max_rad,
             "ff_grav_k": self.ff_grav_k,
@@ -203,10 +150,8 @@ class ControlParamsSnapshot:
             "alpha_lpf": self.alpha_lpf,
             "pos_kp": self.pos_kp,
             "pos_kd": self.pos_kd,
-            "pos_pitch_kp": self.pos_pitch_kp,
             "pos_x_ref_m": self.pos_x_ref_m,
             "pos_v_max_turns_s": self.pos_v_max_turns_s,
-            "pos_pitch_max_rad": self.pos_pitch_max_rad,
             "wheel_radius_m": self.wheel_radius_m,
             "pos_reset": self.pos_reset,
             "pos_err_ema_alpha": self.pos_err_ema_alpha,

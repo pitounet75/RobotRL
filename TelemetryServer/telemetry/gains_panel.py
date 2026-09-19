@@ -1,8 +1,8 @@
-"""Qt gains editor panel (GET/SET via SharedRpcClient)."""
+"""Qt gains editor: simple line edits, grouped by control category."""
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Dict, Optional, Sequence, Tuple
 
 from telemetry.ctrl_params import PARAM_NAMES
 from telemetry.rpc_mux import SharedRpcClient
@@ -11,6 +11,8 @@ try:
     from PyQt5.QtCore import Qt
     from PyQt5.QtWidgets import (
         QFormLayout,
+        QGridLayout,
+        QGroupBox,
         QHBoxLayout,
         QLabel,
         QLineEdit,
@@ -23,6 +25,8 @@ except ImportError:  # pragma: no cover
     from PySide2.QtCore import Qt
     from PySide2.QtWidgets import (
         QFormLayout,
+        QGridLayout,
+        QGroupBox,
         QHBoxLayout,
         QLabel,
         QLineEdit,
@@ -32,8 +36,105 @@ except ImportError:  # pragma: no cover
         QWidget,
     )
 
-# One-shot / action params: button instead of free edit apply-all.
-_ACTION_PARAMS = frozenset({"pos_reset", "heading_reset", "heading_inc", "heading_dec"})
+# One-shot / aliases: buttons or hidden (same store as heading_ref_rad).
+_ACTION_PARAMS = frozenset({"pos_reset", "heading_reset", "heading_dec"})
+_HIDDEN_ALIASES = frozenset({"heading_inc"})
+
+# Proposed categories for ff_cascade (name stays the SET key).
+CATEGORIES: Sequence[Tuple[str, Sequence[str]]] = (
+    (
+        "Consignes",
+        (
+            "pitch_ref_rad",
+            "vel_ref_turns_s",
+            "heading_ref_rad",
+            "pos_x_ref_m",
+            "outer_mode",
+        ),
+    ),
+    (
+        "Limites",
+        (
+            "pitch_failsafe_rad",
+            "cmd_max_torque_nm",
+            "cascade_pitch_ref_max_rad",
+            "vel_ref_slew_turns_s2",
+        ),
+    ),
+    (
+        "Cascade vitesse / pitch",
+        (
+            "cascade_vel_kp",
+            "cascade_vel_kd",
+            "cascade_vel_err_ema_alpha",
+            "cascade_vel_ema_kp",
+            "cascade_vel_accel_kp",
+        ),
+    ),
+    (
+        "Équilibre (FF + PD)",
+        (
+            "ff_grav_k",
+            "ff_fb_k_pitch",
+            "ff_fb_k_rate",
+            "ff_output_alpha",
+        ),
+    ),
+    (
+        "Lacet",
+        (
+            "heading_kp",
+            "heading_kd",
+            "heading_torque_max_nm",
+        ),
+    ),
+    (
+        "Position",
+        (
+            "pos_kp",
+            "pos_kd",
+            "pos_v_max_turns_s",
+            "pos_err_ema_alpha",
+            "pos_ema_kp",
+            "wheel_radius_m",
+        ),
+    ),
+    (
+        "Friction / deadband",
+        (
+            "friction_mode",
+            "friction_static_nm",
+            "friction_kinetic_nm",
+            "friction_vel_eps_turns_s",
+            "torque_deadband_nm",
+            "torque_deadband_pitch_max_rad",
+            "torque_deadband_rate_max_rads",
+        ),
+    ),
+    (
+        "Accélération moteur",
+        (
+            "alpha_kp",
+            "alpha_max_nm",
+            "motor_J",
+            "motor_friction_c",
+            "alpha_pitch_max_rad",
+            "alpha_rate_max_rads",
+            "alpha_vel_max_turns_s",
+            "alpha_lpf",
+        ),
+    ),
+    (
+        "Système",
+        (
+            "strategy",
+            "wheel_encoder_vel_lpf_alpha",
+        ),
+    ),
+)
+
+_DIRTY_SS = "QLineEdit { background: #fff3cd; }"
+_CLEAN_SS = ""
 
 
 class GainsPanel(QWidget):
@@ -67,18 +168,39 @@ class GainsPanel(QWidget):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        form_host = QWidget()
-        form = QFormLayout(form_host)
-        form.setLabelAlignment(Qt.AlignRight)
-        # Stable order by param id.
-        for name in sorted(PARAM_NAMES.keys(), key=lambda n: PARAM_NAMES[n]):
-            if name in _ACTION_PARAMS:
+        host = QWidget()
+        grid = QGridLayout(host)
+        grid.setContentsMargins(8, 8, 8, 8)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(12)
+
+        used = set()
+        row = 0
+        col = 0
+        for title, keys in CATEGORIES:
+            visible = [n for n in keys if n in PARAM_NAMES]
+            if not visible:
                 continue
-            edit = QLineEdit()
-            edit.setPlaceholderText(name)
-            self._edits[name] = edit
-            form.addRow(name, edit)
-        scroll.setWidget(form_host)
+            used.update(visible)
+            box = self._make_group(title, visible)
+            grid.addWidget(box, row, col)
+            col += 1
+            if col >= 2:
+                col = 0
+                row += 1
+
+        extras = [
+            n
+            for n in sorted(PARAM_NAMES.keys(), key=lambda k: PARAM_NAMES[k])
+            if n not in used and n not in _ACTION_PARAMS and n not in _HIDDEN_ALIASES
+        ]
+        if extras:
+            if col != 0:
+                col = 0
+                row += 1
+            grid.addWidget(self._make_group("Autres", extras), row, 0, 1, 2)
+
+        scroll.setWidget(host)
         root.addWidget(scroll)
 
         self._btn_refresh.clicked.connect(self.refresh)
@@ -95,6 +217,30 @@ class GainsPanel(QWidget):
             self._btn_reset_x.setEnabled(False)
             self._btn_reset_heading.setEnabled(False)
 
+    def _make_group(self, title: str, names: Sequence[str]) -> QGroupBox:
+        box = QGroupBox(title)
+        form = QFormLayout(box)
+        form.setLabelAlignment(Qt.AlignRight)
+        form.setHorizontalSpacing(8)
+        form.setVerticalSpacing(4)
+        for name in names:
+            edit = QLineEdit()
+            edit.setPlaceholderText(name)
+            edit.setClearButtonEnabled(True)
+            edit.textChanged.connect(lambda _t, n=name: self._paint_dirty(n))
+            edit.returnPressed.connect(lambda n=name: self._apply_one(n))
+            self._edits[name] = edit
+            form.addRow(name, edit)
+        return box
+
+    def _paint_dirty(self, name: str) -> None:
+        edit = self._edits.get(name)
+        if edit is None:
+            return
+        loaded = self._loaded.get(name)
+        text = edit.text().strip()
+        edit.setStyleSheet(_DIRTY_SS if loaded is not None and text != loaded else _CLEAN_SS)
+
     def _set_status(self, text: str, error: bool = False) -> None:
         self._status.setStyleSheet("color: #b00020;" if error else "")
         self._status.setText(text)
@@ -108,19 +254,22 @@ class GainsPanel(QWidget):
             for name, edit in self._edits.items():
                 val = data.get(name)
                 text = f"{val:.6g}" if isinstance(val, float) else str(val)
+                edit.blockSignals(True)
                 edit.setText(text)
+                edit.blockSignals(False)
                 self._loaded[name] = text
+                edit.setStyleSheet(_CLEAN_SS)
             self._set_status(
                 f"Loaded snapshot version={snap.version}  strategy={snap.strategy_id}"
             )
         except Exception as exc:
             self._set_status(f"Refresh failed: {exc}", error=True)
 
-    def apply(self, changed_only: bool) -> None:
-        if self._rpc is None:
-            return
+    def _collect_updates(self, changed_only: bool, only: Optional[str] = None) -> Optional[list[tuple[str, float]]]:
         updates: list[tuple[str, float]] = []
-        for name, edit in self._edits.items():
+        names = (only,) if only is not None else tuple(self._edits.keys())
+        for name in names:
+            edit = self._edits[name]
             text = edit.text().strip()
             if not text:
                 continue
@@ -130,9 +279,19 @@ class GainsPanel(QWidget):
                 value = float(text)
             except ValueError:
                 self._set_status(f"Invalid number for {name!r}: {text!r}", error=True)
-                return
+                return None
             updates.append((name, value))
+        return updates
 
+    def apply(self, changed_only: bool) -> None:
+        self._send_updates(self._collect_updates(changed_only))
+
+    def _apply_one(self, name: str) -> None:
+        self._send_updates(self._collect_updates(changed_only=True, only=name))
+
+    def _send_updates(self, updates: Optional[list[tuple[str, float]]]) -> None:
+        if self._rpc is None or updates is None:
+            return
         if not updates:
             self._set_status("Nothing to apply.")
             return
@@ -141,8 +300,13 @@ class GainsPanel(QWidget):
         try:
             for name, value in updates:
                 _id, _n, applied = self._rpc.set_param(name, value)
-                self._edits[name].setText(f"{applied:.6g}")
-                self._loaded[name] = f"{applied:.6g}"
+                text = f"{applied:.6g}"
+                edit = self._edits[name]
+                edit.blockSignals(True)
+                edit.setText(text)
+                edit.blockSignals(False)
+                self._loaded[name] = text
+                edit.setStyleSheet(_CLEAN_SS)
                 ok += 1
             self._set_status(f"Applied {ok} param(s).")
         except Exception as exc:

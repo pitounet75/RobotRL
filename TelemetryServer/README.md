@@ -81,8 +81,9 @@ running). Close the plotter first, or stop it briefly.
 
 ### UI
 
-- **Gains** tab in `run_server.py --plot`: Refresh / Apply / `pos_reset` /
-  `heading_reset` buttons.
+- **Gains** tab in `run_server.py --plot`: grouped line edits (consignes, cascade,
+  équilibre, lacet, …). Refresh / Apply / Enter on a field / `pos_reset` /
+  `heading_reset`.
 - Graphs tab: speed + heading sliders → `vel_ref_turns_s` / `heading_ref_rad`.
 
 ### Action params (one-shot)
@@ -91,40 +92,37 @@ running). Close the plotter first, or stop it briefly.
 |------|--------|
 | `pos_reset` | Zero position odometry / EMA (GET always 0) |
 | `heading_reset` | Zero integrated yaw ψ at current heading (GET always 0) |
-| `heading_inc` | `heading_ref += \|value\|` (rad, wrap ±π); ACK returns new ref |
-| `heading_dec` | `heading_ref -= \|value\|` (rad, wrap ±π); ACK returns new ref |
+| `heading_inc` | `ψ̇_ref = value` (signed rad/s, clamp ±2); GET/ACK = current ref |
+| `heading_dec` | alias: `ψ̇_ref = −value` (old UI) |
 
 ### Param reference (id → name)
 
 | Id | Name | Notes |
 |----|------|-------|
-| 0 | `strategy` | 0..3 (`ff_cascade` = 3) |
+| 0 | `strategy` | `ff_cascade` only (`0`) |
 | 1 | `pitch_ref_rad` | Base pitch setpoint |
 | 2 | `vel_ref_turns_s` | Motor-shaft turn/s (robot frame) |
 | 3 | `pitch_failsafe_rad` | Cut drive beyond \|pitch\| |
-| 4–6 | `pitch_kp/ki/kd` | Legacy pitch PID (often unused in ff_cascade) |
-| 7–9 | `vel_kp/ki/kd` | Legacy vel PID |
-| 10 | `cmd_max_torque_nm` | Torque clamp |
-| 11–15 | `linear_*` | Linear strategy |
-| 16 | `cascade_vel_kp` | Outer vel → pitch (P) |
-| 17 | `cascade_vel_ki` | Legacy; unused (prefer EMA) |
-| 18 | `cascade_vel_kd` | D on filtered wheel `v̇` |
-| 19 | `cascade_pitch_ref_max_rad` | Lean limit |
-| 20–23 | `ff_grav_k`, `ff_fb_k_*`, `ff_output_alpha` | Balance FF+PD |
-| 24 | `wheel_encoder_vel_lpf_alpha` | ABZ vel EMA (0=off) |
-| 25–27 | `torque_deadband_*` | Gated Coulomb boost |
-| 28–35 | `alpha_*`, `motor_J`, `motor_friction_c` | Motor accel P (often off) |
-| 36–42 | `pos_*`, `wheel_radius_m` | Position outer loop |
-| 43 | `pos_reset` | Action |
-| 44–45 | `pos_err_ema_alpha`, `pos_ema_kp` | Pos EMA |
-| 46 | `outer_mode` | 0=vel, 1=pos |
-| 47–50 | `heading_kp/kd`, `heading_ref_rad`, `heading_torque_max_nm` | Yaw hold |
-| 51 | `heading_reset` | Action |
-| 52–53 | `cascade_vel_err_ema_alpha`, `cascade_vel_ema_kp` | Leaky I on vel error |
-| 54 | `vel_ref_slew_turns_s2` | \|d v_ref/dt\| limit (0=off) |
-| 55 | `cascade_vel_accel_kp` | Lean FF on `v̇_ref` |
-| 56–57 | `heading_inc`, `heading_dec` | Action nudges |
-| 58–61 | `friction_mode`, `friction_static_nm`, `friction_kinetic_nm`, `friction_vel_eps_turns_s` | Two-level friction (`hypothesis_lab`) |
+| 4 | `cmd_max_torque_nm` | Torque clamp |
+| 5 | `cascade_vel_kp` | Outer vel → pitch (P) |
+| 6 | `cascade_vel_kd` | D on filtered wheel `v̇` |
+| 7 | `cascade_pitch_ref_max_rad` | Lean limit |
+| 8–11 | `ff_grav_k`, `ff_fb_k_*`, `ff_output_alpha` | Balance FF+PD |
+| 12 | `wheel_encoder_vel_lpf_alpha` | ABZ vel EMA (0=off) |
+| 13–15 | `torque_deadband_*` | Gated Coulomb boost |
+| 16–23 | `alpha_*`, `motor_J`, `motor_friction_c` | Motor accel P (often off) |
+| 24–28 | `pos_kp/kd`, `pos_x_ref_m`, `pos_v_max_turns_s`, `wheel_radius_m` | Position outer loop |
+| 29 | `pos_reset` | Action |
+| 30–31 | `pos_err_ema_alpha`, `pos_ema_kp` | Pos EMA |
+| 32 | `outer_mode` | 0=vel, 1=pos |
+| 33–36 | `heading_kp/kd`, `heading_ref_rad`, `heading_torque_max_nm` | Yaw hold |
+| 37 | `heading_reset` | Action |
+| 38–39 | `cascade_vel_err_ema_alpha`, `cascade_vel_ema_kp` | Leaky I on vel error |
+| 40 | `vel_ref_slew_turns_s2` | \|d v_ref/dt\| limit (0=off) |
+| 41 | `cascade_vel_accel_kp` | Lean FF on `v̇_ref` |
+| 42 | `heading_inc` | `ψ̇_ref` (rad/s, same store as `heading_ref_rad`) |
+| 43 | `heading_dec` | SET `ψ̇_ref = −value` (old UI) |
+| 44–47 | `friction_mode`, `friction_static_nm`, `friction_kinetic_nm`, `friction_vel_eps_turns_s` | Two-level friction (`hypothesis_lab`) |
 
 Boot defaults (velocity cascade checkpoint) live in STM32 `app_config.h`. See `STM32/RobotSTM32FirmWare/docs/HYPOTHESIS_LAB.md` for friction A/B.
 
