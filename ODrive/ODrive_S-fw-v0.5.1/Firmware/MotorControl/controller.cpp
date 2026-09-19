@@ -83,8 +83,11 @@ float Controller::get_anticogging_value(uint32_t index) {
 // Out-of-range indices are ignored so a partial/garbled stream cannot corrupt
 // neighbouring config. The caller is expected to disable anticogging while
 // streaming, then set anticogging.pre_calibrated and call save_configuration().
+// Ignored while a live calibration sweep (anticogging_calibration()) is writing
+// the same cogging_map/cogging_ratio-indexed array, so a restore racing a
+// calibration can't interleave bin writes from both sources into one map.
 void Controller::set_anticogging_value(uint32_t index, float value) {
-    if (index < 3600u) {
+    if (index < 3600u && !config_.anticogging.calib_anticogging) {
         config_.anticogging.cogging_map[index] = value;
     }
 }
@@ -147,7 +150,8 @@ bool Controller::anticogging_calibration(float pos_estimate, float vel_estimate)
 
     // Finalize (average fwd+rev, then subtract the global mean) is chunked across control cycles:
     // doing the full 2x3600 float pass inline in one 8 kHz iteration overran the control deadline.
-    static constexpr uint32_t kFinalizeChunk = 128;
+    // 128/cycle was still missing the deadline; cut further for margin.
+    static constexpr uint32_t kFinalizeChunk = 32;
 
     if (anticogging_calib_phase_ == 2 || anticogging_calib_phase_ == 3) {
         const uint32_t end = std::min<uint32_t>(anticogging_finalize_idx_ + kFinalizeChunk, kBins);
