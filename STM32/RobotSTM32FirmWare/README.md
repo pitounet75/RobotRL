@@ -252,6 +252,8 @@ On fatal errors, firmware calls `app_halt_record()` and spins in `Error_Handler(
 ## Related documentation
 
 - **[Control & RTOS architecture](docs/CONTROL_ARCHITECTURE.md)** — task rates, strategies, bias (planned), debug globals
+- **[Balance algorithm — detailed analysis](docs/BALANCE_ALGORITHM.md)** — `ff_cascade` law, IMU fusion, tunable params, validated baseline, analysis notes
+- **[Antipatinage (wheel lift)](docs/ANTIPATINAGE.md)** — contact detection, SYNC / BOTH_AIR / RECOVERY
 - **[KiCad board](../../Board/README.md)** — STM32H743 + ICM-45686 schematic
 - [STM32 sensor drivers (ICM-45686)](../sensor_drivers/README.md)
 - [Telemetry protocol (ESP32 / USART1)](../Telemetry/README.md)

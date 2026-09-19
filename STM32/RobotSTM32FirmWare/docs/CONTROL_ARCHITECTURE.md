@@ -122,9 +122,15 @@ One burst read ≈ **15 bytes** on SPI1. At **2.5 MHz** ≈ **100–200 µs** wi
 
 ### Control output
 
+> **Outdated.** The robot now runs in **torque** mode (`SET_INPUT_TORQUE`, both ODrive nodes),
+> not `SET_INPUT_VEL`, and the actual law is a gravity-FF + pitch-PD + velocity-cascade
+> architecture, not the simple PD sketched below. See
+> **[BALANCE_ALGORITHM.md](BALANCE_ALGORITHM.md)** for the implemented algorithm, tunable
+> parameters, and analysis notes. This section is kept only for history.
+
 - **`v_cmd_left`**, **`v_cmd_right`** (turn/s) → CAN `SET_INPUT_VEL`, **torque FF = 0** unless deliberately used.
 
-Conceptual law (tuning TBD):
+Conceptual law (tuning TBD, superseded — see note above):
 
 ```text
 u = Kp*(pitch_ref - pitch) + Kd*(0 - pitch_rate) + Kv*(vel_ref - v_for_control)

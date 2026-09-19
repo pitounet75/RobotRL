@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Algorithme d'équilibrage — ff_cascade</title>
+<style>
+  :root {
+    --bg: #f6f5f2;
+    --panel: #ffffff;
+    --panel-2: #fbfaf7;
+    --ink: #201d18;
+    --ink-dim: #5c574c;
+    --line: #d9d4c8;
+    --accent: #b5502c;      /* terracotta — chemin direct */
+    --accent-2: #2f6f5e;    /* vert — contre-réaction / capteurs */
+    --accent-3: #8a6d1f;    /* ocre — sécurité / avertissement */
+    --mono: "SF Mono", "Cascadia Code", Consolas, "Roboto Mono", monospace;
+    --sans: -apple-system, "Segoe UI", Inter, Roboto, Arial, sans-serif;
+    --serif: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #171511;
+      --panel: #201d18;
+      --panel-2: #1b1915;
+      --ink: #efe9dd;
+      --ink-dim: #a89f8d;
+      --line: #3a352c;
+      --accent: #e08356;
+      --accent-2: #6fbfa5;
+      --accent-3: #d8b25c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #171511;
+    --panel: #201d18;
+    --panel-2: #1b1915;
+    --ink: #efe9dd;
+    --ink-dim: #a89f8d;
+    --line: #3a352c;
+    --accent: #e08356;
+    --accent-2: #6fbfa5;
+    --accent-3: #d8b25c;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.55;
+    padding: 0 20px 80px;
+    max-width: 1240px;
+    margin: 0 auto;
+  }
+  header {
+    padding: 48px 0 28px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 36px;
+  }
+  h1 {
+    font-family: var(--serif);
+    font-size: 2.1rem;
+    font-weight: 600;
+    margin: 0 0 8px;
+    letter-spacing: -0.01em;
+  }
+  .subtitle { color: var(--ink-dim); font-size: 1.02rem; max-width: 66ch; }
+  .badges { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+  .badge {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.02em;
+    padding: 4px 10px;
+    border: 1px solid var(--line);
+    border-radius: 100px;
+    color: var(--ink-dim);
+  }
+
+  section { margin: 56px 0; }
+  h2 {
+    font-family: var(--serif);
+    font-size: 1.4rem;
+    font-weight: 600;
+    margin: 0 0 6px;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  h2 .num { color: var(--accent); font-family: var(--mono); font-size: 0.95rem; }
+  .lede { color: var(--ink-dim); max-width: 74ch; margin: 0 0 24px; font-size: 0.96rem; }
+
+  figure { margin: 0; }
+  .diagram-frame {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 18px;
+    overflow-x: auto;
+  }
+  .diagram-frame svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+  figcaption {
+    color: var(--ink-dim);
+    font-size: 0.86rem;
+    margin-top: 12px;
+    max-width: 80ch;
+  }
+  figcaption b { color: var(--ink); font-weight: 600; }
+
+  svg text { font-family: var(--sans); fill: currentColor; }
+  svg .lbl-title { font-size: 12px; font-weight: 700; }
+  svg .lbl-sub { font-size: 10px; fill: var(--ink-dim); }
+  svg .lbl-arrow { font-size: 9.5px; fill: var(--ink-dim); font-family: var(--mono); }
+  svg .lbl-state { font-size: 12px; font-weight: 700; }
+  svg rect.box { fill: var(--panel-2); stroke: currentColor; stroke-width: 1.3; }
+  svg rect.box.feedback { stroke: var(--accent-2); }
+  svg rect.box.plant { stroke: var(--accent); stroke-width: 1.6; }
+  svg rect.box.safety { stroke: var(--accent-3); }
+  svg rect.box.off { stroke-dasharray: 4 3; opacity: 0.75; }
+  svg line, svg polyline, svg path.arrow { stroke: currentColor; stroke-width: 1.3; fill: none; }
+  svg polyline.fb, svg path.fb { stroke: var(--accent-2); }
+  svg .legend-dot { }
+
+  .legend { display: flex; gap: 22px; flex-wrap: wrap; margin-top: 14px; font-size: 0.82rem; color: var(--ink-dim); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { width: 14px; height: 2px; display: inline-block; background: currentColor; }
+  .legend .fwd i { background: var(--ink); }
+  .legend .fb i { background: var(--accent-2); }
+  .legend .plant i { background: var(--accent); height: 3px; }
+
+  .eq-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+  .eq-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .eq-card h3 { margin: 0 0 8px; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-dim); font-weight: 600; }
+  .eq-card code {
+    display: block;
+    font-family: var(--mono);
+    font-size: 0.84rem;
+    white-space: pre-wrap;
+    color: var(--ink);
+    line-height: 1.65;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+  thead th { color: var(--ink-dim); font-weight: 600; font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.03em; }
+  td.num { font-family: var(--mono); white-space: nowrap; }
+  .table-wrap { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 4px 18px; overflow-x: auto; }
+
+  .notes { display: grid; gap: 10px; }
+  .note {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent-3);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 0.89rem;
+  }
+  .note b { display: block; margin-bottom: 3px; }
+
+  .files { font-size: 0.86rem; }
+  .files code { font-family: var(--mono); background: var(--panel-2); padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); }
+
+  footer { color: var(--ink-dim); font-size: 0.8rem; border-top: 1px solid var(--line); padding-top: 20px; margin-top: 60px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Algorithme d'équilibrage du robot — <code style="font-family:var(--mono); font-size:0.85em;">ff_cascade</code></h1>
+  <p class="subtitle">Schéma de la loi de commande réellement embarquée sur le STM32H743 : estimation d'état IMU, cascade vitesse → tangage, feed-forward gravité + PD, et répartition du couple entre les deux roues.</p>
+  <div class="badges">
+    <span class="badge">STM32H743 · FreeRTOS</span>
+    <span class="badge">Boucle 500 Hz</span>
+    <span class="badge">Commande en couple (CAN → ODrive ×2)</span>
+    <span class="badge">control_strategy_ff_cascade.c</span>
+  </div>
+</header>
+
+<section id="dataflow">
+  <h2><span class="num">01</span> Chaîne de données temps réel</h2>
+  <p class="lede">Trois capteurs alimentent trois tâches d'acquisition indépendantes ; <code style="font-family:var(--mono)">task_control</code> les combine à 500&nbsp;Hz, applique la loi d'équilibrage puis l'overlay antipatinage, et <code style="font-family:var(--mono)">task_motor_tx</code> publie le couple sur CAN.</p>
+
+  <figure>
+  <div class="diagram-frame">
+    <svg viewBox="0 0 1400 480" role="img" aria-label="Trois chaînes de capteurs (IMU à 1 kHz, encodeur ABZ, ODrive CAN) convergent dans task_control à 500 Hz, qui appelle l'overlay antipatinage puis publie vers task_motor_tx et le bus CAN.">
+      <defs>
+        <marker id="arrowFwd" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+
+      <!-- col1: sensors -->
+      <rect class="box" x="20" y="30" width="220" height="100" rx="8"/>
+      <text x="130" y="65" text-anchor="middle" class="lbl-title">ICM-45686</text>
+      <text x="130" y="82" text-anchor="middle" class="lbl-sub">1 kHz SPI</text>
+      <text x="130" y="97" text-anchor="middle" class="lbl-sub">accel + gyro bruts</text>
+
+      <rect class="box" x="20" y="190" width="220" height="100" rx="8"/>
+      <text x="130" y="225" text-anchor="middle" class="lbl-title">Encodeur ABZ</text>
+      <text x="130" y="242" text-anchor="middle" class="lbl-sub">21-bit, 1 roue</text>
+      <text x="130" y="257" text-anchor="middle" class="lbl-sub">TIM hardware count</text>
+
+      <rect class="box" x="20" y="350" width="220" height="100" rx="8"/>
+      <text x="130" y="385" text-anchor="middle" class="lbl-title">ODrive ×2 (CAN)</text>
+      <text x="130" y="402" text-anchor="middle" class="lbl-sub">100 Hz + RTR</text>
+      <text x="130" y="417" text-anchor="middle" class="lbl-sub">vel / pos par roue</text>
+
+      <!-- col2: acquisition tasks -->
+      <rect class="box" x="320" y="30" width="230" height="100" rx="8"/>
+      <text x="435" y="60" text-anchor="middle" class="lbl-title">task_imu</text>
+      <text x="435" y="77" text-anchor="middle" class="lbl-sub">filtre complémentaire</text>
+      <text x="435" y="92" text-anchor="middle" class="lbl-sub">(imu_fusion.c, α=0.999)</text>
+      <text x="435" y="112" text-anchor="middle" class="lbl-arrow">→ pitch, pitch_rate, yaw_rate</text>
+
+      <rect class="box" x="320" y="190" width="230" height="100" rx="8"/>
+      <text x="435" y="225" text-anchor="middle" class="lbl-title">task_encoder</text>
+      <text x="435" y="242" text-anchor="middle" class="lbl-sub">500 Hz snapshot</text>
+      <text x="435" y="262" text-anchor="middle" class="lbl-arrow">→ vel_wheel, pos_wheel</text>
+
+      <rect class="box" x="320" y="350" width="230" height="100" rx="8"/>
+      <text x="435" y="385" text-anchor="middle" class="lbl-title">task_odrive</text>
+      <text x="435" y="402" text-anchor="middle" class="lbl-sub">encoder snapshot</text>
+      <text x="435" y="422" text-anchor="middle" class="lbl-arrow">→ vel_motor_l/r</text>
+
+      <!-- arrows sensor -> task -->
+      <line x1="240" y1="80" x2="315" y2="80" marker-end="url(#arrowFwd)"/>
+      <line x1="240" y1="240" x2="315" y2="240" marker-end="url(#arrowFwd)"/>
+      <line x1="240" y1="400" x2="315" y2="400" marker-end="url(#arrowFwd)"/>
+
+      <!-- col3: control task hub -->
+      <rect class="box" x="640" y="150" width="260" height="180" rx="8"/>
+      <text x="770" y="185" text-anchor="middle" class="lbl-title">task_control — 500 Hz</text>
+      <text x="770" y="204" text-anchor="middle" class="lbl-sub">control_strategy_ff_cascade_update()</text>
+      <text x="770" y="228" text-anchor="middle" class="lbl-sub">cascade vitesse → tangage</text>
+      <text x="770" y="244" text-anchor="middle" class="lbl-sub">+ FF gravité + PD + frottement</text>
+      <text x="770" y="260" text-anchor="middle" class="lbl-sub">(détail : figure 2)</text>
+      <text x="770" y="284" text-anchor="middle" class="lbl-sub">estop si |pitch| &gt; 45° ou IMU invalide</text>
+      <text x="770" y="300" text-anchor="middle" class="lbl-sub" fill="var(--accent-3)">gouverné par app_ctrl_params (live)</text>
+
+      <!-- converging arrows -->
+      <path class="arrow" d="M550,80 C600,80 600,190 635,215" marker-end="url(#arrowFwd)"/>
+      <line x1="550" y1="240" x2="635" y2="240" marker-end="url(#arrowFwd)"/>
+      <path class="arrow" d="M550,400 C600,400 600,290 635,265" marker-end="url(#arrowFwd)"/>
+
+      <!-- col4: wheel_contact overlay -->
+      <rect class="box safety off" x="980" y="150" width="200" height="180" rx="8"/>
+      <text x="1080" y="185" text-anchor="middle" class="lbl-title">wheel_contact_update()</text>
+      <text x="1080" y="204" text-anchor="middle" class="lbl-sub">antipatinage overlay</text>
+      <text x="1080" y="222" text-anchor="middle" class="lbl-sub">NORMAL / SYNC / BOTH_AIR</text>
+      <text x="1080" y="238" text-anchor="middle" class="lbl-sub">/ RECOVERY (fig. 3)</text>
+      <text x="1080" y="262" text-anchor="middle" class="lbl-sub" fill="var(--accent-3)">désactivé par défaut</text>
+      <text x="1080" y="278" text-anchor="middle" class="lbl-sub" fill="var(--accent-3)">(ANTIPATINAGE_ENABLE=0)</text>
+
+      <line x1="900" y1="240" x2="975" y2="240" marker-end="url(#arrowFwd)"/>
+      <text x="937" y="232" text-anchor="middle" class="lbl-arrow">τ_L,τ_R prés</text>
+
+      <!-- col5: motor tx + CAN -->
+      <rect class="box" x="1200" y="150" width="180" height="180" rx="8" transform="translate(0,0)"/>
+      <text x="1290" y="185" text-anchor="middle" class="lbl-title">task_motor_tx</text>
+      <text x="1290" y="203" text-anchor="middle" class="lbl-sub">500 Hz</text>
+      <text x="1290" y="223" text-anchor="middle" class="lbl-sub">SET_INPUT_TORQUE ×2</text>
+      <text x="1290" y="241" text-anchor="middle" class="lbl-sub">CAN 500 kbit/s</text>
+      <text x="1290" y="263" text-anchor="middle" class="lbl-sub">nœud 0 = gauche</text>
+      <text x="1290" y="279" text-anchor="middle" class="lbl-sub">nœud 1 = droite</text>
+
+      <line x1="1180" y1="240" x2="1195" y2="240" marker-end="url(#arrowFwd)"/>
+      <text x="1240" y="128" text-anchor="middle" class="lbl-arrow">τ_L, τ_R (Nm)</text>
+    </svg>
+  </div>
+  <figcaption><b>Figure 1.</b> Trois chaînes d'acquisition indépendantes (IMU 1 kHz, encodeur ABZ, ODrive CAN) publient des snapshots horodatés lus par <code style="font-family:var(--mono)">task_control</code> à 500&nbsp;Hz. L'overlay antipatinage (case en tirets) est implémenté et exercé à chaque cycle mais désactivé par défaut sur cette branche.</figcaption>
+  </figure>
+</section>
+
+<section id="loop">
+  <h2><span class="num">02</span> Boucle de commande — mécanisme détaillé</h2>
+  <p class="lede">Le trajet direct (haut, en noir) transforme une consigne de vitesse en couple moteur en trois étages : la <b>cascade</b> (vitesse → angle de tangage de consigne), la <b>boucle interne</b> (feed-forward gravité + PD sur l'angle), puis la <b>répartition</b> gauche/droite. Le trajet de contre-réaction (bas, en vert) montre quels capteurs referment quelle boucle.</p>
+
+  <figure>
+  <div class="diagram-frame">
+    <svg viewBox="0 0 1640 480" role="img" aria-label="Boucle fermée : vel_ref traverse la boucle externe, la cascade vitesse-vers-tangage, le PD de tangage combiné au feed-forward gravité, la compensation de frottement, le filtre de sortie, la répartition gauche/droite et l'overlay antipatinage jusqu'au couple moteur ; le robot referme la boucle en renvoyant pitch, vitesse de roue et vitesse moteur vers les étages correspondants.">
+      <defs>
+        <marker id="arrowFwd2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+        <marker id="arrowFb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--accent-2)"/>
+        </marker>
+      </defs>
+
+      <!-- forward path boxes: y=30 h=130 -->
+      <!-- 1 -->
+      <rect class="box" x="10" y="40" width="130" height="110" rx="7"/>
+      <text x="75" y="85" text-anchor="middle" class="lbl-title">vel_ref</text>
+      <text x="75" y="102" text-anchor="middle" class="lbl-sub">(ou x_ref si</text>
+      <text x="75" y="116" text-anchor="middle" class="lbl-sub">outer_mode=1)</text>
+
+      <!-- 2 -->
+      <rect class="box" x="175" y="40" width="150" height="110" rx="7"/>
+      <text x="250" y="80" text-anchor="middle" class="lbl-title">Boucle externe</text>
+      <text x="250" y="98" text-anchor="middle" class="lbl-sub">vitesse directe, ou</text>
+      <text x="250" y="112" text-anchor="middle" class="lbl-sub">x→P+EMA−Kd·v</text>
+      <text x="250" y="128" text-anchor="middle" class="lbl-sub">+ slew-limiter</text>
+
+      <!-- 3 -->
+      <rect class="box" x="360" y="40" width="170" height="110" rx="7"/>
+      <text x="445" y="76" text-anchor="middle" class="lbl-title">Cascade vitesse</text>
+      <text x="445" y="93" text-anchor="middle" class="lbl-sub">Kp·e + Kema·ema(e)</text>
+      <text x="445" y="107" text-anchor="middle" class="lbl-sub">+ Kd·v̇ − Kacc·v̇_ref</text>
+      <text x="445" y="124" text-anchor="middle" class="lbl-sub">→ pitch_trim (clamp ±15°)</text>
+
+      <!-- 4 -->
+      <rect class="box" x="565" y="40" width="140" height="110" rx="7"/>
+      <text x="635" y="80" text-anchor="middle" class="lbl-title">+ pitch_ref</text>
+      <text x="635" y="98" text-anchor="middle" class="lbl-sub">= pitch_ref_eff</text>
+      <text x="635" y="116" text-anchor="middle" class="lbl-sub">(consigne d'angle)</text>
+
+      <!-- 5 : PD + FF -->
+      <rect class="box" x="740" y="20" width="190" height="150" rx="7"/>
+      <text x="835" y="52" text-anchor="middle" class="lbl-title">Équilibrage</text>
+      <text x="835" y="70" text-anchor="middle" class="lbl-sub">u_ff = −K_ff·sin(θ)</text>
+      <text x="835" y="86" text-anchor="middle" class="lbl-sub">u_fb = Kθ·θ_err − Kω·θ̇</text>
+      <text x="835" y="102" text-anchor="middle" class="lbl-sub">     + Kv·(vref−v)</text>
+      <text x="835" y="122" text-anchor="middle" class="lbl-sub" fill="var(--ink)">u_raw = u_ff + u_fb</text>
+
+      <!-- 6 -->
+      <rect class="box" x="965" y="40" width="140" height="110" rx="7"/>
+      <text x="1035" y="76" text-anchor="middle" class="lbl-title">Frottement</text>
+      <text x="1035" y="94" text-anchor="middle" class="lbl-sub">Coulomb statique/</text>
+      <text x="1035" y="108" text-anchor="middle" class="lbl-sub">cinétique, gated</text>
+      <text x="1035" y="124" text-anchor="middle" class="lbl-sub">(|θ|,|θ̇| faibles)</text>
+
+      <!-- 7 -->
+      <rect class="box" x="1140" y="40" width="130" height="110" rx="7"/>
+      <text x="1205" y="80" text-anchor="middle" class="lbl-title">LPF sortie</text>
+      <text x="1205" y="98" text-anchor="middle" class="lbl-sub">α = 0.50</text>
+      <text x="1205" y="116" text-anchor="middle" class="lbl-sub">u_raw → u</text>
+
+      <!-- 8 -->
+      <rect class="box" x="1305" y="30" width="150" height="130" rx="7"/>
+      <text x="1380" y="64" text-anchor="middle" class="lbl-title">Répartition L/R</text>
+      <text x="1380" y="82" text-anchor="middle" class="lbl-sub">τ_L = u − u_yaw + Δτ_L</text>
+      <text x="1380" y="97" text-anchor="middle" class="lbl-sub">τ_R = u + u_yaw + Δτ_R</text>
+      <text x="1380" y="115" text-anchor="middle" class="lbl-sub">Δτ : accel moteur</text>
+      <text x="1380" y="129" text-anchor="middle" class="lbl-sub">(shelved, gain=0)</text>
+
+      <!-- 9 antipatinage + clamp -->
+      <rect class="box safety off" x="1490" y="30" width="150" height="130" rx="7"/>
+      <text x="1565" y="64" text-anchor="middle" class="lbl-title">Antipatinage</text>
+      <text x="1565" y="82" text-anchor="middle" class="lbl-sub">override si roue</text>
+      <text x="1565" y="96" text-anchor="middle" class="lbl-sub">en l'air (désactivé)</text>
+      <text x="1565" y="118" text-anchor="middle" class="lbl-sub">clamp ±cmd_max</text>
+      <text x="1565" y="132" text-anchor="middle" class="lbl-sub">→ τ_L, τ_R (Nm)</text>
+
+      <!-- forward arrows -->
+      <line x1="140" y1="95" x2="172" y2="95" marker-end="url(#arrowFwd2)"/>
+      <line x1="325" y1="95" x2="357" y2="95" marker-end="url(#arrowFwd2)"/>
+      <line x1="530" y1="95" x2="562" y2="95" marker-end="url(#arrowFwd2)"/>
+      <line x1="705" y1="95" x2="737" y2="95" marker-end="url(#arrowFwd2)"/>
+      <line x1="930" y1="95" x2="962" y2="95" marker-end="url(#arrowFwd2)"/>
+      <line x1="1105" y1="95" x2="1137" y2="95" marker-end="url(#arrowFwd2)"/>
+      <line x1="1270" y1="95" x2="1302" y2="95" marker-end="url(#arrowFwd2)"/>
+      <line x1="1455" y1="95" x2="1487" y2="95" marker-end="url(#arrowFwd2)"/>
+
+      <!-- plant box, right side, spans full height -->
+      <rect class="box plant" x="1330" y="330" width="300" height="120" rx="8"/>
+      <text x="1480" y="368" text-anchor="middle" class="lbl-title">Robot (plante)</text>
+      <text x="1480" y="386" text-anchor="middle" class="lbl-sub">pendule inversé 2 roues</text>
+      <text x="1480" y="402" text-anchor="middle" class="lbl-sub">m=1.335 kg, h=0.145 m</text>
+      <text x="1480" y="418" text-anchor="middle" class="lbl-sub">réducteur 3:16, r_roue=0.04 m</text>
+
+      <path class="arrow" d="M1640,95 h20 v255 h-190" marker-end="url(#arrowFwd2)"/>
+      <text x="1610" y="180" text-anchor="middle" class="lbl-arrow" writing-mode="vertical-rl">τ_L, τ_R</text>
+
+      <!-- feedback rail -->
+      <line class="fb" x1="1330" y1="390" x2="90" y2="390" marker-end="url(#arrowFb)"/>
+      <text x="700" y="380" text-anchor="middle" class="lbl-arrow" fill="var(--accent-2)">bus de contre-réaction (IMU + encodeur ABZ + ODrive CAN)</text>
+
+      <!-- vertical feedback taps -->
+      <path class="fb arrow" d="M90,390 V160" marker-end="url(#arrowFb)"/>
+      <text x="65" y="280" text-anchor="middle" class="lbl-arrow" fill="var(--accent-2)" writing-mode="vertical-rl">vel_ref</text>
+
+      <path class="fb arrow" d="M445,390 V152" marker-end="url(#arrowFb)"/>
+      <text x="465" y="280" text-anchor="middle" class="lbl-arrow" fill="var(--accent-2)">v_wheel (ABZ)</text>
+
+      <path class="fb arrow" d="M835,390 V172" marker-end="url(#arrowFb)"/>
+      <text x="855" y="280" text-anchor="middle" class="lbl-arrow" fill="var(--accent-2)">pitch, θ̇ (IMU)</text>
+
+      <path class="fb arrow" d="M1565,390 V162" marker-end="url(#arrowFb)"/>
+      <text x="1585" y="280" text-anchor="middle" class="lbl-arrow" fill="var(--accent-2)">vel_motor_l/r, yaw_rate</text>
+    </svg>
+  </div>
+  <div class="legend">
+    <span class="fwd"><i></i> trajet direct (calcul du couple)</span>
+    <span class="fb"><i></i> contre-réaction (mesures capteurs)</span>
+    <span class="plant"><i></i> plante physique (non codée, referme la boucle)</span>
+  </div>
+  <figcaption><b>Figure 2.</b> La cascade (étage 3) transforme une erreur de <i>vitesse</i> en angle de tangage de consigne ; l'étage 5 asservit le <i>tangage</i> autour de cette consigne avec un feed-forward de gravité. Les cases en tirets (antipatinage) sont câblées mais inactives par défaut — voir §4.</figcaption>
+  </figure>
+</section>
+
+<section id="antipat">
+  <h2><span class="num">03</span> Vue rapide — machine à états antipatinage</h2>
+  <p class="lede">Chaque roue peut décrocher du sol (marche, ramassage). <code style="font-family:var(--mono)">wheel_contact.c</code> détecte l'événement via η&nbsp;=&nbsp;|accélération angulaire| / couple et bascule le mode de commande — spécification complète dans <code style="font-family:var(--mono)">ANTIPATINAGE.md</code>. Implémenté, mais <b>désactivé par défaut</b> sur cette branche.</p>
+
+  <figure>
+  <div class="diagram-frame">
+    <svg viewBox="0 0 1040 300" role="img" aria-label="Machine à états : NORMAL passe à SYNC_L, SYNC_R ou BOTH_AIR selon quelle(s) roue(s) décroche(nt) ; chaque mode revient à NORMAL via un état RECOVERY qui réancre la position et relance progressivement le couple.">
+      <defs>
+        <marker id="arrowState" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+
+      <rect class="box" x="30" y="110" width="150" height="80" rx="40"/>
+      <text x="105" y="145" text-anchor="middle" class="lbl-state">NORMAL</text>
+      <text x="105" y="162" text-anchor="middle" class="lbl-sub">contact, u actif</text>
+
+      <rect class="box" x="330" y="20" width="150" height="80" rx="40"/>
+      <text x="405" y="55" text-anchor="middle" class="lbl-state">SYNC_L</text>
+      <text x="405" y="72" text-anchor="middle" class="lbl-sub">L en l'air</text>
+
+      <rect class="box" x="330" y="200" width="150" height="80" rx="40"/>
+      <text x="405" y="235" text-anchor="middle" class="lbl-state">SYNC_R</text>
+      <text x="405" y="252" text-anchor="middle" class="lbl-sub">R en l'air</text>
+
+      <rect class="box" x="620" y="110" width="150" height="80" rx="40"/>
+      <text x="695" y="140" text-anchor="middle" class="lbl-state">BOTH_AIR</text>
+      <text x="695" y="157" text-anchor="middle" class="lbl-sub">u coupé, ω→v_good</text>
+      <text x="695" y="172" text-anchor="middle" class="lbl-sub">integrator_trust=0</text>
+
+      <rect class="box safety" x="860" y="110" width="150" height="80" rx="40"/>
+      <text x="935" y="145" text-anchor="middle" class="lbl-state">RECOVERY</text>
+      <text x="935" y="162" text-anchor="middle" class="lbl-sub">rampe u, réancre x_m</text>
+
+      <path class="arrow" d="M170,120 C220,80 280,60 328,58" marker-end="url(#arrowState)"/>
+      <text x="240" y="65" text-anchor="middle" class="lbl-arrow">η_L ↑, decorr., k_dom</text>
+
+      <path class="arrow" d="M170,180 C220,220 280,240 328,242" marker-end="url(#arrowState)"/>
+      <text x="240" y="240" text-anchor="middle" class="lbl-arrow">η_R ↑, decorr., k_dom</text>
+
+      <path class="arrow" d="M170,145 C280,150 500,150 618,148" marker-end="url(#arrowState)"/>
+      <text x="380" y="165" text-anchor="middle" class="lbl-arrow">η_L, η_R ↑ + pitch_mismatch</text>
+
+      <path class="arrow" d="M480,60 C560,70 600,100 622,125" marker-end="url(#arrowState)"/>
+      <path class="arrow" d="M480,240 C560,230 600,200 622,175" marker-end="url(#arrowState)"/>
+
+
+      <path class="arrow" d="M770,140 C800,140 810,140 858,143" marker-end="url(#arrowState)"/>
+      <path class="arrow" d="M480,45 C560,20 800,30 858,120" marker-end="url(#arrowState)"/>
+      <path class="arrow" d="M480,255 C560,275 800,260 858,158" marker-end="url(#arrowState)"/>
+
+      <path class="arrow" d="M935,108 C935,60 500,30 180,120" marker-end="url(#arrowState)"/>
+      <text x="530" y="35" text-anchor="middle" class="lbl-arrow">après T_recover (150 ms)</text>
+    </svg>
+  </div>
+  <figcaption><b>Figure 3.</b> Sortie de chaque mode « roue en l'air » vers <b>RECOVERY</b> dès que η repasse sous le seuil bas, puis retour à <b>NORMAL</b> après une rampe de 150&nbsp;ms qui réancre l'intégrateur de position. Détail complet des seuils (η_on/off, k_dom, T_on/off) dans <code style="font-family:var(--mono)">ANTIPATINAGE.md</code>.</figcaption>
+  </figure>
+</section>
+
+<section id="eqs">
+  <h2><span class="num">04</span> Équations clés</h2>
+  <div class="eq-grid">
+    <div class="eq-card">
+      <h3>Estimation de tangage (filtre complémentaire, 1 kHz)</h3>
+      <code>pitch_accel = atan2(−a_fwd, a_up)
+si accel valide (‖a‖≈g) :
+  pitch = α·(pitch + θ̇·dt) + (1−α)·pitch_accel
+sinon (accél. linéaire — poussée) :
+  pitch = pitch + θ̇·dt        // gyro pur
+α = 0.999 → correction gravité très lente</code>
+    </div>
+    <div class="eq-card">
+      <h3>Cascade vitesse → tangage de consigne</h3>
+      <code>e = vel_ref − v_roue
+e_f = α·e_f + (1−α)·e         // fuite, pas d'intégrale pure
+pitch_cmd = Kp·e + Kema·e_f + Kd·v̇ − Kacc·v̇_ref
+pitch_trim = −clamp(pitch_cmd, ±15°)</code>
+    </div>
+    <div class="eq-card">
+      <h3>Boucle d'équilibrage</h3>
+      <code>θ_err = pitch_ref_eff − pitch
+u_ff = −K_ff · sin(pitch)
+u_fb = Kθ·θ_err − Kω·θ̇ + Kv·(vel_ref−v_roue)
+u = LPF(u_ff + u_fb + frottement, α=0.50)</code>
+    </div>
+    <div class="eq-card">
+      <h3>Répartition gauche / droite</h3>
+      <code>τ_L = clamp(u − u_yaw + Δτ_L, ±cmd_max)
+τ_R = clamp(u + u_yaw + Δτ_R, ±cmd_max)
+u_yaw : régulateur de vitesse de lacet ψ̇ (désactivé, kp=kd=0)
+Δτ   : correction accel moteur (shelved, alpha_kp=0)</code>
+    </div>
+  </div>
+</section>
+
+<section id="params">
+  <h2><span class="num">05</span> Paramètres réglables (valeurs par défaut, branche <code style="font-family:var(--mono); font-size:0.85em;">hypothesis_lab</code>)</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Étage</th><th>Paramètre</th><th>Défaut</th><th>Rôle</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Sécurité</td><td class="num">pitch_failsafe_rad</td><td class="num">0.785 (45°)</td><td>Estop si |tangage| dépassé</td></tr>
+        <tr><td>Sécurité</td><td class="num">cmd_max_torque_nm</td><td class="num">0.08</td><td>Clamp couple final / roue</td></tr>
+        <tr><td>Équilibrage</td><td class="num">ff_grav_k</td><td class="num">0.14</td><td>Feed-forward gravité (~80 % du FF plein, 0.178)</td></tr>
+        <tr><td>Équilibrage</td><td class="num">ff_fb_k_pitch / k_rate</td><td class="num">0.055 / 0.013</td><td>Gains P / D du PD de tangage</td></tr>
+        <tr><td>Équilibrage</td><td class="num">ff_output_alpha</td><td class="num">0.50</td><td>Lissage de la sortie u</td></tr>
+        <tr><td>Cascade</td><td class="num">cascade_vel_kp / kd</td><td class="num">0.08 / 0.008</td><td>P / D sur l'erreur de vitesse</td></tr>
+        <tr><td>Cascade</td><td class="num">cascade_vel_err_ema_alpha</td><td class="num">0.80</td><td>Fuite de l'intégrateur (EMA)</td></tr>
+        <tr><td>Cascade</td><td class="num">cascade_pitch_ref_max_rad</td><td class="num">0.26 (~15°)</td><td>Clamp de l'angle de consigne</td></tr>
+        <tr><td>Frottement</td><td class="num">friction_static / kinetic_nm</td><td class="num">0.0045 / 0.003</td><td>Coulomb arrêt / glissement (mode 1)</td></tr>
+        <tr><td>Cap</td><td class="num">heading_kp / kd</td><td class="num">0 / 0</td><td>Régulateur ψ̇ — désactivé</td></tr>
+        <tr><td>Position</td><td class="num">pos_kp / kd</td><td class="num">0 / 0</td><td>Mode position implémenté, non réglé</td></tr>
+        <tr><td>Accel moteur</td><td class="num">alpha_kp</td><td class="num">0</td><td>Correction shelved (2026-08), code exécuté sans effet</td></tr>
+        <tr><td>Antipatinage</td><td class="num">APP_CTRL_ANTIPATINAGE_ENABLE</td><td class="num">0</td><td>Détection + overlay désactivés (compile-time)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="notes">
+  <h2><span class="num">06</span> Points d'attention relevés à l'analyse</h2>
+  <div class="notes">
+    <div class="note"><b>Antipatinage inactif par défaut.</b> <code style="font-family:var(--mono)">APP_CTRL_ANTIPATINAGE_ENABLE=0</code> et <code style="font-family:var(--mono)">APP_ANTIPAT_SYNC_ENABLE=0</code> : aucune protection roue-en-l'air tant que ces flags ne sont pas activés — seul l'estop 45° reste actif.</div>
+    <div class="note"><b>dt fixe, non mesuré.</b> <code style="font-family:var(--mono)">task_control</code> passe <code style="font-family:var(--mono)">dt_s = 2&nbsp;ms</code> codé en dur, jamais le delta réel entre réveils FreeRTOS — un jitter du scheduler fausserait silencieusement les dérivées/filtres.</div>
+    <div class="note"><b>Écart au réglage baseline validé.</b> <code style="font-family:var(--mono)">cmd_max_torque_nm</code> par défaut = 0.08 Nm, contre 0.04 Nm dans le réglage banc documenté (<code style="font-family:var(--mono)">BALANCE_BASELINE.md</code>) — à réappliquer avant un test terrain.</div>
+    <div class="note"><b>Gains EMA/LPF liés à 500 Hz.</b> La plupart des constantes de lissage (α de cascade, LPF sortie, alpha_lpf…) sont des coefficients par itération, pas des constantes de temps — un changement de fréquence de boucle imposerait de tout retuner.</div>
+  </div>
+</section>
+
+<section id="review">
+  <h2><span class="num">07</span> Avis du spécialiste — évaluation physique / mécanique</h2>
+  <p class="lede">Relecture du plan de masse et du budget de couple à la lumière de la plante mesurée (m, h, réducteur) et des essais moteur/ODrive menés en parallèle sur ce projet (bring-up SF2804 sur <code style="font-family:var(--mono)">0x387f354d3235</code>). Il s'agit d'un avis d'ingénierie croisant les sources existantes, pas d'une nouvelle mesure au banc.</p>
+
+  <div class="eq-grid" style="margin-bottom:18px;">
+    <div class="eq-card">
+      <h3>Marge de couple à la butée de cascade (15°)</h3>
+      <code>FF seul à 15° = ff_grav_k·sin(15°)
+            = 0.14 × 0.2588 ≈ 0.036 Nm
+Marge restante pour PD + frottement :
+  cmd_max=0.08 (défaut actuel)  → ≈0.044 Nm (55 %)
+  cmd_max=0.04 (banc validé)    → ≈0.004 Nm (9 %)</code>
+    </div>
+    <div class="eq-card">
+      <h3>Roue en l'air — temps avant survitesse (sans limiteur)</h3>
+      <code>J_rotor ≈ 1.12e-5 kg·m² (identifié, roue libre)
+α_libre = τ/J ≈ 0.08 / 1.12e-5 ≈ 1100 tr/s²
+t(0 → vel_limit=2 tr/s) ≈ 2 / 1100 ≈ 1.8 ms
+(ordre de grandeur ; limiteur ODrive non revalidé)</code>
+    </div>
+  </div>
+
+  <div class="notes">
+    <div class="note"><b>Feed-forward gravité : calcul cohérent, bonne pratique.</b> <code style="font-family:var(--mono)">K_ff_full = m·g·h / (2·réducteur) ≈ 0.178 Nm</code> (<code style="font-family:var(--mono)">app_config.h:212-218</code>) est dérivé de grandeurs mesurées (masse, hauteur de CoM, rapport de réduction), pas d'une constante ajustée à l'aveugle — c'est la bonne approche pour linéariser la gravité et laisser le PD gérer seulement l'écart de modèle. Sous-doser le FF à 0.14 (~79 % du plein) plutôt que le pousser à 100 % est un choix défendable : une erreur de modélisation sur un FF plein deviendrait elle-même une source d'instabilité, alors qu'un FF légèrement sous-dosé laisse le PD absorber l'écart de façon stable.</div>
+    <div class="note"><b>La marge de couple au bord de la cascade dépend fortement du <code style="font-family:var(--mono)">cmd_max</code> retenu.</b> Voir calcul ci-dessus : à 0.04 Nm (réglage validé <code style="font-family:var(--mono)">BALANCE_BASELINE.md</code>), il ne reste quasiment aucune autorité de correction à 15° de gîte. Le banc n'a probablement jamais sondé cette limite (<code style="font-family:var(--mono)">cascade_vel_kp=0.001</code> très douce ⇒ tangage mesuré max 1.88°, loin des 15°), mais toute évolution poussant le robot plus près de la butée (cascade plus agressive, mode position actif, perturbation externe franche) exposerait cette marge très fine si `cmd_max` redescend à 0.04.</div>
+    <div class="note"><b>Roue en l'air : deux filets de sécurité contre la survitesse moteur, aucun validé simultanément.</b> Le firmware pilote en couple pur (<code style="font-family:var(--mono)">SET_INPUT_TORQUE</code>) : si une roue quitte le sol, rien ne s'oppose mécaniquement au couple d'équilibrage. Le filet côté STM32 (<code style="font-family:var(--mono)">wheel_contact.c</code>) est désactivé par défaut (§3.8/§4). Côté ODrive, le firmware stock 0.5.1 n'avait historiquement aucun limiteur de vitesse en mode couple — constaté au banc sur ce même ODrive/SF2804 : <code style="font-family:var(--mono)">OVERSPEED</code> en moins de 0.6&nbsp;s à vide. Le correctif ajouté aujourd'hui (<code style="font-family:var(--mono)">enable_current_mode_vel_limit</code> + <code style="font-family:var(--mono)">limitVel()</code>, <code style="font-family:var(--mono)">controller.cpp:223-227/432-438</code>) freine proportionnellement le couple à mesure que la vitesse approche <code style="font-family:var(--mono)">vel_limit</code> — mais avec l'inertie de rotor mesurée (voir calcul ci-dessus, ~1.8&nbsp;ms pour atteindre 2&nbsp;tr/s à couple plein sans frein), la bande proportionnelle risque d'être trop courte pour ce rotor spécifique, et le correctif <b>n'a pas encore été revalidé sur le matériel réel</b>. Tant que l'un des deux filets n'est pas confirmé actif et efficace, un lever de roue pendant un essai terrain n'a aucune protection éprouvée.</div>
+    <div class="note"><b>Le couple ODrive réellement livrable peut être inférieur au plafond STM32, sans erreur remontée.</b> <code style="font-family:var(--mono)">cmd_max_torque_nm</code> est un plafond logiciel en Nm absolus côté STM32, mais le couple physiquement disponible est borné par <code style="font-family:var(--mono)">torque_constant × current_lim</code> côté ODrive. Le dépôt contient plusieurs configurations moteur candidates avec des <code style="font-family:var(--mono)">current_lim</code>/<code style="font-family:var(--mono)">torque_constant</code> très différents selon les sessions de bring-up (SF2804 220&nbsp;kv, candidats "2836"/"4108" — <code style="font-family:var(--mono)">OdriveTool/Commands/Configs/</code>), et le <code style="font-family:var(--mono)">current_lim</code> observé pour l'axe SF2804 est passé de 1.5&nbsp;A (bring-up initial) à 10&nbsp;A (dump du 28/08) au fil des essais. Si le moteur finalement monté a un <code style="font-family:var(--mono)">current_lim</code> inférieur à <code style="font-family:var(--mono)">cmd_max_torque_nm / torque_constant</code>, l'ODrive écrête silencieusement sous le plafond STM32 — le budget de couple du point précédent ne serait alors qu'aspirationnel. À vérifier explicitement sur les deux ODrive effectivement montés.</div>
+    <div class="note"><b>Il manque un paramètre pour une vérification de stabilité rigoureuse : l'inertie du corps.</b> Le triplet <code style="font-family:var(--mono)">m / h / réducteur</code> suffit à dériver le FF gravité, mais pas à poser le modèle d'état complet du pendule inversé sur roues (couplage corps↔roue). Seule l'inertie du <b>rotor</b> (<code style="font-family:var(--mono)">J ≈ 1.12e-5 kg·m²</code>) est identifiée — pas celle du corps autour de l'axe des roues. Sans elle, les gains PD (<code style="font-family:var(--mono)">Kθ=0.055</code>, <code style="font-family:var(--mono)">Kω=0.013</code>) ne peuvent être validés que par test au banc (ce qui a été fait, cf. <code style="font-family:var(--mono)">BALANCE_BASELINE.md</code>), pas par calcul — robuste empiriquement, mais sans marge de stabilité formelle (pas de root locus / placement de pôles possible en l'état). Une mesure simple (pendule bifilaire du châssis, ou bascule chronométrée en roue libre) débloquerait une vérification de marge de phase/gain plutôt qu'un réglage par tâtonnement seul.</div>
+  </div>
+</section>
+
+<section class="files">
+  <h2><span class="num">08</span> Sources</h2>
+  <p>Analyse complète et détaillée : <code>STM32/RobotSTM32FirmWare/docs/BALANCE_ALGORITHM.md</code>. Code : <code>control_strategy_ff_cascade.c</code>, <code>imu_fusion.c</code>, <code>wheel_contact.c</code>, <code>task_control.c</code>, <code>app_ctrl_params.c</code>, <code>app_config.h</code>. Avis §07 croisé avec <code>ODrive_S-fw-v0.5.1/Firmware/MotorControl/controller.cpp</code> et <code>OdriveTool/Commands/BALANCE_BASELINE.md</code> / <code>Configs/</code>.</p>
+</section>
+
+<footer>
+  Généré le 2026-09-11 à partir de l'analyse de la branche <code style="font-family:var(--mono)">hypothesis_lab</code> ; §07 ajouté le 2026-09-11 (avis d'ingénierie, pas une nouvelle mesure). Schéma statique, indépendant de tout outil externe.
+</footer>
+
+</body>
+</html>
