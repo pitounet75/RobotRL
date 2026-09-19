@@ -2,7 +2,7 @@
 
 #include <SimpleFOC.h>
 
-/** Two-shunt inline sense fed by DmaAdc, not analogRead. */
+/** Two-shunt inline sense fed by PWM-sync ADC, not analogRead. */
 class DmaInlineCurrentSense : public CurrentSense {
  public:
   DmaInlineCurrentSense(float shunt_ohm, float amp_gain, int pin_a, int pin_b);

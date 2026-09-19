@@ -115,26 +115,26 @@
 #endif
 
 #ifndef FOC_VOLTAGE_LIMIT
-#define FOC_VOLTAGE_LIMIT 2.0f
+#define FOC_VOLTAGE_LIMIT 6.0f
 #endif
 #ifndef FOC_VOLTAGE_ALIGN
-#define FOC_VOLTAGE_ALIGN 2.0f
+#define FOC_VOLTAGE_ALIGN 4.0f
 #endif
 #ifndef FOC_PWM_HZ
 #define FOC_PWM_HZ 20000u
 #endif
 
 #ifndef FOC_VEL_P
-#define FOC_VEL_P 0.08f
+#define FOC_VEL_P 0.12f
 #endif
 #ifndef FOC_VEL_I
-#define FOC_VEL_I 0.25f
+#define FOC_VEL_I 0.06f
 #endif
 #ifndef FOC_VEL_D
 #define FOC_VEL_D 0.0f
 #endif
 #ifndef FOC_VEL_LPF
-#define FOC_VEL_LPF 0.02f
+#define FOC_VEL_LPF 0.003f
 #endif
 #ifndef FOC_VEL_RAMP
 #define FOC_VEL_RAMP 5.0f
@@ -143,9 +143,9 @@
 #define FOC_VEL_LIMIT 80.0f
 #endif
 
-/** FOC task rate. Floor 8 kHz; climb toward 16 kHz while dt_max < 0.7 T. */
+/** FOC task rate. I2S ADC live: dt≈180–190 µs. 8 kHz (T=125) starves IDLE0 WDT. */
 #ifndef FOC_LOOP_HZ
-#define FOC_LOOP_HZ 8000u
+#define FOC_LOOP_HZ 4000u
 #endif
 #ifndef FOC_LOOP_HZ_MIN
 #define FOC_LOOP_HZ_MIN 4000u
@@ -155,13 +155,16 @@
 #endif
 
 #ifndef FOC_I_LIM
-#define FOC_I_LIM 0.6f
+#define FOC_I_LIM 2.0f
+#endif
+#ifndef FOC_I_LIM_MAX
+#define FOC_I_LIM_MAX 2.0f
 #endif
 #ifndef FOC_CURR_P
-#define FOC_CURR_P 0.15f
+#define FOC_CURR_P 0.5f /* 0.15: I-dominant, tq hunts ~14 s; tqv 2 does not */
 #endif
 #ifndef FOC_CURR_I
-#define FOC_CURR_I 8.0f
+#define FOC_CURR_I 1.0f /* 8: P=0.5 still hunts — I slews Uq through 0 */
 #endif
 #ifndef FOC_CURR_LPF
 #define FOC_CURR_LPF 0.003f
@@ -200,13 +203,13 @@
 #define ACOG_BINS_DEFAULT 3600u
 #endif
 #ifndef ACOG_SETTLE_POS
-#define ACOG_SETTLE_POS 0.02f
+#define ACOG_SETTLE_POS 0.1f
 #endif
 #ifndef ACOG_SETTLE_VEL
-#define ACOG_SETTLE_VEL 0.3f
+#define ACOG_SETTLE_VEL 1.0f
 #endif
 #ifndef ACOG_SETTLE_S
-#define ACOG_SETTLE_S 0.015f
+#define ACOG_SETTLE_S 0.005f
 #endif
 
 #if MOTOR_AXIS == 0

@@ -6,6 +6,16 @@
 
 namespace {
 
+void rampDriverPwm(BLDCDriver *d, float a0, float b0, float c0, float a1, float b1,
+                   float c1) {
+  constexpr int kSteps = 40;
+  for (int i = 1; i <= kSteps; ++i) {
+    const float t = (float)i / (float)kSteps;
+    d->setPwm(a0 + (a1 - a0) * t, b0 + (b1 - b0) * t, c0 + (c1 - c0) * t);
+    delay(5);
+  }
+}
+
 PhaseCurrent_s averageCurrents(DmaInlineCurrentSense *cs, int n) {
   PhaseCurrent_s acc{};
   acc.a = 0.0f;
@@ -76,10 +86,11 @@ int DmaInlineCurrentSense::driverAlign(float voltage) {
   int exit_flag = 1;
   constexpr float kMinA = 0.05f;
 
-  driver->setPwm(voltage, 0.0f, 0.0f);
-  delay(250);
+  /* Step PWM yanks the free rotor (~20–40° mech). Ramp in/out. */
+  rampDriverPwm(driver, 0.0f, 0.0f, 0.0f, voltage, 0.0f, 0.0f);
+  delay(200);
   PhaseCurrent_s c = averageCurrents(this, 40);
-  driver->setPwm(0.0f, 0.0f, 0.0f);
+  rampDriverPwm(driver, voltage, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
   delay(50);
 
   const float ab = (c.b != 0.0f) ? fabsf(c.a / c.b) : 100.0f;
@@ -103,10 +114,10 @@ int DmaInlineCurrentSense::driverAlign(float voltage) {
     gain_a_ *= (c.a >= 0.0f) ? 1.0f : -1.0f;
   }
 
-  driver->setPwm(0.0f, voltage, 0.0f);
-  delay(250);
+  rampDriverPwm(driver, 0.0f, 0.0f, 0.0f, 0.0f, voltage, 0.0f);
+  delay(200);
   c = averageCurrents(this, 40);
-  driver->setPwm(0.0f, 0.0f, 0.0f);
+  rampDriverPwm(driver, 0.0f, voltage, 0.0f, 0.0f, 0.0f, 0.0f);
   delay(50);
 
   const float ba = (c.a != 0.0f) ? fabsf(c.b / c.a) : 100.0f;

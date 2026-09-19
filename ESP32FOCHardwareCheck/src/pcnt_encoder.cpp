@@ -4,16 +4,17 @@
 #include <math.h>
 
 #include "config.h"
-#include "soc/pcnt_struct.h"
-#include "soc/soc.h"
 
 namespace {
 
 portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
-bool s_isr_installed = false;
 PcntEncoder *s_z_owner = nullptr;
 
-/* Smaller than INT16_MAX so a missed fold is ~90°, not 180° at CPR 65536. */
+/*
+ * ESP32 PCNT is 16-bit and *resets to 0* at h_lim/l_lim (not two's-complement
+ * wrap). Symmetric ±kPcntLim makes each reset a known step of L counts.
+ * Unfold in software on every read — no lim ISR, no pcnt_counter_clear.
+ */
 constexpr int16_t kPcntLim = 16384;
 
 }  // namespace
@@ -24,33 +25,37 @@ PcntEncoder::PcntEncoder(int pin_a, int pin_b, int pin_z, uint32_t ppr, pcnt_uni
       pin_z_(pin_z),
       unit_(unit),
       cpr_(4.0f * (float)ppr),
-      overflow_(0),
+      accum_(0),
+      hw_prev_(0),
       count_at_z_(0),
       index_found_(false),
       z_edges_(0),
       jumps_(0),
-      overflow_events_(0),
+      wrap_events_(0),
       jump_count_(0),
       last_update_us_(0),
+      vel_count_prev_(0),
+      vel_count_prev_us_(0),
       jump_log_{},
       jump_log_idx_(0),
       accept_z_(false),
       ok_(false) {}
 
-void IRAM_ATTR PcntEncoder::overflowIsr(void *arg) {
-  auto *self = static_cast<PcntEncoder *>(arg);
-  portENTER_CRITICAL_ISR(&s_mux);
-  if (PCNT.status_unit[self->unit_].h_lim_lat) {
-    self->overflow_ += (int64_t)kPcntLim;
-    self->overflow_events_ += 1;
-    pcnt_counter_clear(self->unit_);
-  } else if (PCNT.status_unit[self->unit_].l_lim_lat) {
-    self->overflow_ += (int64_t)(-kPcntLim);
-    self->overflow_events_ += 1;
-    pcnt_counter_clear(self->unit_);
+int64_t IRAM_ATTR PcntEncoder::foldLocked() const {
+  int16_t hw = 0;
+  pcnt_get_counter_value(unit_, &hw);
+  int32_t d = (int32_t)hw - (int32_t)hw_prev_;
+  constexpr int32_t kL = (int32_t)kPcntLim;
+  if (d < -(kL / 2)) {
+    d += kL;
+    wrap_events_ += 1;
+  } else if (d > (kL / 2)) {
+    d -= kL;
+    wrap_events_ += 1;
   }
-  PCNT.int_clr.val = BIT(self->unit_);
-  portEXIT_CRITICAL_ISR(&s_mux);
+  hw_prev_ = hw;
+  accum_ += (int64_t)d;
+  return accum_;
 }
 
 void IRAM_ATTR PcntEncoder::zIsr() {
@@ -58,7 +63,7 @@ void IRAM_ATTR PcntEncoder::zIsr() {
     return;
   }
   portENTER_CRITICAL_ISR(&s_mux);
-  const int64_t raw = s_z_owner->rawCountLocked();
+  const int64_t raw = s_z_owner->foldLocked();
   s_z_owner->z_edges_ += 1;
   /* First Z is the origin. Later pulses must not rebase count — that snaps
    * getAngle() by ~π or 2π and the velocity PID slams the shaft. */
@@ -67,22 +72,6 @@ void IRAM_ATTR PcntEncoder::zIsr() {
     s_z_owner->index_found_ = true;
   }
   portEXIT_CRITICAL_ISR(&s_mux);
-}
-
-int64_t PcntEncoder::rawCountLocked() const {
-  int16_t hw = 0;
-  int64_t extra = 0;
-  pcnt_get_counter_value(unit_, &hw);
-  /* Same race as ESP32Encoder::getCountRaw: ISR may not have run yet. */
-  if (PCNT.int_st.val & BIT(unit_)) {
-    pcnt_get_counter_value(unit_, &hw);
-    if (PCNT.status_unit[unit_].h_lim_lat) {
-      extra = (int64_t)kPcntLim;
-    } else if (PCNT.status_unit[unit_].l_lim_lat) {
-      extra = (int64_t)(-kPcntLim);
-    }
-  }
-  return overflow_ + extra + (int64_t)hw;
 }
 
 void PcntEncoder::init() {
@@ -130,29 +119,22 @@ void PcntEncoder::init() {
     pcnt_filter_enable(unit_);
   }
 
-  pcnt_event_enable(unit_, PCNT_EVT_H_LIM);
-  pcnt_event_enable(unit_, PCNT_EVT_L_LIM);
+  /* Lim still resets HW to 0 (ESP32). Do not IRQ or clear — foldLocked does. */
+  pcnt_event_disable(unit_, PCNT_EVT_H_LIM);
+  pcnt_event_disable(unit_, PCNT_EVT_L_LIM);
   pcnt_counter_pause(unit_);
+  pcnt_intr_disable(unit_);
 
-  if (!s_isr_installed) {
-    if (pcnt_isr_service_install(0) != ESP_OK) {
-      ok_ = false;
-      return;
-    }
-    s_isr_installed = true;
-  }
-  if (pcnt_isr_handler_add(unit_, overflowIsr, this) != ESP_OK) {
-    ok_ = false;
-    return;
-  }
-
-  overflow_ = 0;
   count_at_z_ = 0;
   index_found_ = false;
   z_edges_ = 0;
   accept_z_ = false;
+  wrap_events_ = 0;
   pcnt_counter_clear(unit_);
-  pcnt_intr_enable(unit_);
+  int16_t hw0 = 0;
+  pcnt_get_counter_value(unit_, &hw0);
+  hw_prev_ = hw0;
+  accum_ = 0;
   pcnt_counter_resume(unit_);
 
   s_z_owner = this;
@@ -162,7 +144,10 @@ void PcntEncoder::init() {
   z_edges_ = 0;
   index_found_ = false;
   count_at_z_ = 0;
-  overflow_ = 0;
+  wrap_events_ = 0;
+  pcnt_get_counter_value(unit_, &hw0);
+  hw_prev_ = hw0;
+  accum_ = 0;
   accept_z_ = true;
   portEXIT_CRITICAL(&s_mux);
 
@@ -185,7 +170,7 @@ int64_t PcntEncoder::count() const {
   int64_t z0 = 0;
   bool have_z = false;
   portENTER_CRITICAL(&s_mux);
-  raw = rawCountLocked();
+  raw = foldLocked();
   have_z = index_found_;
   z0 = count_at_z_;
   portEXIT_CRITICAL(&s_mux);
@@ -212,28 +197,16 @@ void PcntEncoder::update() {
   const uint32_t elapsed_us = now_us - last_update_us_;
   const int64_t c = count();
   const int64_t dc = c - jump_count_;
-  /* Speed-independent glitch test: explain away up to a few clean kPcntLim
-   * wraps (real h/l_lim crossings), then ask whether what's LEFT would
-   * require an instantaneous velocity no real shaft can reach. A true
-   * mechanical hiccup unfolds over many 125us loops (each with a small,
-   * physically plausible per-loop delta) — it never shows up as one huge
-   * delta in a single loop. So if the residual implies an impossible
-   * velocity, it's a counting artifact, not real motion, regardless of
-   * what speed we're testing at. */
-  const int64_t n_wraps = (dc >= 0) ? (dc + kPcntLim / 2) / kPcntLim
-                                     : -((-dc + kPcntLim / 2) / kPcntLim);
-  const int64_t wrap_explained = n_wraps * (int64_t)kPcntLim;
-  const int64_t residual = dc - wrap_explained;
   constexpr float kMaxPlausibleVelRadS = 6.0f * FOC_VEL_LIMIT;
   const float implied_vel_rad_s =
-      ((float)residual / cpr_) * _2PI / ((float)elapsed_us * 1e-6f);
-  if (fabsf(implied_vel_rad_s) > kMaxPlausibleVelRadS) {
+      ((float)dc / cpr_) * _2PI / ((float)elapsed_us * 1e-6f);
+  if (elapsed_us > 0u && fabsf(implied_vel_rad_s) > kMaxPlausibleVelRadS) {
     jumps_ += 1;
     JumpEvent &ev = jump_log_[jump_log_idx_ % kJumpLogCap];
     ev.seq = jumps_;
     ev.delta = (int32_t)dc;
     ev.elapsed_us = elapsed_us;
-    ev.overflow_delta = (int32_t)wrap_explained;
+    ev.overflow_delta = 0;
     jump_log_idx_ = (uint8_t)(jump_log_idx_ + 1);
   }
   last_update_us_ = now_us;
@@ -270,4 +243,17 @@ int32_t PcntEncoder::getFullRotations() {
   float shaft = 0.0f;
   angleFromCount(count(), &rot, &shaft);
   return rot;
+}
+
+float PcntEncoder::getVelocity() {
+  const uint32_t now_us = micros();
+  const float Ts = (float)(now_us - vel_count_prev_us_) * 1e-6f;
+  if (Ts < min_elapsed_time) {
+    return velocity;
+  }
+  const int64_t c = count();
+  velocity = (float)(c - vel_count_prev_) * (_2PI / cpr_) / Ts;
+  vel_count_prev_ = c;
+  vel_count_prev_us_ = now_us;
+  return velocity;
 }

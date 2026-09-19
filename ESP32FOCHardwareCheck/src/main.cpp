@@ -21,6 +21,7 @@
 #include "config.h"
 #include "dma_adc.h"
 #include "dma_current_sense.h"
+#include "mcpwm_driver.h"
 #include "pcnt_encoder.h"
 
 namespace {
@@ -62,7 +63,29 @@ uint32_t foc_hz = FOC_LOOP_HZ;
 volatile uint32_t dt_us = 0;
 volatile uint32_t dt_max_us = 0;
 volatile uint32_t foc_late = 0;
+volatile uint32_t foc_loop_calls = 0;
+volatile bool ota_active = false;
 TaskHandle_t foc_task_handle = nullptr;
+
+/* Fast velocity/current burst capture (vcap/vdump): a status line every 1 s
+ * only samples a ~500 Hz-updating estimate at essentially a random phase.
+ * This grabs every foc_task iteration instead, so we can see the real
+ * waveform and tell a genuine mechanical oscillation (dcount would swing
+ * too) from a getVelocity()-only artifact (dcount stays smooth, vel doesn't). */
+constexpr uint32_t kVCapMax = 2500;
+struct VCapSample {
+  int32_t dcount;
+  float vel;
+  float iq;
+};
+VCapSample vcap_buf[kVCapMax];
+volatile uint32_t vcap_idx = 0;
+volatile uint32_t vcap_target = 0;
+/* 1 = capture every loop; N = keep only every Nth, so a long request still
+ * fits the buffer (dcount then spans N loops, still exact/unambiguous). */
+volatile uint32_t vcap_decim = 1;
+uint32_t vcap_loop_ctr = 0;
+int64_t vcap_last_count = 0;
 
 char line[96];
 uint8_t line_len = 0;
@@ -109,6 +132,19 @@ void applyLimits() {
   motor.current_limit = current_limit;
   motor.PID_velocity.limit = current_limit;
   motor.P_angle.limit = FOC_VEL_LIMIT;
+}
+
+void enableIfNeeded() {
+  /* SimpleFOC enable() always setPwm(0,0,0). Re-arming on every CLI
+   * command hard-stops the shaft before the new target. */
+  if (!motor.enabled) {
+    motor.enable();
+  }
+}
+
+void primeEncoderMotion() {
+  encoder.update();
+  (void)encoder.getVelocity();
 }
 
 void applyCurrentPids() {
@@ -169,12 +205,22 @@ void setupOta() {
     WiFi.softAP(OTA_AP_SSID);
   }
   ArduinoOTA.setHostname(OTA_HOSTNAME);
+  ArduinoOTA.setTimeout(60000);
   ArduinoOTA.onStart([]() {
+    ota_active = true;
     goEnc();
-    Serial.println("ota: start — motor off");
+    timer_pause(TIMER_GROUP_1, TIMER_0);
+    mcpwmPauseAdcIsr();
+    disableCore1WDT();
+    Serial.println("ota: start — motor off, FOC timer paused");
     Serial.flush();
   });
-  ArduinoOTA.onError([](ota_error_t err) { Serial.printf("ota: err %u\n", (unsigned)err); });
+  ArduinoOTA.onError([](ota_error_t err) {
+    ota_active = false;
+    timer_start(TIMER_GROUP_1, TIMER_0);
+    mcpwmResumeAdcIsr();
+    Serial.printf("ota: err %u\n", (unsigned)err);
+  });
   ArduinoOTA.begin();
   printOta();
 }
@@ -196,6 +242,7 @@ void ensureMotorReady() {
   driver.pwm_frequency = FOC_PWM_HZ;
   applyLimits();
   driver.init();
+  mcpwmAttachAdcIsr();
   motor.linkDriver(&driver);
   motor.linkSensor(&encoder);
   current_ok = current_sense.init() != 0;
@@ -292,16 +339,18 @@ void forgetCal() {
 void printStatus() {
   Serial.printf(
       "axis=%c mode=%s cal=%d idx=%d zn=%lu jmp=%lu cnt=%ld ang=%.4f vel=%.3f "
-      "tgt=%.3f Uq=%.3f Iq=%.3f Isp=%.3f zero=%.4f dir=%s lim=%.2f ilim=%.2f "
-      "hz=%u dt=%u dtmax=%u late=%u cs=%d ac=%d/%u\n",
+      "tgt=%.3f Uq=%.3f Iq=%.3f Isp=%.3f IqP=%.2f IqI=%.1f zero=%.4f dir=%s lim=%.2f ilim=%.2f "
+      "hz=%u dt=%u dtmax=%u late=%u cs=%d ac=%d/%u loops=%lu adc=%lu adcstall=%lu\n",
       HWCHK_AXIS_CHAR, modeName(mode), (int)calibrated, (int)encoder.indexFound(),
       (unsigned long)encoder.zEdges(), (unsigned long)encoder.jumps(), (long)encoderCount(),
       (double)encoder.getAngle(), (double)motor.shaft_velocity, (double)motor.target,
       (double)motor.voltage.q, (double)motor.current.q, (double)motor.current_sp,
+      (double)motor.PID_current_q.P, (double)motor.PID_current_q.I,
       (double)motor.zero_electric_angle, dirName(motor.sensor_direction),
       (double)voltage_limit, (double)current_limit, (unsigned)foc_hz, (unsigned)dt_us,
       (unsigned)dt_max_us, (unsigned)foc_late, (int)current_ok, (int)anticog.enabled(),
-      (unsigned)anticog.bins());
+      (unsigned)anticog.bins(), (unsigned long)foc_loop_calls, (unsigned long)DmaAdc::samples(),
+      (unsigned long)DmaAdc::stalls());
 }
 
 void printHelp() {
@@ -314,6 +363,7 @@ void printHelp() {
   Serial.println("  vel <rad/s>          tq <A>   idle");
   Serial.println("  limit <V>  ilim <A>  hz <Hz>  alignv <V>  mon 0|1");
   Serial.println("  accal [bins]         ac on|off|save|forget   dt  csflip  csoff  jlog  wifioff");
+  Serial.println("  vcap [ms]  vdump     fast per-loop vel/Iq capture (default 300ms)");
   Serial.println("  status  ota  download");
 }
 
@@ -366,6 +416,37 @@ constexpr float kAlignOlRadS = 3.0f;
 constexpr uint32_t kAlignOlMs = 500;
 constexpr float kAlignMinRad = 0.25f;
 
+void slewElectric(float u, float el_from, float el_to, uint32_t ms) {
+  float d = el_to - el_from;
+  d = _normalizeAngle(d + _PI) - _PI;
+  const int n = (int)(ms / 5u);
+  if (n <= 0) {
+    motor.setPhaseVoltage(u, 0.0f, el_to);
+    return;
+  }
+  for (int i = 1; i <= n; ++i) {
+    motor.setPhaseVoltage(u, 0.0f, _normalizeAngle(el_from + d * ((float)i / (float)n)));
+    delay(5);
+  }
+}
+
+void rampElectricDown(float u, float el, uint32_t ms) {
+  const int n = (int)(ms / 5u);
+  for (int i = 1; i <= n; ++i) {
+    motor.setPhaseVoltage(u * (1.0f - (float)i / (float)n), 0.0f, el);
+    delay(5);
+  }
+  motor.setPhaseVoltage(0.0f, 0.0f, 0.0f);
+}
+
+void rampElectricUp(float u, float el, uint32_t ms) {
+  const int n = (int)(ms / 5u);
+  for (int i = 1; i <= n; ++i) {
+    motor.setPhaseVoltage(u * ((float)i / (float)n), 0.0f, el);
+    delay(5);
+  }
+}
+
 bool runOpenloopDirectionAndZero() {
   applyLimits();
   motor.voltage_sensor_align = align_voltage;
@@ -401,12 +482,18 @@ bool runOpenloopDirectionAndZero() {
   }
 
   motor.sensor_direction = (dcnt > 0) ? Direction::CW : Direction::CCW;
-  motor.setPhaseVoltage(align_voltage, 0.0f, _3PI_2);
-  delay(700);
+  const float el_from = _normalizeAngle(motor.shaft_angle * (float)motor.pole_pairs);
+  rampElectricUp(align_voltage, el_from, 200);
+  slewElectric(align_voltage, el_from, _3PI_2, 400);
+  delay(400);
   encoder.update();
   motor.zero_electric_angle = 0.0f;
   motor.zero_electric_angle = motor.electricalAngle();
-  motor.setPhaseVoltage(0.0f, 0.0f, 0.0f);
+  rampElectricDown(align_voltage, _3PI_2, 250);
+  if (current_ok) {
+    current_sense.driverAlign(align_voltage);
+    current_sense.skip_align = true;
+  }
   motor.disable();
   Serial.printf("align: dir=%s  zero=%.4f\n", dirName(motor.sensor_direction),
                 (double)motor.zero_electric_angle);
@@ -420,6 +507,15 @@ int runInitFoc() {
     if (!runOpenloopDirectionAndZero()) {
       return 0;
     }
+  } else if (current_ok && !current_sense.skip_align) {
+    /* zsearch with NVS electrical: still need one CS polarity pass, but
+     * don't leave skip_align false or initFOC repeats it. */
+    motor.enable();
+    digitalWrite(FOC_PIN_MEN, HIGH);
+    current_sense.driverAlign(align_voltage);
+    current_sense.skip_align = true;
+    motor.setPhaseVoltage(0.0f, 0.0f, 0.0f);
+    motor.disable();
   }
   motor.enable();
   digitalWrite(FOC_PIN_MEN, HIGH);
@@ -505,6 +601,7 @@ bool calCurrentOffsets() {
   if (!requireCurrent()) {
     return false;
   }
+  mcpwmResumeAdcIsr();
   mode = RunMode::Enc;
   applyLimits();
   motor.enable();
@@ -555,7 +652,7 @@ void enterOpenloop(float rad_s) {
   motor.controller = MotionControlType::velocity_openloop;
   motor.torque_controller = TorqueControlType::voltage;
   motor.target = rad_s;
-  motor.enable();
+  enableIfNeeded();
   mode = RunMode::Openloop;
   Serial.printf("ol: tgt=%.2f rad/s  cap=%.0f  Ulim=%.2f  (open-loop)\n", (double)rad_s,
                 (double)FOC_VEL_LIMIT, (double)voltage_limit);
@@ -576,13 +673,20 @@ void enterVelocity(float rad_s) {
   }
   applyLimits();
   applyCurrentPids();
+  const bool live = motor.enabled && mode == RunMode::Velocity;
+  if (live) {
+    motor.target = rad_s;
+    Serial.printf("vel: %.3f rad/s  (Iq loop)\n", (double)rad_s);
+    return;
+  }
   if (!calCurrentOffsets()) {
     return;
   }
   motor.controller = MotionControlType::velocity;
   motor.torque_controller = TorqueControlType::foc_current;
   motor.target = rad_s;
-  motor.enable();
+  primeEncoderMotion();
+  enableIfNeeded();
   mode = RunMode::Velocity;
   Serial.printf("vel: %.3f rad/s  (Iq loop)\n", (double)rad_s);
 }
@@ -596,21 +700,84 @@ void enterTorque(float iq) {
     return;
   }
   if (iq > current_limit) {
+    Serial.printf("tq: clamp %.2f → ilim=%.2f A\n", (double)iq, (double)current_limit);
     iq = current_limit;
   } else if (iq < -current_limit) {
+    Serial.printf("tq: clamp %.2f → ilim=%.2f A\n", (double)iq, (double)current_limit);
     iq = -current_limit;
   }
   applyLimits();
   applyCurrentPids();
+  const bool live = motor.enabled && mode == RunMode::Torque &&
+                    motor.torque_controller == TorqueControlType::foc_current;
+  if (live) {
+    motor.target = iq;
+    Serial.printf("tq: Iq=%.3f A  P=%.2f I=%.1f  (setpoint only)\n",
+                  (double)iq, (double)motor.PID_current_q.P, (double)motor.PID_current_q.I);
+    return;
+  }
+  if (motor.enabled && mode == RunMode::Torque) {
+    /* tqv → tq: do not calCurrentOffsets (Enc + PWM 0). Fresh I-term. */
+    motor.PID_current_q.reset();
+    motor.PID_current_d.reset();
+    motor.controller = MotionControlType::torque;
+    motor.torque_controller = TorqueControlType::foc_current;
+    motor.target = iq;
+    Serial.printf("tq: Iq=%.3f A  P=%.2f I=%.1f  (from tqv, no recals)\n",
+                  (double)iq, (double)motor.PID_current_q.P, (double)motor.PID_current_q.I);
+    return;
+  }
   if (!calCurrentOffsets()) {
     return;
   }
+  motor.PID_current_q.reset();
+  motor.PID_current_d.reset();
   motor.controller = MotionControlType::torque;
   motor.torque_controller = TorqueControlType::foc_current;
   motor.target = iq;
-  motor.enable();
+  primeEncoderMotion();
+  enableIfNeeded();
   mode = RunMode::Torque;
-  Serial.printf("tq: Iq=%.3f A  (current torque, not V / not Nm)\n", (double)iq);
+  Serial.printf("tq: Iq=%.3f A  P=%.2f I=%.1f  (current torque, not V / not Nm)\n",
+                (double)iq, (double)motor.PID_current_q.P, (double)motor.PID_current_q.I);
+}
+
+/** Diagnostic: torque via closed-loop voltage (real sensor for commutation,
+ * current sense bypassed entirely). Isolates commutation/angle bugs from
+ * current-sense bugs — see if stall+restart-direction behavior survives. */
+void enterTorqueVoltage(float uq) {
+  if (!requireCal()) {
+    return;
+  }
+  ensureMotorReady();
+  if (uq > voltage_limit) {
+    uq = voltage_limit;
+  } else if (uq < -voltage_limit) {
+    uq = -voltage_limit;
+  }
+  applyLimits();
+  motor.voltage.d = 0.0f;
+  const bool live = motor.enabled && mode == RunMode::Torque &&
+                    motor.torque_controller == TorqueControlType::voltage;
+  if (live) {
+    motor.target = uq;
+    Serial.printf("tqv: Uq=%.3f V  (setpoint only)\n", (double)uq);
+    return;
+  }
+  if (motor.enabled && mode == RunMode::Torque) {
+    motor.controller = MotionControlType::torque;
+    motor.torque_controller = TorqueControlType::voltage;
+    motor.target = uq;
+    Serial.printf("tqv: Uq=%.3f V  (from tq, no recals)\n", (double)uq);
+    return;
+  }
+  motor.controller = MotionControlType::torque;
+  motor.torque_controller = TorqueControlType::voltage;
+  motor.target = uq;
+  primeEncoderMotion();
+  enableIfNeeded();
+  mode = RunMode::Torque;
+  Serial.printf("tqv: Uq=%.3f V  (voltage torque, current sense bypassed)\n", (double)uq);
 }
 
 void enterAccal(uint16_t bins) {
@@ -725,6 +892,14 @@ void handleLine(char *raw) {
     enterTorque(strtof(arg, nullptr));
     return;
   }
+  if (strcmp(s, "tqv") == 0) {
+    if (*arg == '\0') {
+      Serial.println("usage: tqv <V>");
+      return;
+    }
+    enterTorqueVoltage(strtof(arg, nullptr));
+    return;
+  }
   if (strcmp(s, "accal") == 0) {
     uint16_t bins = ACOG_BINS_DEFAULT;
     if (*arg != '\0') {
@@ -794,8 +969,8 @@ void handleLine(char *raw) {
     if (current_limit < 0.05f) {
       current_limit = 0.05f;
     }
-    if (current_limit > 2.0f) {
-      current_limit = 2.0f;
+    if (current_limit > FOC_I_LIM_MAX) {
+      current_limit = FOC_I_LIM_MAX;
     }
     applyLimits();
     Serial.printf("ilim: %.2f A\n", (double)current_limit);
@@ -820,10 +995,49 @@ void handleLine(char *raw) {
     Serial.println("dt: max/late cleared");
     return;
   }
+  if (strcmp(s, "vcap") == 0) {
+    uint32_t ms = 300;
+    if (*arg != '\0') {
+      const long v = strtol(arg, nullptr, 10);
+      if (v > 0) {
+        ms = (uint32_t)v;
+      }
+    }
+    const uint32_t total_loops = ms * foc_hz / 1000u;
+    uint32_t decim = 1;
+    if (total_loops > kVCapMax) {
+      decim = (total_loops + kVCapMax - 1) / kVCapMax;
+    }
+    uint32_t n = total_loops / decim;
+    if (n > kVCapMax) {
+      n = kVCapMax;
+    }
+    vcap_idx = 0;
+    vcap_loop_ctr = 0;
+    vcap_decim = decim;
+    vcap_last_count = encoderCount();
+    vcap_target = n;
+    Serial.printf(
+        "vcap: arming %u samples, decim=%u (each dcount spans %.2f ms) covering ~%u ms — vdump "
+        "when idx=target\n",
+        (unsigned)n, (unsigned)decim, (double)(decim * 1000.0 / (double)foc_hz), (unsigned)ms);
+    return;
+  }
+  if (strcmp(s, "vdump") == 0) {
+    const uint32_t idx = vcap_idx;
+    const uint32_t target = vcap_target;
+    Serial.printf("vdump: idx=%u target=%u %s\n", (unsigned)idx, (unsigned)target,
+                  (idx >= target && target > 0) ? "(done)" : "(still capturing or empty)");
+    for (uint32_t i = 0; i < idx; ++i) {
+      Serial.printf("%u,%ld,%.4f,%.4f\n", (unsigned)i, (long)vcap_buf[i].dcount,
+                    (double)vcap_buf[i].vel, (double)vcap_buf[i].iq);
+    }
+    return;
+  }
   if (strcmp(s, "jlog") == 0) {
     Serial.printf(
-        "jlog: jumps_total=%lu  overflow_events=%lu  (flagged when the residual after removing "
-        "N clean kPcntLim wraps implies a velocity no real shaft can reach)\n",
+        "jlog: jumps_total=%lu  wrap_events=%lu  (poll unwrap; jump if one update is faster "
+        "than any real shaft)\n",
         (unsigned long)encoder.jumps(), (unsigned long)encoder.overflowEvents());
     const uint8_t cap = encoder.jumpLogCap();
     for (uint8_t i = 0; i < cap; ++i) {
@@ -969,6 +1183,7 @@ void startFocTimer() {
 }
 
 void focTask(void *) {
+  disableCore0WDT();
   startFocTimer();
   for (;;) {
     const uint32_t n = ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -979,6 +1194,7 @@ void focTask(void *) {
     const RunMode m = mode;
     if (m == RunMode::Openloop || m == RunMode::Velocity || m == RunMode::Torque ||
         m == RunMode::Accal) {
+      foc_loop_calls += 1;
       motor.loopFOC();
       if (m == RunMode::Accal && anticog.calibrating()) {
         const bool done =
@@ -992,12 +1208,28 @@ void focTask(void *) {
       if (m != RunMode::Accal && m != RunMode::Openloop && anticog.enabled()) {
         motor.current_sp += anticog.feedforward(encoder.getAngle());
       }
+      const uint32_t idx = vcap_idx;
+      if (idx < vcap_target) {
+        const uint32_t ctr = vcap_loop_ctr;
+        vcap_loop_ctr = ctr + 1;
+        if ((ctr % vcap_decim) == 0) {
+          const int64_t c = encoderCount();
+          vcap_buf[idx].dcount = (int32_t)(c - vcap_last_count);
+          vcap_buf[idx].vel = motor.shaft_velocity;
+          vcap_buf[idx].iq = motor.current.q;
+          vcap_last_count = c;
+          vcap_idx = idx + 1;
+        }
+      }
     }
     const uint32_t dt = (uint32_t)(esp_timer_get_time() - t0);
     dt_us = dt;
     if (dt > dt_max_us) {
       dt_max_us = dt;
     }
+    /* Overrun (dt > T): notifies pile up, Take returns immediately, IDLE0
+     * never runs, task WDT aborts. Drop the backlog and wait for a new tick. */
+    (void)ulTaskNotifyTake(pdTRUE, 0);
   }
 }
 
@@ -1039,7 +1271,7 @@ void setup() {
   startFocTask();
   if (current_sense.init()) {
     current_ok = true;
-    Serial.printf("  ADC DMA ok  offA=%.3f V  offB=%.3f V  samples=%lu\n",
+    Serial.printf("  ADC PWM-sync  offA=%.3f V  offB=%.3f V  samples=%lu\n",
                   (double)current_sense.offsetA(), (double)current_sense.offsetB(),
                   (unsigned long)DmaAdc::samples());
   } else {
@@ -1054,8 +1286,14 @@ void setup() {
 }
 
 void loop() {
-  pollSerial();
   ArduinoOTA.handle();
+  if (ota_active) {
+    /* Must yield: a tight handle() loop starves IDLE1 and the WDT aborts
+     * mid-flash. That onStart path is what broke OTA after the pause change. */
+    vTaskDelay(1);
+    return;
+  }
+  pollSerial();
   if (ac_finished) {
     ac_finished = false;
     goEnc();

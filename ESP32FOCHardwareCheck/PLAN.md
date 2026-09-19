@@ -4,13 +4,13 @@ Outil de validation hardware : **un** MKS FS2804 + **un** MT6835 en **ABZ / PCNT
 
 ## Moteur
 
-MKS FS2804 / YT2804 : **12N14P → 7 pole pairs**, ~220 kV, Rphase ~2.3 Ω. Voltage FOC, pas de current sense : le « couple » est **Uq** (V).
+MKS FS2804 / YT2804 : **12N14P → 7 pole pairs**, ~220 kV, Rphase ~5.2 Ω (spec fabricant). Voltage FOC, pas de current sense : le « couple » est **Uq** (V).
 
 | Paramètre | Défaut | Pourquoi |
 |-----------|--------|----------|
 | `FOC_POLE_PAIRS` | 7 | 12N14P |
 | `FOC_VBUS` | 8.4 | 2S |
-| `FOC_VOLTAGE_LIMIT` | 2.0 | ~0.9 A court, sous le max 1–2 A |
+| `FOC_VOLTAGE_LIMIT` | 2.0 | ~0.38 A court (2.0V / 5.2Ω), sous le max 1–2 A |
 | `FOC_VOLTAGE_ALIGN` | 1.0 | lock d-axis sans surchauffe |
 | PWM | 20 kHz 3PWM | même que le balancer |
 
