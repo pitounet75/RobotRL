@@ -566,7 +566,8 @@ typedef enum {
  *   u_yaw = clamp( Kp·(ψ̇_ref − ψ̇) − Kd·dψ̇/dt , ±τ_max )
  *   τ_L = u − u_yaw,  τ_R = u + u_yaw
  * Telemetry names kept for compat: heading_ref_rad = ψ̇_ref (rad/s).
- * Gains: Kp Nm/(rad/s), Kd Nm/(rad/s²). Defaults: Kp=0.03, Kd=0.005, τ_max=0.01.
+ * Gains: Kp Nm/(rad/s), Kd Nm/(rad/s²).
+ * Defaults: Kp=0.08, Kd=0.005, τ_max=0.04 (half of cmd max 0.08; saturates ~0.5 rad/s).
  * SET heading_reset=1 → ψ̇_ref ← 0 (integrated ψ display also zeroed).
  * heading_inc: ψ̇_ref = value (signed, rad/s, clamp ±YAW_RATE_REF_MAX).
  * heading_dec: ψ̇_ref = −value (old UI). heading_ref_rad is the same store.
@@ -575,16 +576,16 @@ typedef enum {
 #define APP_CTRL_YAW_RATE_REF_MAX_RADS     2.0f
 #endif
 #ifndef APP_CTRL_HEADING_KP
-#define APP_CTRL_HEADING_KP                  0.000f  /* Nm / (rad/s) */
+#define APP_CTRL_HEADING_KP                  0.08f  /* Nm / (rad/s) */
 #endif
 #ifndef APP_CTRL_HEADING_KD
-#define APP_CTRL_HEADING_KD                  0.0000f /* Nm / (rad/s²) on dψ̇/dt */
+#define APP_CTRL_HEADING_KD                  0.005f /* Nm / (rad/s²) on dψ̇/dt */
 #endif
 #ifndef APP_CTRL_HEADING_REF_RAD
 #define APP_CTRL_HEADING_REF_RAD             0.0f   /* ψ̇_ref rad/s */
 #endif
 #ifndef APP_CTRL_HEADING_TORQUE_MAX_NM
-#define APP_CTRL_HEADING_TORQUE_MAX_NM       0.01f
+#define APP_CTRL_HEADING_TORQUE_MAX_NM       0.04f
 #endif
 /** EMA on ψ̇ before yaw loop: y = α·y + (1−α)·ψ̇_raw ; 0 = off, higher = smoother. */
 #ifndef APP_CTRL_YAW_RATE_LPF_ALPHA
