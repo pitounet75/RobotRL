@@ -1,0 +1,14 @@
+---
+description: Take user blame-the-software questions seriously; do not default to wiring/user error
+alwaysApply: true
+---
+
+# When the user suspects the agent broke something
+
+If the user asks whether a change introduced a bug, bad protocol, a bricked sensor/MCU, or a corrupted config:
+
+- Treat that as the **primary hypothesis**, not a nuisance. In this project it has been right far more often than "cables / voltage / user error".
+- Do **not** lead with "check your wiring" or "the hardware is dead" while a recent software change (SPI framing, EEPROM PROG, registers, clocks, CS, CPR) can explain the symptom.
+- Search the diff first: spec vs code, extra clocks, PROG of whole maps, skipped verifies, wrong CPR, Mode/CS init order.
+- Say "I don't think I broke it" only after a concrete counter-check (e.g. loopback, register dump that matches the datasheet). If unsure, say so and keep the software path open.
+- Own it plainly when evidence later shows the agent was wrong. Do not double down.
