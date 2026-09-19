@@ -1,5 +1,8 @@
 # odrivetool: torque (current) mode — start with 0 Nm so the axis does not jump.
 # Device: odrv0, axis: axis0.
+#
+# Bench: disable overspeed + current-mode vel clamp (free wheel hits CONTROLLER_ERROR_OVERSPEED
+# and MOTOR_ERROR_CONTROL_DEADLINE_MISSED otherwise if vel_limit is low or vel_estimate spikes).
 
 # --- Preamble: clear errors and calibration ---
 odrv0.axis0.requested_state = AXIS_STATE_IDLE
@@ -7,11 +10,19 @@ odrv0.axis0.clear_errors()
 odrv0.axis1.clear_errors()
 dump_errors(odrv0, True)
 
+odrv0.axis0.controller.config.enable_vel_limit = True
+odrv0.axis0.controller.config.vel_limit = 1200.0
+
+
 odrv0.axis0.requested_state = AXIS_STATE_FULL_CALIBRATION_SEQUENCE
 import time
 _busy = (AXIS_STATE_FULL_CALIBRATION_SEQUENCE, AXIS_STATE_MOTOR_CALIBRATION, AXIS_STATE_ENCODER_OFFSET_CALIBRATION, AXIS_STATE_ENCODER_INDEX_SEARCH)
 while odrv0.axis0.current_state in _busy:
     time.sleep(0.1)
+
+dump_errors(odrv0, True)
+if odrv0.axis0.error != 0:
+    raise RuntimeError("cal failed — fix encoder/motor before torque test")
 
 odrv0.axis0.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
 while odrv0.axis0.current_state != AXIS_STATE_CLOSED_LOOP_CONTROL:
@@ -25,4 +36,9 @@ odrv0.axis0.controller.input_torque = 0.0
 odrv0.axis0.controller.input_vel = 0.0
 
 # Apply torque gradually, e.g.:
-# odrv0.axis0.controller.input_torque = 0.05
+# odrv0.axis0.controller.input_torque = 0.019
+
+odrv0.axis0.motor.config.pre_calibrated = True
+odrv0.axis0.encoder.config.pre_calibrated = True
+odrv0.axis0.config.startup_closed_loop_control = True
+

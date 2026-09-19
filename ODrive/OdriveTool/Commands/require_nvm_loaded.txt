@@ -1,0 +1,41 @@
+# odrivetool (IPython): paste FIRST after connect / reboot, BEFORE any other script.
+# Requires: import odrive (odrivetool already has odrv0)
+#
+# Firmware: user_config_loaded == True only if NVM_init() + safe_load_config() succeeded
+# (CRC + config_version OK). If load fails, RAM = factory defaults and flag stays False.
+# Do NOT save_configuration() when user_config_loaded is False.
+
+import odrive
+import time
+
+_EXPECTED_SERIAL = 0x55517627953204  # left 2836 — change or set None to skip
+_MAX_REBOOTS = 2
+_REBOOT_WAIT_S = 4.0
+
+
+def require_nvm_loaded(odrv, expected_serial=_EXPECTED_SERIAL, max_reboots=_MAX_REBOOTS):
+    global odrv0
+    for attempt in range(max_reboots + 1):
+        loaded = bool(odrv.user_config_loaded)
+        serial = int(odrv.serial_number)
+        print("NVM check: user_config_loaded={} serial=0x{:x} attempt={}/{}".format(
+            loaded, serial, attempt + 1, max_reboots + 1))
+        if expected_serial is not None and serial != expected_serial:
+            raise RuntimeError(
+                "Wrong ODrive serial 0x{:x} (expected 0x{:x})".format(serial, expected_serial))
+        if loaded:
+            return odrv
+        if attempt >= max_reboots:
+            raise RuntimeError(
+                "NVM load failed (user_config_loaded=False) after {} reboot(s). "
+                "RAM is factory defaults — do NOT save. Check power/USB, re-run, or restore from 2836_L.".format(
+                    max_reboots + 1))
+        print("Rebooting ODrive and reconnecting...")
+        odrv.reboot()
+        time.sleep(_REBOOT_WAIT_S)
+        odrv = odrive.find_any()
+        odrv0 = odrv
+    return odrv
+
+
+odrv0 = require_nvm_loaded(odrv0)

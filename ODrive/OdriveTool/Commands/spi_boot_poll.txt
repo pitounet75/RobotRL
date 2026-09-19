@@ -1,0 +1,223 @@
+# odrivetool: boot lottery poll — spi_error_rate vs exact SPI fail class.
+# Paste AFTER connect. Do NOT clear_errors(), do NOT change requested_state.
+# Ctrl-C to stop.
+#
+# Needs FW with encoder.spi_fail_class / _first / _detail / spi_rx_dbg
+# and motor.gate_driver.spi_ping_* (DRV8301 Status_2 on the same SPI3).
+# Diagnostic only: no recadrage, no DeInit-from-ISR, no tCSS.
+# Ping is ~4 Hz, steals SPI3 for one encoder cycle; set spi_ping_en=False to stop.
+#
+# How to catch the climb:
+#   1) power-cycle or odrv0.reboot(), reconnect, paste this immediately
+#   2) or paste now, then in another thought reboot — this loop reconnects
+#
+# fail_class (last) / fail_class_first (sticky this boot):
+#   0 NONE        rate climbs with class still 0 = DMA never completed
+#   1 CRC         DMA done, MT6835 CRC mismatch  (detail: rx, calc, SPI_SR)
+#   2 NOT_READY   HAL State != READY when starting a burst
+#   3 HAL         HAL_SPI_ErrorCallback  (detail: ErrorCode | SPI_SR<<16)
+#   4 NO_CB       DMA complete, pRxBuffPtr matched no encoder
+#
+# HAL ErrorCode bits: 1 MODF  2 CRC  4 OVR  8 FRE  16 DMA  32 FLAG/BSY  64 ABORT
+# DRV ping (same SPI3 as MT6835): Status_2 device ID nibble must be 1.
+#   last_hal 0=OK 1=ERROR 2=BUSY 3=TIMEOUT
+#   last_raw 0xAAAABBBB  AAAA=MISO on command  BBBB=MISO on dummy (want 0x0801)
+#   encoder slam + ping still ok     => SPI3 alive, encoder-side
+#   encoder slam + ping fail         => generalized SPI3
+#   slam aligned with ping_ok bump   => the ping's format-switch is the stimulus
+#   BBBB==0x8800 with old FW         => ping read MOSI echo; reflashed ping splits frames
+# e_err: 0x80 ABS_SPI_COM_FAIL   0x100 ABS_SPI_NOT_READY
+# m_err: 0x08 DRV_FAULT
+# state: 1 IDLE  2 STARTUP  4 MOTOR_CAL  7 OFFSET_CAL  8 CLOSED_LOOP
+
+import time
+import odrive
+
+_HZ = 10.0
+_DT = 1.0 / _HZ
+_SPI_ZERO = 0.001
+_RECONNECT_S = 20.0
+
+_STATE = {
+    0: "UNDEF", 1: "IDLE", 2: "STARTUP", 3: "FULL_CAL", 4: "MOTOR_CAL",
+    5: "SENSORLESS", 6: "IDX_SEARCH", 7: "OFFSET_CAL", 8: "CLOSED_LOOP",
+    9: "LOCKIN", 10: "DIR_FIND", 11: "HOMING",
+}
+
+_FAIL = {0: "NONE", 1: "CRC", 2: "NOT_READY", 3: "HAL", 4: "NO_CB"}
+
+_HAL_ERR = (
+    (1, "MODF"), (2, "CRC"), (4, "OVR"), (8, "FRE"),
+    (16, "DMA"), (32, "FLAG"), (64, "ABORT"),
+)
+
+
+def _st(v):
+    v = int(v)
+    return "{:02d}:{}".format(v, _STATE.get(v, "?"))
+
+
+def _hx(v):
+    return "0x{:X}".format(int(v))
+
+
+def _eenc(v):
+    v = int(v)
+    bits = []
+    if v & 0x40:
+        bits.append("SPI_TIMEOUT")
+    if v & 0x80:
+        bits.append("COM_FAIL")
+    if v & 0x100:
+        bits.append("NOT_READY")
+    extra = v & ~0x1C0
+    if extra:
+        bits.append("other=" + _hx(extra))
+    return _hx(v) + ((":" + "|".join(bits)) if bits else "")
+
+
+def _hal_err(code):
+    code = int(code) & 0xFFFF
+    names = [n for b, n in _HAL_ERR if code & b]
+    extra = code & ~0x7F
+    if extra:
+        names.append("0x{:X}".format(extra))
+    return ",".join(names) if names else "0"
+
+
+def _fail(cls, detail):
+    cls = int(cls)
+    d = int(detail)
+    name = _FAIL.get(cls, "?{}".format(cls))
+    if cls == 1:
+        return "{} rx={:02X} calc={:02X} SR=0x{:04X}".format(
+            name, d & 0xFF, (d >> 8) & 0xFF, (d >> 16) & 0xFFFF)
+    if cls == 2:
+        return "{} state={}".format(name, d)
+    if cls == 3:
+        return "{} err={} SR=0x{:04X}".format(
+            name, _hal_err(d), (d >> 16) & 0xFFFF)
+    if cls == 4:
+        return "{} ptr=0x{:08X}".format(name, d)
+    if cls == 0 and d:
+        return "{} 0x{:08X}".format(name, d)
+    return name
+
+
+def _find(serial=None, timeout=_RECONNECT_S):
+    print("  (re)connecting...", flush=True)
+    return odrive.find_any(path="usb", serial_number=serial, timeout=timeout)
+
+
+serial = None
+try:
+    serial = "{:012X}".format(int(odrv0.serial_number))
+except Exception:
+    odrv0 = _find()
+    serial = "{:012X}".format(int(odrv0.serial_number))
+
+ax = odrv0.axis0
+try:
+    diag_rev = int(odrv0.fw_diag_rev)
+except Exception:
+    diag_rev = -1
+print("# serial {}  fw_diag_rev={}  enc.mode={}  axis1.mode={}  startup_offcal={}  startup_cl={}".format(
+    serial, diag_rev, int(ax.encoder.config.mode), int(odrv0.axis1.encoder.config.mode),
+    bool(ax.config.startup_encoder_offset_calibration),
+    bool(ax.config.startup_closed_loop_control)), flush=True)
+print("{:>7} {:>14} {:>7} {:>28} {:>6} {:>10} {:>5} {:>5} {:>6} {:>4} {:>18} {:>5} {:>8} {:>10}  flags".format(
+    "t_s", "state", "spi", "fail", "first", "rx_dbg",
+    "p_ok", "p_fail", "p_raw", "phal", "e_err", "drv", "a_err", "pos_abs"), flush=True)
+
+t0 = time.time()
+prev_state = None
+prev_drv = None
+prev_eerr = None
+prev_cls = None
+prev_pfail = None
+left_zero = False
+n = 0
+
+try:
+    while True:
+        try:
+            ax = odrv0.axis0
+            enc = ax.encoder
+            m = ax.motor
+            state = int(ax.current_state)
+            spi = float(enc.spi_error_rate)
+            eerr = int(enc.error)
+            drv = int(m.gate_driver.drv_fault)
+            merr = int(m.error)
+            aerr = int(ax.error)
+            pos = int(enc.pos_abs)
+            try:
+                cls = int(enc.spi_fail_class)
+                first = int(enc.spi_fail_class_first)
+                detail = int(enc.spi_fail_detail)
+                rxdbg = int(enc.spi_rx_dbg)
+            except Exception:
+                cls = first = detail = rxdbg = -1
+            try:
+                pok = int(m.gate_driver.spi_ping_ok_count)
+                pfail = int(m.gate_driver.spi_ping_fail_count)
+                praw = int(m.gate_driver.spi_ping_last_raw)
+                phal = int(m.gate_driver.spi_ping_last_hal)
+            except Exception:
+                pok = pfail = praw = phal = -1
+            t = time.time() - t0
+        except Exception as ex:
+            print("# DISCONNECT {}  t={:.1f}s  ({})".format(
+                time.strftime("%H:%M:%S"), time.time() - t0, ex), flush=True)
+            odrv0 = _find(serial)
+            ax = odrv0.axis0
+            t0 = time.time()
+            prev_state = prev_drv = prev_eerr = prev_cls = prev_pfail = None
+            left_zero = False
+            n = 0
+            print("# RECONNECT  new t=0  (boot window starts here)", flush=True)
+            continue
+
+        flags = []
+        if prev_state is not None and state != prev_state:
+            flags.append("STATE")
+        if prev_drv is not None and drv != prev_drv:
+            flags.append("DRV_CHANGE")
+        if prev_eerr is not None and eerr != prev_eerr:
+            flags.append("E_ERR")
+        if prev_cls is not None and cls != prev_cls:
+            flags.append("FAIL_CLASS")
+        if prev_pfail is not None and pfail != prev_pfail and pfail >= 0:
+            flags.append("DRV_PING_FAIL")
+        if (not left_zero) and spi > _SPI_ZERO:
+            left_zero = True
+            flags.append("SPI_LEFT_ZERO")
+        if drv:
+            flags.append("DRV")
+        if merr & 0x08:
+            flags.append("M_DRV_FAULT")
+        if eerr & 0x80:
+            flags.append("COM_FAIL")
+        if eerr & 0x100:
+            flags.append("NOT_READY")
+        if cls == 0 and spi > _SPI_ZERO:
+            flags.append("SILENT_MISS")
+
+        fail_s = _fail(cls, detail) if cls >= 0 else "?"
+        first_s = _FAIL.get(first, "?") if first >= 0 else "?"
+        line = "{:7.2f} {:>14} {:7.4f} {:>28} {:>6} 0x{:08X} {:5d} {:5d} 0x{:08X} {:4d} {:>18} {:5d} {:>8} {:10d}  {}".format(
+            t, _st(state), spi, fail_s, first_s, rxdbg & 0xFFFFFFFF,
+            pok, pfail, praw & 0xFFFFFFFF, phal,
+            _eenc(eerr), drv, _hx(aerr), pos,
+            " ".join(flags))
+        if flags:
+            print("*** " + line, flush=True)
+        else:
+            print("    " + line, flush=True)
+
+        prev_state, prev_drv, prev_eerr, prev_cls, prev_pfail = state, drv, eerr, cls, pfail
+        n += 1
+        time.sleep(_DT)
+except KeyboardInterrupt:
+    print("\n# stopped after {:.1f}s  samples={}  spi_left_zero={}".format(
+        time.time() - t0, n, left_zero), flush=True)

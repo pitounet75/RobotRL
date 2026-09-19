@@ -1,0 +1,151 @@
+# odrivetool (IPython): paste blocks IN ORDER. Device: odrv0, axis: axis0.
+#
+# Target: 24N22P hand-wound motor, 110 kv, on ODrive 387F354D3235 (v3.6-56V, 3S ~11.9 V)
+#   pole_pairs      = 11            (22 poles / 2)
+#   phase_resistance= 3.10 ohm      (measured by ODrive @ 2 A, keep this over the hand-ohmmeter value)
+#   phase_inductance= 0.226 mH      (measured by ODrive)
+#   torque_constant = 0.0752 Nm/A   (8.27 / 110)
+# Feedback: MT6835 SPI absolute encoder (mode 260) on axis0.
+# Use case: velocity control, continuous rotation.
+#
+# NOTE the two things that bit us during bring-up:
+#   * resistance_calib_max_voltage MUST stay below vbus/sqrt(3) (~6.9 V on 3S) or
+#     motor calibration dies with MOTOR_ERROR_MODULATION_MAGNITUDE.
+#   * MOTOR_TYPE_GIMBAL (2) makes run_calibration() a silent no-op (no R/L, no beep).
+#     Use MOTOR_TYPE_HIGH_CURRENT (0). Gimbal's ">1 ohm" rule is about standstill
+#     torque resolution, which we don't need here.
+
+
+# ============================================================================
+# STEP 0 - Motor calibration (ONLY if phase_resistance / phase_inductance are 0)
+# ============================================================================
+# Skip if odrv0.axis0.motor.is_calibrated is already True with sane R/L.
+
+odrv0.axis0.requested_state = AXIS_STATE_IDLE
+odrv0.axis0.motor.config.motor_type = 0                      # HIGH_CURRENT
+odrv0.axis0.motor.config.pole_pairs = 11
+odrv0.axis0.motor.config.torque_constant = 0.0752
+odrv0.axis0.motor.config.calibration_current = 2.0
+odrv0.axis0.motor.config.resistance_calib_max_voltage = 5.0  # < vbus/sqrt(3) ~ 6.9 V
+odrv0.axis0.motor.config.current_lim = 3.0
+odrv0.axis0.motor.config.pre_calibrated = False
+odrv0.axis0.clear_errors()
+
+odrv0.axis0.requested_state = AXIS_STATE_MOTOR_CALIBRATION
+# expect the inductance-step beep; wait for current_state back to 1 (IDLE)
+import time
+while odrv0.axis0.current_state != AXIS_STATE_IDLE:
+    time.sleep(0.2)
+
+odrv0.axis0.motor.config.phase_resistance    # ~3.1 ohm
+odrv0.axis0.motor.config.phase_inductance    # ~0.2-0.3 mH
+odrv0.axis0.motor.is_calibrated              # True
+dump_errors(odrv0, True)
+
+# If MOTOR_ERROR_MODULATION_MAGNITUDE  -> resistance_calib_max_voltage too high, lower to 4.0
+# If ERROR_PHASE_RESISTANCE_OUT_OF_RANGE -> real R higher; calibration_current = 1.0, max_voltage = 5.0
+# If ERROR_PHASE_INDUCTANCE_OUT_OF_RANGE -> a phase is not connected; check the 3 motor leads
+
+odrv0.axis0.motor.config.pre_calibrated = True
+
+
+# ============================================================================
+# STEP 1 - Encoder config (MT6835 SPI absolute)
+# ============================================================================
+odrv0.axis0.encoder.config.mode = 260                   # ENCODER_MODE_SPI_ABS_MT6835
+odrv0.axis0.encoder.config.cpr  = 2097152               # 2^21, MT6835 21-bit
+odrv0.axis0.encoder.config.abs_spi_cs_gpio_pin = 6      # <-- SET TO YOUR ACTUAL CS PIN
+odrv0.axis0.encoder.config.use_index = False
+odrv0.axis0.encoder.config.pre_calibrated = False
+odrv0.axis0.encoder.config.bandwidth = 1000.0
+odrv0.axis0.encoder.config.enable_phase_interpolation = True
+
+# axis1 must NOT hold the shared SPI in an abs mode (phantom-axis1 contention)
+odrv0.axis1.requested_state = AXIS_STATE_IDLE
+odrv0.axis1.encoder.config.mode = 0
+
+
+# ============================================================================
+# STEP 2 - Save + reboot  (abs_spi_init() only runs at boot)
+# ============================================================================
+odrv0.save_configuration()
+odrv0.reboot()
+# odrivetool will hang on the RPC -> Ctrl-C, wait ~5 s for the auto-reconnect.
+# If it does not reconnect: power-cycle the board, relaunch odrivetool.
+
+
+# ============================================================================
+# STEP 3 - Verify SPI link BEFORE spinning anything
+# ============================================================================
+dump_errors(odrv0)
+odrv0.axis0.encoder.spi_error_rate     # must be ~0.0  (fw errors at >0.005 -> ABS_SPI_COM_FAIL)
+odrv0.axis0.encoder.pos_abs            # turn the rotor by hand -> must change
+odrv0.axis0.encoder.shadow_count       # idem
+# If spi_error_rate ~1.0 / ENCODER_ERROR_ABS_SPI_COM_FAIL:
+#   wrong abs_spi_cs_gpio_pin, bad wiring, missing pull-up, or no diametric magnet on the shaft.
+#   Fix and re-run STEP 1-3. Do not proceed until spi_error_rate is near 0.
+
+
+# ============================================================================
+# STEP 4 - Encoder offset calibration  (NOT full calibration - motor already done)
+# ============================================================================
+odrv0.axis0.clear_errors()
+odrv0.axis0.requested_state = AXIS_STATE_ENCODER_OFFSET_CALIBRATION
+import time
+while odrv0.axis0.current_state != AXIS_STATE_IDLE:
+    time.sleep(0.2)
+
+odrv0.axis0.error                      # 0
+odrv0.axis0.encoder.is_ready           # True
+odrv0.axis0.encoder.config.offset      # non-zero
+odrv0.axis0.encoder.config.offset_float
+odrv0.axis0.motor.config.direction     # +1 or -1
+dump_errors(odrv0, True)
+
+# ERROR_CPR_POLEPAIRS_MISMATCH -> cpr must be 2097152 AND pole_pairs must be 11
+#   (count magnets on the rotor: pole_pairs = magnets / 2)
+# ABS_SPI_COM_FAIL mid-cal -> intermittent SPI (connector, wire length, magnet gap)
+
+odrv0.axis0.encoder.config.pre_calibrated = True
+
+
+# ============================================================================
+# STEP 5 - Controller: velocity control
+# ============================================================================
+odrv0.axis0.controller.config.control_mode = CONTROL_MODE_VELOCITY_CONTROL
+odrv0.axis0.controller.config.input_mode   = INPUT_MODE_VEL_RAMP
+odrv0.axis0.controller.config.vel_gain            = 0.02
+odrv0.axis0.controller.config.vel_integrator_gain = 0.1
+odrv0.axis0.controller.config.vel_limit           = 30.0    # ~1320 rpm no-load ceiling @ 3S
+odrv0.axis0.controller.config.vel_ramp_rate       = 10.0
+odrv0.axis0.motor.config.current_lim = 3.0
+odrv0.axis0.motor.config.current_control_bandwidth = 300.0  # low L -> stay gentle
+odrv0.axis0.controller.config.enable_overspeed_error = True
+
+
+# ============================================================================
+# STEP 6 - Closed-loop test
+# ============================================================================
+odrv0.axis0.clear_errors()
+odrv0.axis0.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+odrv0.axis0.controller.input_vel = 2.0
+odrv0.axis0.controller.input_vel = 10.0
+odrv0.axis0.controller.input_vel = 0.0     # holds zero now that there is an encoder
+odrv0.axis0.requested_state = AXIS_STATE_IDLE
+# Whining / oscillation  -> vel_gain = 0.01
+# Sluggish               -> raise vel_gain, then vel_integrator_gain
+# ERROR_OVERSPEED        -> vel_limit too low vs commanded, or direction wrong
+
+
+# ============================================================================
+# STEP 7 - Persist + auto-start
+# ============================================================================
+odrv0.axis0.config.startup_encoder_offset_calibration = False  # absolute + pre_calibrated
+odrv0.axis0.config.startup_closed_loop_control = True          # optional
+if not odrv0.user_config_loaded:
+    raise RuntimeError("user_config_loaded is False - do NOT save_configuration()")
+odrv0.save_configuration()
+
+# Anticogging (optional, later): see calibrate_anticoggging.txt.
+# This ODrive's fw now has set_anticogging_value, so dump_full_config.py /
+# restore_full_config.py can back up and restore the map + full config.
