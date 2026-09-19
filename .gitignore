@@ -50,3 +50,6 @@ ODrive/**/build*/
 ODrive/**/*.npy
 ODrive/**/*.csv
 ODrive/**/*.png
+
+# Eclipse/CubeIDE per-machine indexer state (rewritten on every IDE open)
+**/.settings/language.settings.xml
