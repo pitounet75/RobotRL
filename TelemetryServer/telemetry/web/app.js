@@ -103,7 +103,10 @@ function makeChart(containerId, title, seriesKeys, labels) {
         stroke: `hsl(${(i * 67) % 360},70%,55%)`,
       })),
     ],
-    scales: { x: { time: false, auto: false, range: [0, viewWindowS] } },
+    // No `range` here: a static range array fights with setScale() below
+    // (uPlot keeps reapplying it on every setData, freezing the window).
+    // scheduleRedraw() is the sole authority over the x-domain via setScale.
+    scales: { x: { time: false, auto: false } },
     // uPlot defaults to black axes/grid, which is invisible on the dark panel
     // background. These match --muted / --border in style.css.
     axes: [
@@ -117,6 +120,9 @@ function makeChart(containerId, title, seriesKeys, labels) {
     ],
   };
   const plot = new uPlot(opts, buffers.series(seriesKeys), container);
+  // Set the initial window explicitly now that there's no static `range`
+  // option to do it for us.
+  plot.setScale("x", { min: 0, max: viewWindowS });
   return { plot, seriesKeys, container };
 }
 
