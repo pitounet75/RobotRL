@@ -43,7 +43,9 @@ _Min_Stack_Size = 0x400; /* 4 KiB — startup polling + HAL need more than 1 KiB
 /* Specify the memory areas */
 MEMORY
 {
-  FLASH (rx)     : ORIGIN = 0x08000000, LENGTH = 2048K
+  /* 2048K − last Bank2 sector (128K) reserved for IMU rest-bias (task_bias). */
+  FLASH (rx)     : ORIGIN = 0x08000000, LENGTH = 1920K
+  IMU_CAL (r)    : ORIGIN = 0x081E0000, LENGTH = 128K
   DTCMRAM (xrw)  : ORIGIN = 0x20000000, LENGTH = 128K
   RAM_D1 (xrw)   : ORIGIN = 0x24000000, LENGTH = 512K
   RAM_D2 (xrw)   : ORIGIN = 0x30000000, LENGTH = 288K
@@ -183,6 +185,14 @@ SECTIONS
     libm.a ( * )
     libgcc.a ( * )
   }
+
+  /* Runtime-programmed IMU offsets (NOLOAD: not in the .hex / .elf image). */
+  .imu_offset (NOLOAD) :
+  {
+    . = ALIGN(32);
+    KEEP(*(.imu_offset))
+    . = ALIGN(32);
+  } >IMU_CAL
 
   .ARM.attributes 0 : { *(.ARM.attributes) }
 }

@@ -278,6 +278,9 @@ public:
     const uint8_t fw_version_minor_ = ::fw_version_minor_;
     const uint8_t fw_version_revision_ = ::fw_version_revision_;
     const uint8_t fw_version_unreleased_ = ::fw_version_unreleased_; // 0 for official releases, 1 otherwise
+    /** Bump FW_DIAG_REV on every firmware behavior change (not NVM). */
+    static constexpr uint32_t FW_DIAG_REV = 3;
+    const uint32_t fw_diag_rev_ = FW_DIAG_REV;
 
     bool& brake_resistor_armed_ = ::brake_resistor_armed; // TODO: make this the actual variable
     bool& brake_resistor_saturated_ = ::brake_resistor_saturated; // TODO: make this the actual variable

@@ -169,7 +169,7 @@ During a turn, `ΔV_ref` removes the **intentional** left/right difference so `b
 bias_hold += α * (bias_raw - bias_hold)    // low-pass at bias update rate
 ```
 
-Optional: rate-limit `bias_hold`, clamp magnitude, disable updates if `\|pitch\|` large or wheel lift detected.
+Optional: rate-limit `bias_hold`, clamp magnitude, disable updates if `\|pitch\|` large or **antipatinage** reports wheel lift (see [ANTIPATINAGE.md](ANTIPATINAGE.md)).
 
 ### Use at 500 Hz
 
@@ -261,9 +261,7 @@ typedef struct {
 
 | ID | Name | File |
 |----|------|------|
-| 0 | dual_pid | `control_strategy_dual_pid.c` (default) |
-| 1 | linear | `control_strategy_linear.c` (F407-style) |
-| 2 | cascade | `control_strategy_cascade.c` |
+| 0 | ff_cascade | `control_strategy_ff_cascade.c` |
 
 Gains in `app_config.h`. Failsafe: IMU invalid or `|pitch| > APP_CTRL_PITCH_FAILSAFE_RAD` → estop, zero velocity.
 
@@ -293,6 +291,7 @@ Gains in `app_config.h`. Failsafe: IMU invalid or `|pitch| > APP_CTRL_PITCH_FAIL
 - [x] Motor TX @ 500 Hz, mutex TX queue
 - [x] Estop on IMU fault / pitch limit
 - [ ] Bias task wired to control
+- [x] **Antipatinage** — lift detect, SYNC / BOTH_AIR / RECOVERY ([ANTIPATINAGE.md](ANTIPATINAGE.md))
 - [ ] Jetson / telemetry protocols
 - [ ] `configENABLE_FPU` = 1 + ARM_CM7 FreeRTOS port (optional hardening)
 
@@ -304,3 +303,4 @@ Gains in `app_config.h`. Failsafe: IMU invalid or `|pitch| > APP_CTRL_PITCH_FAIL
 |------|--------|
 | 2026-05 | Implemented RTOS pipeline, CAN boot fixes, debug globals |
 | 2026-05 | Initial design: rates, bias formula, task map |
+| 2026-08 | Antipatinage spec: lift detection, SYNC, BOTH_AIR + `v_good` lookback |

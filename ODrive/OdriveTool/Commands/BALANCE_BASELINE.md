@@ -109,6 +109,8 @@ Caveat: when the robot pitches, torque also goes into body dynamics — model is
 
 Script: `ODrive/OdriveTool/Commands/identify_motor_inertia.py` (step torque + coast, LS fit \(J,b,c\)).
 
+**Used by:** [ANTIPATINAGE.md](../../../STM32/RobotSTM32FirmWare/docs/ANTIPATINAGE.md) § *Plant mesuré* — runaway estimate in BOTH_AIR and `η` criterion.
+
 ### Code / telemetry (still present)
 
 - Law: `control_strategy_ff_cascade.c`

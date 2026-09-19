@@ -573,6 +573,21 @@ extern bool DRV8301_isReset(DRV8301_Handle handle);
 //! \return    The data value
 extern uint16_t DRV8301_readSpi(DRV8301_Handle handle,const DRV8301_RegName_e regName);
 
+//! \brief     Reads data from the DRV8301 register with a caller-supplied SPI
+//!            timeout and the transfers' real HAL status, instead of the
+//!            fixed 1000 ms timeout and pass/fail-only assert of
+//!            DRV8301_readSpi(). For periodic diagnostic use on a bus shared
+//!            with other SPI slaves, where a genuine DRV fault must not be
+//!            able to hold a shared-bus lock for seconds.
+//! \param[in] handle      The DRV8301 handle
+//! \param[in] regName     The register name
+//! \param[in] timeout_ms  Timeout passed to each of the two underlying SPI transfers
+//! \param[out] out_status Set to the first non-OK HAL status of the two transfers,
+//!                        or HAL_OK if both succeeded. May be NULL.
+//! \return    The data value (only meaningful if *out_status == HAL_OK)
+extern uint16_t DRV8301_readSpiEx(DRV8301_Handle handle, const DRV8301_RegName_e regName,
+                                   uint32_t timeout_ms, HAL_StatusTypeDef* out_status);
+
 
 //! \brief     Resets the DRV8301
 //! \param[in] handle   The DRV8301 handle

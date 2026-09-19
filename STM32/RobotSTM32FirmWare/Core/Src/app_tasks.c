@@ -41,7 +41,7 @@ static const osThreadAttr_t attr_odrive = {
 
 static const osThreadAttr_t attr_bias = {
     .name = "bias",
-    .stack_size = 256u * 4u,
+    .stack_size = 768u * 4u,
     .priority = osPriorityAboveNormal,
 };
 

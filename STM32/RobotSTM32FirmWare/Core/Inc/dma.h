@@ -41,7 +41,8 @@ extern "C" {
 void MX_DMA_Init(void);
 
 /* USER CODE BEGIN Prototypes */
-
+void app_dma_nvic_apply(void);
+void app_imu_dma_nvic_apply(void);
 /* USER CODE END Prototypes */
 
 #ifdef __cplusplus

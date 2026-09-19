@@ -11,7 +11,15 @@ public:
     static constexpr uint32_t MODE_FLAG_ABS = 0x100;
 
     struct Config_t {
-        Mode mode = MODE_SPI_ABS_MT6835;
+        // Default INCREMENTAL, not MT6835: pwm_trig_adc_cb() starts an abs-SPI
+        // transaction every cycle for ANY axis whose mode has MODE_FLAG_ABS, even
+        // when that axis is idle. With the factory default of MODE_SPI_ABS_MT6835
+        // an unconfigured axis1 hammers the SPI3 bus shared with axis0's encoder
+        // (and, sharing abs_spi_cs_gpio_pin=6, toggles the same CS), which
+        // corrupts axis0's reads (spi_error_rate -> 1). This came back after every
+        // erase_configuration()/NVM-load-fail. Configure axis0.encoder.config.mode
+        // explicitly, like stock ODrive.
+        Mode mode = MODE_INCREMENTAL;
         bool use_index = false;
         bool pre_calibrated = false; // If true, this means the offset stored in
                                     // configuration is valid and does not need
@@ -84,6 +92,17 @@ public:
     float calib_scan_response_ = 0.0f; // debug report from offset calib
     int32_t pos_abs_ = 0;
     float spi_error_rate_ = 0.0f;
+    uint32_t spi_fail_class_ = 0;
+    uint32_t spi_fail_class_first_ = 0;
+    uint32_t spi_fail_detail_ = 0;
+    uint32_t spi_rx_dbg_ = 0;
+    uint32_t spi_drv_skip_count_ = 0;
+
+    static constexpr uint32_t SPI_FAIL_NONE = 0;
+    static constexpr uint32_t SPI_FAIL_CRC = 1;
+    static constexpr uint32_t SPI_FAIL_NOT_READY = 2;
+    static constexpr uint32_t SPI_FAIL_HAL = 3;
+    static constexpr uint32_t SPI_FAIL_NO_CB = 4;
 
     float pos_estimate_ = 0.0f; // [turn]
     float vel_estimate_ = 0.0f; // [turn/s]
@@ -105,6 +124,24 @@ public:
     void abs_spi_cs_pin_init();
     /** Seed ABZ timer from last SPI absolute position; see MODE_SPI_THEN_ABZ_MT6835. */
     void spi_then_abz_handoff_from_abs_spi();
+    /** SPI3 is shared with the DRV8301 gate driver. A DRV8301 transaction calls
+     *  spi3_lock_for_drv() so the ADC-ISR-driven absolute-encoder transfer skips
+     *  its turn instead of colliding / running with the wrong frame format, then
+     *  spi3_unlock_for_drv() when done. Format restore happens in the caller
+     *  thread, never from the ADC ISR. See Motor::drv_spi_ping(). */
+    static void spi3_lock_for_drv();
+    static void spi3_unlock_for_drv();
+    static bool spi3_locked_for_drv();
+    static bool spi3_try_lock_for_drv();
+    static bool spi3_wait_idle(SPI_HandleTypeDef* spi, uint32_t timeout_ms);
+    static void spi3_apply_drv_format(SPI_HandleTypeDef* spi);
+    static void spi3_restore_abs_format(SPI_HandleTypeDef* spi);
+    /** Park unused GPIO7 (and owned abs CS) high. Boot / DRV ping only — never
+     *  from the ADC ISR (8 kHz abs-SPI path). */
+    static void spi3_park_foreign_cs();
+    void abs_spi_note_fail(uint32_t fail_class, uint32_t detail);
+    static void abs_spi_note_hal_error(SPI_HandleTypeDef* spi);
+    static void abs_spi_note_no_callback(SPI_HandleTypeDef* spi);
     uint16_t abs_spi_dma_tx_[1] = {0xFFFF};
     uint16_t abs_spi_dma_rx_[1];
     static constexpr size_t MT6835_SPI_XFER_BYTES = 6;
@@ -115,8 +152,8 @@ public:
     /** After first good MT6835 SPI read: timer/PLL seeded, ABZ incremental path used (MODE_SPI_THEN_ABZ_MT6835 only). */
     bool spi_then_abz_handoff_done_ = false;
     Mode mode_ = MODE_INCREMENTAL;
-    GPIO_TypeDef* abs_spi_cs_port_;
-    uint16_t abs_spi_cs_pin_;
+    GPIO_TypeDef* abs_spi_cs_port_ = nullptr;
+    uint16_t abs_spi_cs_pin_ = 0;
     uint32_t abs_spi_cr1;
     uint32_t abs_spi_cr2;
 

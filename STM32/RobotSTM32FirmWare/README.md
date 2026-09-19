@@ -116,13 +116,13 @@ Defined in `Core/Inc/fdcan.h`:
 RobotSTM32FirmWare/          ← CubeIDE / VS Code project (this folder)
   Core/
     Src/tasks/               FreeRTOS tasks (control, motor_tx, imu, …)
-    Inc/app_config.h         Rates, PID gains, IMU selection
+    Inc/app_config.h         Rates, ff_cascade gains, IMU selection
   docs/CONTROL_ARCHITECTURE.md
   .vscode/                   Build (make) + Cortex-Debug launch
   README.md                  This file
 
 STM32/                       Shared + reference modules
-  common/                    pid_controller (linked in Debug build)
+  common/                    Shared host-testable C (IMU fusion, …)
   sensor_drivers/            ICM-45686, … (also under project `sensor_drivers/`)
   odrive_can/                CAN Simple protocol
   Telemetry/                 UART binary telemetry (ESP32, planned)
@@ -223,7 +223,7 @@ After CubeMX regenerate: re-apply USER CODE in `main.c`, check `fdcan.c` USER bl
 | `ODRIVE_VELOCITY_MODE_AXIS1_NODE_ID` | same | `1` | Second XDrive |
 | `ODRIVE_CAN_DIAG_SCOPE_PING` | `odrive_can_hal.h` | `0` | `1` = CAN scope test only (no ODrive startup) |
 | `DEBUG_DESK_NO_ODRIVE` | build flags | undefined | Define to skip ODrive boot on desk (no CAN) |
-| `APP_CTRL_STRATEGY_DEFAULT` | `app_config.h` | `0` | 0=dual_pid, 1=linear, 2=cascade |
+| `APP_CTRL_STRATEGY_DEFAULT` | `app_config.h` | `0` | `ff_cascade` only |
 
 ---
 

@@ -90,6 +90,7 @@ public:
     void update_current_controller_gains();
     void DRV8301_setup();
     bool check_DRV_fault();
+    void drv_spi_ping();
     void set_error(Error error);
     bool do_checks();
     float effective_current_lim();
@@ -157,9 +158,15 @@ public:
     };
     struct : GateDriverIntf {
         DrvFault drv_fault = DRV_FAULT_NO_FAULT;
+        bool spi_ping_en = false;
+        uint32_t spi_ping_ok_count = 0;
+        uint32_t spi_ping_fail_count = 0;
+        uint32_t spi_ping_last_raw = 0;
+        uint32_t spi_ping_last_hal = 0;
     } gate_driver_exported_;
     DRV_SPI_8301_Vars_t gate_driver_regs_; //Local view of DRV registers (initialized by DRV8301_setup)
     float effective_current_lim_ = 10.0f;
+    uint32_t drv_spi_ping_last_ms_ = 0;
 };
 
 #endif // __MOTOR_HPP
