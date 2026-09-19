@@ -53,3 +53,4 @@ ODrive/**/*.png
 
 # Eclipse/CubeIDE per-machine indexer state (rewritten on every IDE open)
 **/.settings/language.settings.xml
+STM32/RobotSTM32FirmWare/.settings/stm32cubeide.project.prefs
