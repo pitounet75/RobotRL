@@ -9,7 +9,7 @@ Framed binary protocol over UART. Works with the [ESP32Telemetry](../../ESP32Tel
 
 ### BalanceFrame (type 0x0100)
 
-Unsolicited @ **500 Hz** from STM32 `task_telemetry` (`APP_TELEMETRY_PERIOD_MS=2`). Payload **68 B** (V4: V3 + `wc_mode` / `sync_l` / `sync_r` / pad) — see [telemetry_balance_frame.h](telemetry_balance_frame.h). Streaming starts after ESP32 sends `READY\n`; a 5 s timeout starts it anyway so either MCU may boot first (see ESP32Telemetry README).
+Unsolicited @ **500 Hz** from STM32 `task_telemetry` (`APP_TELEMETRY_PERIOD_MS=2`). Payload **84 B** (V5: V4 + per-wheel order-2 fit `vel_fit_l/r_turns_s`, `acc_fit_l/r_turns_s2`; V4 was V3 + `wc_mode` / `sync_l` / `sync_r` / pad) — see [telemetry_balance_frame.h](telemetry_balance_frame.h). Streaming starts after ESP32 sends `READY\n`; a 5 s timeout starts it anyway so either MCU may boot first (see ESP32Telemetry README).
 `frame_number` advances only when a generated sample is accepted into the STM32 UART4 TX queue. Consequently, host-visible gaps mean loss after queue admission; source generation or queue-admission loss is measured by the firmware counters below without changing the wire payload.
 The former reserved payload byte carries the low 8 bits of
 `g_telemetry_balance_frames_send_failed`, exposed on the PC as

@@ -11,11 +11,13 @@ BALANCE_FRAME_STRUCT_V1 = struct.Struct("<II9f4B")
 BALANCE_FRAME_STRUCT_V2 = struct.Struct("<II11f4B")
 BALANCE_FRAME_STRUCT_V3 = struct.Struct("<II11f4B2f")
 BALANCE_FRAME_STRUCT_V4 = struct.Struct("<II11f4B2f4B")
+BALANCE_FRAME_STRUCT_V5 = struct.Struct("<II11f4B2f4B4f")
 BALANCE_FRAME_PAYLOAD_LEN_V1 = 48
 BALANCE_FRAME_PAYLOAD_LEN_V2 = 56
 BALANCE_FRAME_PAYLOAD_LEN_V3 = 64
 BALANCE_FRAME_PAYLOAD_LEN_V4 = 68
-BALANCE_FRAME_PAYLOAD_LEN = BALANCE_FRAME_PAYLOAD_LEN_V4
+BALANCE_FRAME_PAYLOAD_LEN_V5 = 84
+BALANCE_FRAME_PAYLOAD_LEN = BALANCE_FRAME_PAYLOAD_LEN_V5
 
 @dataclass(frozen=True)
 class BalanceFrameSanityLimits:
@@ -61,9 +63,47 @@ class BalanceFrame:
     sync_l: int = 0
     sync_r: int = 0
     wc_reserved: int = 0
+    # V5: same wheels, order-2 sliding fit instead of the EMA, plus its
+    # acceleration. Streamed beside the EMA so both can be compared live.
+    vel_fit_l_turns_s: float = 0.0
+    vel_fit_r_turns_s: float = 0.0
+    acc_fit_l_turns_s2: float = 0.0
+    acc_fit_r_turns_s2: float = 0.0
 
     @classmethod
     def decode(cls, payload: bytes) -> "BalanceFrame":
+        if len(payload) >= BALANCE_FRAME_PAYLOAD_LEN_V5:
+            values = BALANCE_FRAME_STRUCT_V5.unpack(payload[:BALANCE_FRAME_PAYLOAD_LEN_V5])
+            return cls(
+                frame_number=values[0],
+                time_us=values[1],
+                pitch_rad=values[2],
+                pitch_rate_rads=values[3],
+                vel_wheel_turns_s=values[4],
+                vel_wheel_l_turns_s=values[5],
+                vel_wheel_r_turns_s=values[6],
+                cmd_torque_nm=values[7],
+                cmd_torque_left_nm=values[8],
+                cmd_torque_right_nm=values[9],
+                u_meca_nm=values[10],
+                u_err_nm=values[11],
+                pitch_ref_rad=values[12],
+                imu_valid=values[13],
+                estop=values[14],
+                strategy_id=values[15],
+                source_drop_count_mod256=values[16],
+                vbus_l_v=values[17],
+                vbus_r_v=values[18],
+                wc_mode=values[19],
+                sync_l=values[20],
+                sync_r=values[21],
+                wc_reserved=values[22],
+                vel_fit_l_turns_s=values[23],
+                vel_fit_r_turns_s=values[24],
+                acc_fit_l_turns_s2=values[25],
+                acc_fit_r_turns_s2=values[26],
+            )
+
         if len(payload) >= BALANCE_FRAME_PAYLOAD_LEN_V4:
             values = BALANCE_FRAME_STRUCT_V4.unpack(payload[:BALANCE_FRAME_PAYLOAD_LEN_V4])
             return cls(
@@ -244,8 +284,8 @@ class BalanceFrame:
         return not self.sanity_issues(limits)
 
     def encode(self) -> bytes:
-        """Canonical V4-layout bytes (up-converts older frames) for the web UI."""
-        return BALANCE_FRAME_STRUCT_V4.pack(
+        """Canonical V5-layout bytes (up-converts older frames) for the web UI."""
+        return BALANCE_FRAME_STRUCT_V5.pack(
             self.frame_number,
             self.time_us,
             self.pitch_rad,
@@ -269,4 +309,8 @@ class BalanceFrame:
             self.sync_l,
             self.sync_r,
             self.wc_reserved,
+            self.vel_fit_l_turns_s,
+            self.vel_fit_r_turns_s,
+            self.acc_fit_l_turns_s2,
+            self.acc_fit_r_turns_s2,
         )

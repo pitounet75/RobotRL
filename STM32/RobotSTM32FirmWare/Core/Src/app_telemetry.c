@@ -358,6 +358,10 @@ bool app_telemetry_init(void)
         {"sync_l", TELEMETRY_TYPE_UINT32},
         {"sync_r", TELEMETRY_TYPE_UINT32},
         {"wc_reserved", TELEMETRY_TYPE_UINT32},
+        {"vel_fit_l_turns_s", TELEMETRY_TYPE_FLOAT},
+        {"vel_fit_r_turns_s", TELEMETRY_TYPE_FLOAT},
+        {"acc_fit_l_turns_s2", TELEMETRY_TYPE_FLOAT},
+        {"acc_fit_r_turns_s2", TELEMETRY_TYPE_FLOAT},
     };
 
     static const telemetry_message_def_t balance_def = {
@@ -541,6 +545,10 @@ void app_telemetry_publish_balance_frame(void)
     app_encoder_bank_sample_t bank;
     float vel_l = 0.0f;
     float vel_r = 0.0f;
+    float vel_fit_l = 0.0f;
+    float vel_fit_r = 0.0f;
+    float acc_fit_l = 0.0f;
+    float acc_fit_r = 0.0f;
     if (app_samples_encoder_bank_read(&bank)) {
         const app_encoder_sample_t *left = &bank.encoder[WHEEL_ENCODER_TIM2];
         const app_encoder_sample_t *right = &bank.encoder[WHEEL_ENCODER_TIM4];
@@ -549,6 +557,15 @@ void app_telemetry_publish_balance_frame(void)
         }
         if (right->valid) {
             vel_r = right->vel_turns_s;
+        }
+        /* Fit stays 0 until its window fills: the EMA above is unaffected. */
+        if (left->fit_valid) {
+            vel_fit_l = left->vel_fit_turns_s;
+            acc_fit_l = left->acc_fit_turns_s2;
+        }
+        if (right->fit_valid) {
+            vel_fit_r = right->vel_fit_turns_s;
+            acc_fit_r = right->acc_fit_turns_s2;
         }
     }
 
@@ -576,6 +593,10 @@ void app_telemetry_publish_balance_frame(void)
     s_balance_frame.vel_wheel_turns_s = g_ctrl_vel_wheel;
     s_balance_frame.vel_wheel_l_turns_s = vel_l;
     s_balance_frame.vel_wheel_r_turns_s = vel_r;
+    s_balance_frame.vel_fit_l_turns_s = vel_fit_l;
+    s_balance_frame.vel_fit_r_turns_s = vel_fit_r;
+    s_balance_frame.acc_fit_l_turns_s2 = acc_fit_l;
+    s_balance_frame.acc_fit_r_turns_s2 = acc_fit_r;
     s_balance_frame.cmd_torque_nm = g_ctrl_cmd_torque_nm;
     s_balance_frame.cmd_torque_left_nm = torque_left;
     s_balance_frame.cmd_torque_right_nm = torque_right;

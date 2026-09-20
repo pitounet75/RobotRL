@@ -4,6 +4,7 @@ from telemetry.balance_frame import (
     BALANCE_FRAME_STRUCT_V2,
     BALANCE_FRAME_STRUCT_V3,
     BALANCE_FRAME_STRUCT_V4,
+    BALANCE_FRAME_STRUCT_V5,
     BalanceFrame,
     BalanceFrameSanityLimits,
 )
@@ -87,6 +88,45 @@ class BalanceFrameSanityTests(unittest.TestCase):
         self.assertEqual(frame.sync_r, 0)
         self.assertAlmostEqual(frame.vbus_l_v, 23.5, places=5)
 
+    def test_v5_decodes_per_wheel_fit(self) -> None:
+        payload = BALANCE_FRAME_STRUCT_V5.pack(
+            10,
+            20,
+            *([0.0] * 11),
+            1,
+            0,
+            2,
+            37,
+            23.5,
+            24.1,
+            1,
+            1,
+            0,
+            0,
+            1.25,
+            -1.5,
+            14.0,
+            -14.0,
+        )
+        frame = BalanceFrame.decode(payload)
+        self.assertAlmostEqual(frame.vel_fit_l_turns_s, 1.25, places=5)
+        self.assertAlmostEqual(frame.vel_fit_r_turns_s, -1.5, places=5)
+        self.assertAlmostEqual(frame.acc_fit_l_turns_s2, 14.0, places=5)
+        self.assertAlmostEqual(frame.acc_fit_r_turns_s2, -14.0, places=5)
+        # V4 fields must survive the layout growth.
+        self.assertEqual(frame.wc_mode, 1)
+        self.assertAlmostEqual(frame.vbus_l_v, 23.5, places=5)
+
+    def test_v4_payload_still_decodes_with_fit_zeroed(self) -> None:
+        """A robot running pre-V5 firmware must still stream, not crash."""
+        payload = BALANCE_FRAME_STRUCT_V4.pack(
+            10, 20, *([0.0] * 11), 1, 0, 2, 37, 23.5, 24.1, 3, 1, 1, 0
+        )
+        frame = BalanceFrame.decode(payload)
+        self.assertEqual(frame.wc_mode, 3)
+        self.assertEqual(frame.vel_fit_l_turns_s, 0.0)
+        self.assertEqual(frame.acc_fit_r_turns_s2, 0.0)
+
     def test_physical_limit_reason_is_diagnosable(self) -> None:
         frame = make_frame(cmd_torque_left_nm=3.0)
 
@@ -120,7 +160,8 @@ class BalanceFrameSanityTests(unittest.TestCase):
         # Float fields are packed as float32 on the wire, so a double like 0.1
         # loses precision on the round trip (0.1 -> 0.10000000149011612) --
         # compare floats with assertAlmostEqual, not full dataclass equality.
-        frame = make_frame(frame_number=42, time_us=123456, source_drop_count_mod256=7, sync_l=1, wc_mode=1)
+        frame = make_frame(frame_number=42, time_us=123456, source_drop_count_mod256=7, sync_l=1, wc_mode=1,
+                           vel_fit_l_turns_s=1.25, acc_fit_r_turns_s2=-14.0)
 
         decoded = BalanceFrame.decode(frame.encode())
 
@@ -149,6 +190,10 @@ class BalanceFrameSanityTests(unittest.TestCase):
             "pitch_ref_rad",
             "vbus_l_v",
             "vbus_r_v",
+            "vel_fit_l_turns_s",
+            "vel_fit_r_turns_s",
+            "acc_fit_l_turns_s2",
+            "acc_fit_r_turns_s2",
         ):
             self.assertAlmostEqual(getattr(decoded, field), getattr(frame, field), places=6)
 

@@ -4,6 +4,7 @@ const WS_TELEMETRY_PATH = "/ws/telemetry";
 const FRAME_BYTES_MIN = 56;
 const FRAME_BYTES_V3 = 64;
 const FRAME_BYTES_V4 = 68;
+const FRAME_BYTES_V5 = 84;
 const VBUS_EMA = 0.995;
 const VBUS_PRESENT_V = 0.5;
 const VBUS_WARN_V = 11.4;
@@ -47,6 +48,11 @@ function decodeBalanceFrame(buf) {
     wc_mode: buf.byteLength >= FRAME_BYTES_V4 ? dv.getUint8(64) : 0,
     sync_l: buf.byteLength >= FRAME_BYTES_V4 ? dv.getUint8(65) : 0,
     sync_r: buf.byteLength >= FRAME_BYTES_V4 ? dv.getUint8(66) : 0,
+    // V5: order-2 fit beside the EMA above, to compare them live.
+    vel_fit_l_turns_s: buf.byteLength >= FRAME_BYTES_V5 ? dv.getFloat32(68, true) : 0,
+    vel_fit_r_turns_s: buf.byteLength >= FRAME_BYTES_V5 ? dv.getFloat32(72, true) : 0,
+    acc_fit_l_turns_s2: buf.byteLength >= FRAME_BYTES_V5 ? dv.getFloat32(76, true) : 0,
+    acc_fit_r_turns_s2: buf.byteLength >= FRAME_BYTES_V5 ? dv.getFloat32(80, true) : 0,
   };
 }
 

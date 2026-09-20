@@ -5,7 +5,8 @@
  * Message type TELEM_MSG_BALANCE_FRAME (0x0100), unsolicited ascending @ 500 Hz.
  * frame_number counts frames accepted by the STM32 TX queue, so source-side
  * generation drops do not appear as wire-loss gaps.
- * V4 payload is 68 B: V3 (64 B) plus wc_mode / sync_l / sync_r / pad.
+ * V5 payload is 84 B: V4 (68 B) plus the per-wheel order-2 fit (vel + acc).
+ * V4 was 68 B: V3 (64 B) plus wc_mode / sync_l / sync_r / pad.
  */
 #ifndef TELEMETRY_BALANCE_FRAME_H
 #define TELEMETRY_BALANCE_FRAME_H
@@ -19,7 +20,7 @@ extern "C" {
 
 #define TELEM_MSG_BALANCE_FRAME      0x0100u
 #define TELEMETRY_KEY_BALANCE_FRAME  "BalanceFrame"
-#define TELEMETRY_BALANCE_FRAME_PAYLOAD_LEN 68u
+#define TELEMETRY_BALANCE_FRAME_PAYLOAD_LEN 84u
 
 typedef struct __attribute__((packed)) {
     uint32_t frame_number;
@@ -47,10 +48,19 @@ typedef struct __attribute__((packed)) {
     uint8_t sync_l;
     uint8_t sync_r;
     uint8_t wc_reserved;
+    /** V5: same wheels as vel_wheel_l/r_turns_s above, but from the order-2
+     *  sliding fit (vel_fit.h) instead of the EMA, plus the acceleration that
+     *  fit produces. Streamed side by side on purpose: the balance cascade
+     *  still runs on the EMA, and which estimator it should use is decided by
+     *  comparing these traces on the robot. */
+    float vel_fit_l_turns_s;
+    float vel_fit_r_turns_s;
+    float acc_fit_l_turns_s2;
+    float acc_fit_r_turns_s2;
 } telemetry_balance_frame_t;
 
 _Static_assert(sizeof(telemetry_balance_frame_t) == TELEMETRY_BALANCE_FRAME_PAYLOAD_LEN,
-               "BalanceFrame V4 must be 68 bytes");
+               "BalanceFrame V5 must be 84 bytes");
 
 static inline void telemetry_balance_frame_encode(const telemetry_balance_frame_t *frame, uint8_t *out)
 {

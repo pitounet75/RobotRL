@@ -32,6 +32,10 @@ CSV_HEADER = [
     "wc_mode",
     "sync_l",
     "sync_r",
+    "vel_fit_l_turns_s",
+    "vel_fit_r_turns_s",
+    "acc_fit_l_turns_s2",
+    "acc_fit_r_turns_s2",
 ]
 
 
@@ -76,6 +80,10 @@ class CsvRecorder:
                 frame.wc_mode,
                 frame.sync_l,
                 frame.sync_r,
+                frame.vel_fit_l_turns_s,
+                frame.vel_fit_r_turns_s,
+                frame.acc_fit_l_turns_s2,
+                frame.acc_fit_r_turns_s2,
             ]
         )
 
