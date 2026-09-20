@@ -11,7 +11,7 @@
 #include <stdint.h>
 
 typedef enum {
-    /** Cascade vel → pitch_ref + u_ff = −K_ff·sin(pitch) + FB on (pitch_ref_eff − pitch, pitch_rate). */
+    /** Cascade vel → pitch_ref + u_meca (gravity + D on θ̇) + u_err (P on θ_err + Kv). */
     CTRL_STRATEGY_FF_CASCADE = 0,
     CTRL_STRATEGY_COUNT
 } control_strategy_id_t;
@@ -45,8 +45,8 @@ typedef struct {
     /** Debug taps (strategy-dependent; zero if unused). */
     float u_balance;
     float u_vel;
-    float u_ff;
-    float u_fb;
+    float u_meca;
+    float u_err;
     float cmd;
 } control_strategy_output_t;
 

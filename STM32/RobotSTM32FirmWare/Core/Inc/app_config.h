@@ -50,6 +50,10 @@
 
 /** Stale encoder snapshot: re-issue GET_ENCODER_ESTIMATES RTR. */
 #define APP_ODRIVE_ENCODER_STALE_MS  80u
+/** Re-issue GET_VBUS_VOLTAGE RTR when the last reply is older than this. */
+#ifndef APP_ODRIVE_VBUS_STALE_MS
+#define APP_ODRIVE_VBUS_STALE_MS     150u
+#endif
 
 /**
  * ODrive anticogging (cogging map applied inside the drive as torque offset in Nm).
@@ -254,28 +258,28 @@
 #define APP_CTRL_VEL_REF_SLEW_TURNS_S2  80.0f
 #endif
 
-/* FF + PD (+ wheel-speed torque damp).
+/* u_meca (grav + pitch damper) + u_err (P + Kv).
  * Baseline: ODrive/.../BALANCE_BASELINE.md + logs/krate013_db0017.csv
- * (k_rate 0.013 + gated deadband 0.0017). */
-#ifndef APP_CTRL_FF_GRAV_K
-#define APP_CTRL_FF_GRAV_K               0.14f
+ * (meca_k_pitch_damp 0.013 + gated deadband 0.0017). */
+#ifndef APP_CTRL_MECA_K_GRAV
+#define APP_CTRL_MECA_K_GRAV               0.14f
 #endif
-#ifndef APP_CTRL_FF_FB_K_PITCH
-#define APP_CTRL_FF_FB_K_PITCH           0.055f
+#ifndef APP_CTRL_ERR_K_PITCH
+#define APP_CTRL_ERR_K_PITCH           0.055f
 #endif
-#ifndef APP_CTRL_FF_FB_K_RATE
-#define APP_CTRL_FF_FB_K_RATE            0.013f
+#ifndef APP_CTRL_MECA_K_PITCH_DAMP
+#define APP_CTRL_MECA_K_PITCH_DAMP            0.013f
 #endif
-/** u += Kv·(v_ref - v); negative Kv brakes in current sign convention. */
-#ifndef APP_CTRL_FF_FB_K_VEL
-#define APP_CTRL_FF_FB_K_VEL             (-0.0005f)
+/** u_v = Kv·(v_ref - v); live as err_k_vel. Negative Kv brakes in current sign convention. */
+#ifndef APP_CTRL_ERR_K_VEL
+#define APP_CTRL_ERR_K_VEL             (-0.0005f)
 #endif
-#ifndef APP_CTRL_FF_FB_K_VEL_MAX_NM
-#define APP_CTRL_FF_FB_K_VEL_MAX_NM      0.010f
+#ifndef APP_CTRL_ERR_K_VEL_MAX_NM
+#define APP_CTRL_ERR_K_VEL_MAX_NM      0.010f
 #endif
 /** Output LPF: higher = softer (cuts vib chatter). */
-#ifndef APP_CTRL_FF_OUTPUT_ALPHA
-#define APP_CTRL_FF_OUTPUT_ALPHA         0.50f
+#ifndef APP_CTRL_BALANCE_OUTPUT_ALPHA
+#define APP_CTRL_BALANCE_OUTPUT_ALPHA         0.50f
 #endif
 /**
  * hypothesis_lab build: experimental friction / debug (see docs/HYPOTHESIS_LAB.md).
@@ -320,7 +324,7 @@
 /**
  * Motor-shaft accel P (near upright): alpha_ref = (u - c*sign(ω))/J,
  * dτ = Kα*(α_ref - α_meas), gated. J/c from free-wheel USB ident (avg L/R).
- * SHELVED 2026-08: keep alpha_kp=0 (see ODrive/.../BALANCE_BASELINE.md § Shelved).
+ * SHELVED 2026-08: keep motor_torque_correction_kp=0 (see ODrive/.../BALANCE_BASELINE.md § Shelved).
  * Code kept for a possible later revisit; prefer ODrive bidirectional anticogging.
  */
 #ifndef APP_CTRL_MOTOR_J_KG_M2
@@ -329,25 +333,25 @@
 #ifndef APP_CTRL_MOTOR_FRICTION_C_NM
 #define APP_CTRL_MOTOR_FRICTION_C_NM         0.0052f
 #endif
-#ifndef APP_CTRL_ALPHA_KP
-#define APP_CTRL_ALPHA_KP                    0.0f
+#ifndef APP_CTRL_MOTOR_TORQUE_CORRECTION_KP
+#define APP_CTRL_MOTOR_TORQUE_CORRECTION_KP                    0.0f
 #endif
-#ifndef APP_CTRL_ALPHA_MAX_NM
-#define APP_CTRL_ALPHA_MAX_NM                0.002f
+#ifndef APP_CTRL_MOTOR_TORQUE_CORRECTION_MAX_NM
+#define APP_CTRL_MOTOR_TORQUE_CORRECTION_MAX_NM                0.002f
 #endif
-#ifndef APP_CTRL_ALPHA_PITCH_MAX_RAD
-#define APP_CTRL_ALPHA_PITCH_MAX_RAD         0.05f
+#ifndef APP_CTRL_MOTOR_TORQUE_CORRECTION_GATE_PITCH_MAX_RAD
+#define APP_CTRL_MOTOR_TORQUE_CORRECTION_GATE_PITCH_MAX_RAD         0.05f
 #endif
-#ifndef APP_CTRL_ALPHA_RATE_MAX_RADS
-#define APP_CTRL_ALPHA_RATE_MAX_RADS         0.30f
+#ifndef APP_CTRL_MOTOR_TORQUE_CORRECTION_GATE_RATE_MAX_RADS
+#define APP_CTRL_MOTOR_TORQUE_CORRECTION_GATE_RATE_MAX_RADS         0.30f
 #endif
 /** Gate off when |motor ω| (robot-frame turn/s) exceeds this; 0 = no vel gate. */
-#ifndef APP_CTRL_ALPHA_VEL_MAX_TURNS_S
-#define APP_CTRL_ALPHA_VEL_MAX_TURNS_S       8.0f
+#ifndef APP_CTRL_MOTOR_TORQUE_CORRECTION_GATE_VEL_MAX_TURNS_S
+#define APP_CTRL_MOTOR_TORQUE_CORRECTION_GATE_VEL_MAX_TURNS_S       8.0f
 #endif
 /** EMA on α_meas: higher = smoother / more lag (0..1). */
-#ifndef APP_CTRL_ALPHA_LPF
-#define APP_CTRL_ALPHA_LPF                   0.80f
+#ifndef APP_CTRL_MOTOR_ACCEL_LPF
+#define APP_CTRL_MOTOR_ACCEL_LPF                   0.80f
 #endif
 
 /**
@@ -375,85 +379,101 @@
 
 /**
  * Antipatinage (wheel lift): see docs/ANTIPATINAGE.md.
- * APP_CTRL_ANTIPATINAGE_ENABLE=0 disables detection (pass-through).
+ * Boot defaults. Live as antipat_enable / antipat_* (snapshot v15).
+ * antipat_enable=0 disables detection (pass-through).
  */
 #ifndef APP_CTRL_ANTIPATINAGE_ENABLE
 #define APP_CTRL_ANTIPATINAGE_ENABLE         0
 #endif
-/** 0 = disable SYNC_L/R (single-wheel lift) only; BOTH_AIR stays active. */
+/** 0 = disable SYNC_L/R (single-wheel lift) only; BOTH_AIR stays active if enabled. */
 #ifndef APP_ANTIPAT_SYNC_ENABLE
 #define APP_ANTIPAT_SYNC_ENABLE              0
 #endif
-#ifndef APP_ANTIPAT_TRACK_WIDTH_M
-#define APP_ANTIPAT_TRACK_WIDTH_M            0.16f  /* 16 cm empattement */
+/** 0 = disable BOTH_AIR; SYNC_L/R still work if antipat_enable + sync_enable. */
+#ifndef APP_ANTIPAT_BOTH_ENABLE
+#define APP_ANTIPAT_BOTH_ENABLE              0
+#endif
+#ifndef APP_ANTIPAT_SYNC_TRACK_WIDTH_M
+#define APP_ANTIPAT_SYNC_TRACK_WIDTH_M            0.16f  /* 16 cm empattement */
 #endif
 #ifndef APP_ANTIPAT_TAU_MIN_NM
 #define APP_ANTIPAT_TAU_MIN_NM               0.001f
 #endif
+/** EMA on |τ_applied| before η only (not the motor cmd). 0.85 ≈ 6 ms at 1 kHz. */
+#ifndef APP_ANTIPAT_TAU_EMA
+#define APP_ANTIPAT_TAU_EMA                  0.85f
+#endif
 #ifndef APP_ANTIPAT_ETA_ON
 #define APP_ANTIPAT_ETA_ON                   8000.0f /* rad/s^2 per Nm; tune bench */
 #endif
-#ifndef APP_ANTIPAT_ETA_OFF
-#define APP_ANTIPAT_ETA_OFF                  1000.0f
+#ifndef APP_ANTIPAT_BOTH_ETA_OFF
+#define APP_ANTIPAT_BOTH_ETA_OFF                  1000.0f
 #endif
 /** BOTH_AIR exit fallback when |α| drops (loaded contact); 0 = η-only exit. */
-#ifndef APP_ANTIPAT_ALPHA_CONTACT_MAX_RADS2
-#define APP_ANTIPAT_ALPHA_CONTACT_MAX_RADS2  500.0f
+#ifndef APP_ANTIPAT_BOTH_ALPHA_CONTACT_MAX_RADS2
+#define APP_ANTIPAT_BOTH_ALPHA_CONTACT_MAX_RADS2  500.0f
 #endif
 /** In BOTH_AIR: small τ_both + spinning ω ⇒ still airborne (block false recontact). */
-#ifndef APP_ANTIPAT_TAU_BOTH_STEADY_AIR_NM
-#define APP_ANTIPAT_TAU_BOTH_STEADY_AIR_NM   0.004f
+#ifndef APP_ANTIPAT_BOTH_TAU_STEADY_AIR_NM
+#define APP_ANTIPAT_BOTH_TAU_STEADY_AIR_NM   0.004f
 #endif
 #ifndef APP_ANTIPAT_OMEGA_AIR_MIN_TURNS_S
 #define APP_ANTIPAT_OMEGA_AIR_MIN_TURNS_S    0.25f
 #endif
-#ifndef APP_ANTIPAT_K_DOM
-#define APP_ANTIPAT_K_DOM                    1.4f
+#ifndef APP_ANTIPAT_SYNC_K_DOM
+#define APP_ANTIPAT_SYNC_K_DOM                    1.4f
 #endif
-#ifndef APP_ANTIPAT_EPS_ABS_RADS
-#define APP_ANTIPAT_EPS_ABS_RADS             0.08f  /* |psi_dot - psi_kin| */
+#ifndef APP_ANTIPAT_SYNC_EPS_ABS_RADS
+#define APP_ANTIPAT_SYNC_EPS_ABS_RADS             0.08f  /* |psi_dot - psi_kin| */
 #endif
-#ifndef APP_ANTIPAT_K_REL
-#define APP_ANTIPAT_K_REL                    0.35f
+#ifndef APP_ANTIPAT_SYNC_K_REL
+#define APP_ANTIPAT_SYNC_K_REL                    0.35f
 #endif
-#ifndef APP_ANTIPAT_K_OFF
-#define APP_ANTIPAT_K_OFF                    0.65f
+#ifndef APP_ANTIPAT_SYNC_K_OFF
+#define APP_ANTIPAT_SYNC_K_OFF                    0.65f
 #endif
-#ifndef APP_ANTIPAT_T_ON_MS
-#define APP_ANTIPAT_T_ON_MS                  60u
+#ifndef APP_ANTIPAT_SYNC_T_ON_MS
+#define APP_ANTIPAT_SYNC_T_ON_MS                  60u
 #endif
-#ifndef APP_ANTIPAT_T_OFF_MS
-#define APP_ANTIPAT_T_OFF_MS                 100u
+#ifndef APP_ANTIPAT_SYNC_T_OFF_MS
+#define APP_ANTIPAT_SYNC_T_OFF_MS                 100u
 #endif
-#ifndef APP_ANTIPAT_T_ON_BOTH_MS
-#define APP_ANTIPAT_T_ON_BOTH_MS             15u
+#ifndef APP_ANTIPAT_BOTH_T_ON_MS
+#define APP_ANTIPAT_BOTH_T_ON_MS             15u
 #endif
-#ifndef APP_ANTIPAT_T_OFF_BOTH_MS
-#define APP_ANTIPAT_T_OFF_BOTH_MS            100u
+#ifndef APP_ANTIPAT_BOTH_T_OFF_MS
+#define APP_ANTIPAT_BOTH_T_OFF_MS            100u
 #endif
-#ifndef APP_ANTIPAT_T_MA_MS
-#define APP_ANTIPAT_T_MA_MS                  100u
+#ifndef APP_ANTIPAT_BOTH_T_MA_MS
+#define APP_ANTIPAT_BOTH_T_MA_MS                  100u
 #endif
 #ifndef APP_ANTIPAT_T_RECOVER_MS
 #define APP_ANTIPAT_T_RECOVER_MS             150u
 #endif
-#ifndef APP_ANTIPAT_U_MIN_NM
-#define APP_ANTIPAT_U_MIN_NM                 0.006f
+#ifndef APP_ANTIPAT_BOTH_U_MIN_NM
+#define APP_ANTIPAT_BOTH_U_MIN_NM                 0.006f
 #endif
-#ifndef APP_ANTIPAT_PITCH_RATE_MIN_RADS
-#define APP_ANTIPAT_PITCH_RATE_MIN_RADS      0.08f
+#ifndef APP_ANTIPAT_BOTH_PITCH_RATE_MIN_RADS
+#define APP_ANTIPAT_BOTH_PITCH_RATE_MIN_RADS      0.08f
 #endif
-#ifndef APP_ANTIPAT_K_SYNC
-#define APP_ANTIPAT_K_SYNC                   0.0025f /* Nm/(turn/s) */
+#ifndef APP_ANTIPAT_SYNC_K
+#define APP_ANTIPAT_SYNC_K                   0.0025f /* Nm/(turn/s) */
 #endif
-#ifndef APP_ANTIPAT_TAU_SYNC_MAX_NM
-#define APP_ANTIPAT_TAU_SYNC_MAX_NM          0.015f
+#ifndef APP_ANTIPAT_SYNC_KD
+#define APP_ANTIPAT_SYNC_KD                  0.0f /* Nm/(turn/s^2); D on e = ω_sol−ω_air */
 #endif
-#ifndef APP_ANTIPAT_K_BOTH_V
-#define APP_ANTIPAT_K_BOTH_V                 0.003f
+#ifndef APP_ANTIPAT_SYNC_TAU_MAX_NM
+#define APP_ANTIPAT_SYNC_TAU_MAX_NM          0.015f
 #endif
-#ifndef APP_ANTIPAT_TAU_BOTH_MAX_NM
-#define APP_ANTIPAT_TAU_BOTH_MAX_NM          0.012f
+/** Linear fade of u on a lifted wheel (SYNC or BOTH_AIR): 1→0 on lift, 0→1 on exit. 0 = step. */
+#ifndef APP_ANTIPAT_U_FADE_MS
+#define APP_ANTIPAT_U_FADE_MS                100u
+#endif
+#ifndef APP_ANTIPAT_BOTH_K_V
+#define APP_ANTIPAT_BOTH_K_V                 0.003f
+#endif
+#ifndef APP_ANTIPAT_BOTH_TAU_MAX_NM
+#define APP_ANTIPAT_BOTH_TAU_MAX_NM          0.012f
 #endif
 #ifndef APP_CTRL_POS_KP
 #define APP_CTRL_POS_KP                      0.0f   /* (turn/s) / m */
@@ -567,29 +587,39 @@ typedef enum {
  *   τ_L = u − u_yaw,  τ_R = u + u_yaw
  * Telemetry names kept for compat: heading_ref_rad = ψ̇_ref (rad/s).
  * Gains: Kp Nm/(rad/s), Kd Nm/(rad/s²).
- * Defaults: Kp=0.08, Kd=0.005, τ_max=0.04 (half of cmd max 0.08; saturates ~0.5 rad/s).
+ * Defaults: Kp=0.08, Kd=0.005, τ_max=0.001.
  * SET heading_reset=1 → ψ̇_ref ← 0 (integrated ψ display also zeroed).
  * heading_inc: ψ̇_ref = value (signed, rad/s, clamp ±YAW_RATE_REF_MAX).
  * heading_dec: ψ̇_ref = −value (old UI). heading_ref_rad is the same store.
  */
 #ifndef APP_CTRL_YAW_RATE_REF_MAX_RADS
-#define APP_CTRL_YAW_RATE_REF_MAX_RADS     2.0f
+#define APP_CTRL_YAW_RATE_REF_MAX_RADS     4.0f
 #endif
 #ifndef APP_CTRL_HEADING_KP
-#define APP_CTRL_HEADING_KP                  0.08f  /* Nm / (rad/s) */
+#define APP_CTRL_HEADING_KP                  0.02f  /* Nm / (rad/s) */
 #endif
 #ifndef APP_CTRL_HEADING_KD
-#define APP_CTRL_HEADING_KD                  0.005f /* Nm / (rad/s²) on dψ̇/dt */
+#define APP_CTRL_HEADING_KD                  0.001f /* Nm / (rad/s²) on dψ̇/dt */
 #endif
 #ifndef APP_CTRL_HEADING_REF_RAD
 #define APP_CTRL_HEADING_REF_RAD             0.0f   /* ψ̇_ref rad/s */
 #endif
 #ifndef APP_CTRL_HEADING_TORQUE_MAX_NM
-#define APP_CTRL_HEADING_TORQUE_MAX_NM       0.04f
+#define APP_CTRL_HEADING_TORQUE_MAX_NM       0.03f
 #endif
-/** EMA on ψ̇ before yaw loop: y = α·y + (1−α)·ψ̇_raw ; 0 = off, higher = smoother. */
+/**
+ * EMA on ψ̇ before yaw P: y = α·y + (1−α)·ψ̇_raw. Live as heading_ema.
+ * 0 = off (raw gyro). 0.99 @ 500 Hz ≈ 200 ms.
+ */
+#ifndef APP_CTRL_HEADING_EMA
+#define APP_CTRL_HEADING_EMA                 0.99f
+#endif
+/** EMA after dψ̇/dt (raw gyro) for heading_kd. 0.99 @ 500 Hz ≈ 200 ms. 0 = raw ψ̈. */
+#ifndef APP_CTRL_HEADING_D_EMA
+#define APP_CTRL_HEADING_D_EMA               0.99f
+#endif
 #ifndef APP_CTRL_YAW_RATE_LPF_ALPHA
-#define APP_CTRL_YAW_RATE_LPF_ALPHA          0.99f
+#define APP_CTRL_YAW_RATE_LPF_ALPHA          APP_CTRL_HEADING_EMA
 #endif
 
 #endif /* APP_CONFIG_H */

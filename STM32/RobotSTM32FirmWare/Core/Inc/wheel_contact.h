@@ -2,7 +2,8 @@
  * @file wheel_contact.h
  * @brief Antipatinage: wheel lift detection, SYNC / BOTH_AIR / RECOVERY modes.
  *
- * Spec: STM32/RobotSTM32FirmWare/docs/ANTIPATINAGE.md
+ * Public types/API for antipatinage. Implementation: antipat_common.c
+ * (orchestrator), antipat_sync.c, antipat_both.c.
  */
 #ifndef WHEEL_CONTACT_H
 #define WHEEL_CONTACT_H
@@ -36,8 +37,9 @@ typedef struct {
     float alpha_l_rads2;
     float alpha_r_rads2;
     float yaw_rate_rads;
-    float tau_l_pre_nm;
-    float tau_r_pre_nm;
+    /** Last torque actually sent to each motor (produced the measured shaft accel). */
+    float tau_l_applied_nm;
+    float tau_r_applied_nm;
     float vel_wheel_turns_s;
     float pos_wheel_turns;
     float x_m;
@@ -65,6 +67,8 @@ typedef struct {
     float vel_wheel_touch_turns_s;
     bool reset_u_lpf;
     float u_lpf_seed_nm;
+    float u_scale_l;
+    float u_scale_r;
 } wheel_contact_output_t;
 
 void wheel_contact_init(void);

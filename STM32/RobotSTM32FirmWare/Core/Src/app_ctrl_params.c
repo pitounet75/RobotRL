@@ -48,22 +48,22 @@ static void load_defaults(void)
     s_params.cascade_vel_kp = APP_CTRL_CASCADE_VEL_KP;
     s_params.cascade_vel_kd = APP_CTRL_CASCADE_VEL_KD;
     s_params.cascade_pitch_ref_max_rad = APP_CTRL_CASCADE_PITCH_REF_MAX_RAD;
-    s_params.ff_grav_k = APP_CTRL_FF_GRAV_K;
-    s_params.ff_fb_k_pitch = APP_CTRL_FF_FB_K_PITCH;
-    s_params.ff_fb_k_rate = APP_CTRL_FF_FB_K_RATE;
-    s_params.ff_output_alpha = APP_CTRL_FF_OUTPUT_ALPHA;
+    s_params.meca_k_grav = APP_CTRL_MECA_K_GRAV;
+    s_params.err_k_pitch = APP_CTRL_ERR_K_PITCH;
+    s_params.meca_k_pitch_damp = APP_CTRL_MECA_K_PITCH_DAMP;
+    s_params.balance_output_alpha = APP_CTRL_BALANCE_OUTPUT_ALPHA;
     s_params.wheel_encoder_vel_lpf_alpha = WHEEL_ENCODER_VEL_LPF_ALPHA;
     s_params.torque_deadband_nm = APP_CTRL_TORQUE_DEADBAND_NM;
     s_params.torque_deadband_pitch_max_rad = APP_CTRL_TORQUE_DEADBAND_PITCH_MAX_RAD;
     s_params.torque_deadband_rate_max_rads = APP_CTRL_TORQUE_DEADBAND_RATE_MAX_RADS;
-    s_params.alpha_kp = APP_CTRL_ALPHA_KP;
-    s_params.alpha_max_nm = APP_CTRL_ALPHA_MAX_NM;
+    s_params.motor_torque_correction_kp = APP_CTRL_MOTOR_TORQUE_CORRECTION_KP;
+    s_params.motor_torque_correction_max_nm = APP_CTRL_MOTOR_TORQUE_CORRECTION_MAX_NM;
     s_params.motor_J = APP_CTRL_MOTOR_J_KG_M2;
     s_params.motor_friction_c = APP_CTRL_MOTOR_FRICTION_C_NM;
-    s_params.alpha_pitch_max_rad = APP_CTRL_ALPHA_PITCH_MAX_RAD;
-    s_params.alpha_rate_max_rads = APP_CTRL_ALPHA_RATE_MAX_RADS;
-    s_params.alpha_vel_max_turns_s = APP_CTRL_ALPHA_VEL_MAX_TURNS_S;
-    s_params.alpha_lpf = APP_CTRL_ALPHA_LPF;
+    s_params.motor_torque_correction_gate_pitch_max_rad = APP_CTRL_MOTOR_TORQUE_CORRECTION_GATE_PITCH_MAX_RAD;
+    s_params.motor_torque_correction_gate_rate_max_rads = APP_CTRL_MOTOR_TORQUE_CORRECTION_GATE_RATE_MAX_RADS;
+    s_params.motor_torque_correction_gate_vel_max_turns_s = APP_CTRL_MOTOR_TORQUE_CORRECTION_GATE_VEL_MAX_TURNS_S;
+    s_params.motor_accel_lpf = APP_CTRL_MOTOR_ACCEL_LPF;
     s_params.pos_kp = APP_CTRL_POS_KP;
     s_params.pos_kd = APP_CTRL_POS_KD;
     s_params.pos_x_ref_m = APP_CTRL_POS_X_REF_M;
@@ -86,6 +86,38 @@ static void load_defaults(void)
     s_params.friction_static_nm = APP_CTRL_FRICTION_STATIC_NM;
     s_params.friction_kinetic_nm = APP_CTRL_FRICTION_KINETIC_NM;
     s_params.friction_vel_eps_turns_s = APP_CTRL_FRICTION_VEL_EPS_TURNS_S;
+    s_params.err_k_vel = APP_CTRL_ERR_K_VEL;
+    s_params.heading_ema = APP_CTRL_HEADING_EMA;
+    s_params.heading_d_ema = APP_CTRL_HEADING_D_EMA;
+    s_params.antipat_enable = (float)APP_CTRL_ANTIPATINAGE_ENABLE;
+    s_params.antipat_sync_enable = (float)APP_ANTIPAT_SYNC_ENABLE;
+    s_params.antipat_sync_track_width_m = APP_ANTIPAT_SYNC_TRACK_WIDTH_M;
+    s_params.antipat_tau_min_nm = APP_ANTIPAT_TAU_MIN_NM;
+    s_params.antipat_eta_on = APP_ANTIPAT_ETA_ON;
+    s_params.antipat_both_eta_off = APP_ANTIPAT_BOTH_ETA_OFF;
+    s_params.antipat_both_alpha_contact_max_rads2 = APP_ANTIPAT_BOTH_ALPHA_CONTACT_MAX_RADS2;
+    s_params.antipat_both_tau_steady_air_nm = APP_ANTIPAT_BOTH_TAU_STEADY_AIR_NM;
+    s_params.antipat_omega_air_min_turns_s = APP_ANTIPAT_OMEGA_AIR_MIN_TURNS_S;
+    s_params.antipat_sync_k_dom = APP_ANTIPAT_SYNC_K_DOM;
+    s_params.antipat_sync_eps_abs_rads = APP_ANTIPAT_SYNC_EPS_ABS_RADS;
+    s_params.antipat_sync_k_rel = APP_ANTIPAT_SYNC_K_REL;
+    s_params.antipat_sync_k_off = APP_ANTIPAT_SYNC_K_OFF;
+    s_params.antipat_sync_t_on_ms = (float)APP_ANTIPAT_SYNC_T_ON_MS;
+    s_params.antipat_sync_t_off_ms = (float)APP_ANTIPAT_SYNC_T_OFF_MS;
+    s_params.antipat_both_t_on_ms = (float)APP_ANTIPAT_BOTH_T_ON_MS;
+    s_params.antipat_both_t_off_ms = (float)APP_ANTIPAT_BOTH_T_OFF_MS;
+    s_params.antipat_both_t_ma_ms = (float)APP_ANTIPAT_BOTH_T_MA_MS;
+    s_params.antipat_t_recover_ms = (float)APP_ANTIPAT_T_RECOVER_MS;
+    s_params.antipat_both_u_min_nm = APP_ANTIPAT_BOTH_U_MIN_NM;
+    s_params.antipat_both_pitch_rate_min_rads = APP_ANTIPAT_BOTH_PITCH_RATE_MIN_RADS;
+    s_params.antipat_sync_k = APP_ANTIPAT_SYNC_K;
+    s_params.antipat_sync_tau_max_nm = APP_ANTIPAT_SYNC_TAU_MAX_NM;
+    s_params.antipat_both_k_v = APP_ANTIPAT_BOTH_K_V;
+    s_params.antipat_both_tau_max_nm = APP_ANTIPAT_BOTH_TAU_MAX_NM;
+    s_params.antipat_both_enable = (float)APP_ANTIPAT_BOTH_ENABLE;
+    s_params.antipat_tau_ema = APP_ANTIPAT_TAU_EMA;
+    s_params.antipat_u_fade_ms = (float)APP_ANTIPAT_U_FADE_MS;
+    s_params.antipat_sync_kd = APP_ANTIPAT_SYNC_KD;
     s_pos_reset_req = false;
     s_heading_reset_req = false;
 }
@@ -178,17 +210,17 @@ bool app_ctrl_params_get_value(uint16_t param_id, float *out_value)
     case APP_CTRL_PARAM_CASCADE_PITCH_REF_MAX_RAD:
         *out_value = s_params.cascade_pitch_ref_max_rad;
         return true;
-    case APP_CTRL_PARAM_FF_GRAV_K:
-        *out_value = s_params.ff_grav_k;
+    case APP_CTRL_PARAM_MECA_K_GRAV:
+        *out_value = s_params.meca_k_grav;
         return true;
-    case APP_CTRL_PARAM_FF_FB_K_PITCH:
-        *out_value = s_params.ff_fb_k_pitch;
+    case APP_CTRL_PARAM_ERR_K_PITCH:
+        *out_value = s_params.err_k_pitch;
         return true;
-    case APP_CTRL_PARAM_FF_FB_K_RATE:
-        *out_value = s_params.ff_fb_k_rate;
+    case APP_CTRL_PARAM_MECA_K_PITCH_DAMP:
+        *out_value = s_params.meca_k_pitch_damp;
         return true;
-    case APP_CTRL_PARAM_FF_OUTPUT_ALPHA:
-        *out_value = s_params.ff_output_alpha;
+    case APP_CTRL_PARAM_BALANCE_OUTPUT_ALPHA:
+        *out_value = s_params.balance_output_alpha;
         return true;
     case APP_CTRL_PARAM_WHEEL_ENCODER_VEL_LPF_ALPHA:
         *out_value = s_params.wheel_encoder_vel_lpf_alpha;
@@ -202,11 +234,11 @@ bool app_ctrl_params_get_value(uint16_t param_id, float *out_value)
     case APP_CTRL_PARAM_TORQUE_DEADBAND_RATE_MAX_RADS:
         *out_value = s_params.torque_deadband_rate_max_rads;
         return true;
-    case APP_CTRL_PARAM_ALPHA_KP:
-        *out_value = s_params.alpha_kp;
+    case APP_CTRL_PARAM_MOTOR_TORQUE_CORRECTION_KP:
+        *out_value = s_params.motor_torque_correction_kp;
         return true;
-    case APP_CTRL_PARAM_ALPHA_MAX_NM:
-        *out_value = s_params.alpha_max_nm;
+    case APP_CTRL_PARAM_MOTOR_TORQUE_CORRECTION_MAX_NM:
+        *out_value = s_params.motor_torque_correction_max_nm;
         return true;
     case APP_CTRL_PARAM_MOTOR_J:
         *out_value = s_params.motor_J;
@@ -214,17 +246,17 @@ bool app_ctrl_params_get_value(uint16_t param_id, float *out_value)
     case APP_CTRL_PARAM_MOTOR_FRICTION_C:
         *out_value = s_params.motor_friction_c;
         return true;
-    case APP_CTRL_PARAM_ALPHA_PITCH_MAX_RAD:
-        *out_value = s_params.alpha_pitch_max_rad;
+    case APP_CTRL_PARAM_MOTOR_TORQUE_CORRECTION_GATE_PITCH_MAX_RAD:
+        *out_value = s_params.motor_torque_correction_gate_pitch_max_rad;
         return true;
-    case APP_CTRL_PARAM_ALPHA_RATE_MAX_RADS:
-        *out_value = s_params.alpha_rate_max_rads;
+    case APP_CTRL_PARAM_MOTOR_TORQUE_CORRECTION_GATE_RATE_MAX_RADS:
+        *out_value = s_params.motor_torque_correction_gate_rate_max_rads;
         return true;
-    case APP_CTRL_PARAM_ALPHA_VEL_MAX_TURNS_S:
-        *out_value = s_params.alpha_vel_max_turns_s;
+    case APP_CTRL_PARAM_MOTOR_TORQUE_CORRECTION_GATE_VEL_MAX_TURNS_S:
+        *out_value = s_params.motor_torque_correction_gate_vel_max_turns_s;
         return true;
-    case APP_CTRL_PARAM_ALPHA_LPF:
-        *out_value = s_params.alpha_lpf;
+    case APP_CTRL_PARAM_MOTOR_ACCEL_LPF:
+        *out_value = s_params.motor_accel_lpf;
         return true;
     case APP_CTRL_PARAM_POS_KP:
         *out_value = s_params.pos_kp;
@@ -298,6 +330,102 @@ bool app_ctrl_params_get_value(uint16_t param_id, float *out_value)
     case APP_CTRL_PARAM_FRICTION_VEL_EPS_TURNS_S:
         *out_value = s_params.friction_vel_eps_turns_s;
         return true;
+    case APP_CTRL_PARAM_ERR_K_VEL:
+        *out_value = s_params.err_k_vel;
+        return true;
+    case APP_CTRL_PARAM_HEADING_EMA:
+        *out_value = s_params.heading_ema;
+        return true;
+    case APP_CTRL_PARAM_HEADING_D_EMA:
+        *out_value = s_params.heading_d_ema;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_ENABLE:
+        *out_value = s_params.antipat_enable;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_ENABLE:
+        *out_value = s_params.antipat_sync_enable;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_TRACK_WIDTH_M:
+        *out_value = s_params.antipat_sync_track_width_m;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_TAU_MIN_NM:
+        *out_value = s_params.antipat_tau_min_nm;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_ETA_ON:
+        *out_value = s_params.antipat_eta_on;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_ETA_OFF:
+        *out_value = s_params.antipat_both_eta_off;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_ALPHA_CONTACT_MAX_RADS2:
+        *out_value = s_params.antipat_both_alpha_contact_max_rads2;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_TAU_STEADY_AIR_NM:
+        *out_value = s_params.antipat_both_tau_steady_air_nm;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_OMEGA_AIR_MIN_TURNS_S:
+        *out_value = s_params.antipat_omega_air_min_turns_s;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_K_DOM:
+        *out_value = s_params.antipat_sync_k_dom;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_EPS_ABS_RADS:
+        *out_value = s_params.antipat_sync_eps_abs_rads;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_K_REL:
+        *out_value = s_params.antipat_sync_k_rel;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_K_OFF:
+        *out_value = s_params.antipat_sync_k_off;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_T_ON_MS:
+        *out_value = s_params.antipat_sync_t_on_ms;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_T_OFF_MS:
+        *out_value = s_params.antipat_sync_t_off_ms;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_T_ON_MS:
+        *out_value = s_params.antipat_both_t_on_ms;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_T_OFF_MS:
+        *out_value = s_params.antipat_both_t_off_ms;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_T_MA_MS:
+        *out_value = s_params.antipat_both_t_ma_ms;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_T_RECOVER_MS:
+        *out_value = s_params.antipat_t_recover_ms;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_U_MIN_NM:
+        *out_value = s_params.antipat_both_u_min_nm;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_PITCH_RATE_MIN_RADS:
+        *out_value = s_params.antipat_both_pitch_rate_min_rads;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_K:
+        *out_value = s_params.antipat_sync_k;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_TAU_MAX_NM:
+        *out_value = s_params.antipat_sync_tau_max_nm;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_K_V:
+        *out_value = s_params.antipat_both_k_v;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_TAU_MAX_NM:
+        *out_value = s_params.antipat_both_tau_max_nm;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_ENABLE:
+        *out_value = s_params.antipat_both_enable;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_TAU_EMA:
+        *out_value = s_params.antipat_tau_ema;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_U_FADE_MS:
+        *out_value = s_params.antipat_u_fade_ms;
+        return true;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_KD:
+        *out_value = s_params.antipat_sync_kd;
+        return true;
     default:
         return false;
     }
@@ -348,20 +476,20 @@ bool app_ctrl_params_set(uint16_t param_id, float value, float *out_value)
         }
         s_params.cascade_pitch_ref_max_rad = value;
         break;
-    case APP_CTRL_PARAM_FF_GRAV_K:
-        s_params.ff_grav_k = value;
+    case APP_CTRL_PARAM_MECA_K_GRAV:
+        s_params.meca_k_grav = value;
         break;
-    case APP_CTRL_PARAM_FF_FB_K_PITCH:
-        s_params.ff_fb_k_pitch = value;
+    case APP_CTRL_PARAM_ERR_K_PITCH:
+        s_params.err_k_pitch = value;
         break;
-    case APP_CTRL_PARAM_FF_FB_K_RATE:
-        s_params.ff_fb_k_rate = value;
+    case APP_CTRL_PARAM_MECA_K_PITCH_DAMP:
+        s_params.meca_k_pitch_damp = value;
         break;
-    case APP_CTRL_PARAM_FF_OUTPUT_ALPHA:
+    case APP_CTRL_PARAM_BALANCE_OUTPUT_ALPHA:
         if (value < 0.0f || value > 1.0f) {
             return false;
         }
-        s_params.ff_output_alpha = value;
+        s_params.balance_output_alpha = value;
         break;
     case APP_CTRL_PARAM_WHEEL_ENCODER_VEL_LPF_ALPHA:
         if (value < 0.0f || value >= 1.0f) {
@@ -387,17 +515,17 @@ bool app_ctrl_params_set(uint16_t param_id, float value, float *out_value)
         }
         s_params.torque_deadband_rate_max_rads = value;
         break;
-    case APP_CTRL_PARAM_ALPHA_KP:
+    case APP_CTRL_PARAM_MOTOR_TORQUE_CORRECTION_KP:
         if (value < 0.0f) {
             return false;
         }
-        s_params.alpha_kp = value;
+        s_params.motor_torque_correction_kp = value;
         break;
-    case APP_CTRL_PARAM_ALPHA_MAX_NM:
+    case APP_CTRL_PARAM_MOTOR_TORQUE_CORRECTION_MAX_NM:
         if (value < 0.0f) {
             return false;
         }
-        s_params.alpha_max_nm = value;
+        s_params.motor_torque_correction_max_nm = value;
         break;
     case APP_CTRL_PARAM_MOTOR_J:
         if (value <= 0.0f) {
@@ -411,29 +539,29 @@ bool app_ctrl_params_set(uint16_t param_id, float value, float *out_value)
         }
         s_params.motor_friction_c = value;
         break;
-    case APP_CTRL_PARAM_ALPHA_PITCH_MAX_RAD:
+    case APP_CTRL_PARAM_MOTOR_TORQUE_CORRECTION_GATE_PITCH_MAX_RAD:
         if (value < 0.0f) {
             return false;
         }
-        s_params.alpha_pitch_max_rad = value;
+        s_params.motor_torque_correction_gate_pitch_max_rad = value;
         break;
-    case APP_CTRL_PARAM_ALPHA_RATE_MAX_RADS:
+    case APP_CTRL_PARAM_MOTOR_TORQUE_CORRECTION_GATE_RATE_MAX_RADS:
         if (value < 0.0f) {
             return false;
         }
-        s_params.alpha_rate_max_rads = value;
+        s_params.motor_torque_correction_gate_rate_max_rads = value;
         break;
-    case APP_CTRL_PARAM_ALPHA_VEL_MAX_TURNS_S:
+    case APP_CTRL_PARAM_MOTOR_TORQUE_CORRECTION_GATE_VEL_MAX_TURNS_S:
         if (value < 0.0f) {
             return false;
         }
-        s_params.alpha_vel_max_turns_s = value;
+        s_params.motor_torque_correction_gate_vel_max_turns_s = value;
         break;
-    case APP_CTRL_PARAM_ALPHA_LPF:
+    case APP_CTRL_PARAM_MOTOR_ACCEL_LPF:
         if (value < 0.0f || value >= 1.0f) {
             return false;
         }
-        s_params.alpha_lpf = value;
+        s_params.motor_accel_lpf = value;
         break;
     case APP_CTRL_PARAM_POS_KP:
         if (value < 0.0f) {
@@ -562,6 +690,195 @@ bool app_ctrl_params_set(uint16_t param_id, float value, float *out_value)
         }
         s_params.friction_vel_eps_turns_s = value;
         break;
+    case APP_CTRL_PARAM_ERR_K_VEL:
+        s_params.err_k_vel = value;
+        break;
+    case APP_CTRL_PARAM_HEADING_EMA:
+        if (value < 0.0f || value >= 1.0f) {
+            return false;
+        }
+        s_params.heading_ema = value;
+        break;
+    case APP_CTRL_PARAM_HEADING_D_EMA:
+        if (value < 0.0f || value >= 1.0f) {
+            return false;
+        }
+        s_params.heading_d_ema = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_ENABLE:
+        if (value < 0.0f || value > 1.0f) {
+            return false;
+        }
+        s_params.antipat_enable = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_ENABLE:
+        if (value < 0.0f || value > 1.0f) {
+            return false;
+        }
+        s_params.antipat_sync_enable = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_TRACK_WIDTH_M:
+        if (value <= 0.0f) {
+            return false;
+        }
+        s_params.antipat_sync_track_width_m = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_TAU_MIN_NM:
+        if (value <= 0.0f) {
+            return false;
+        }
+        s_params.antipat_tau_min_nm = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_ETA_ON:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_eta_on = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_ETA_OFF:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_both_eta_off = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_ALPHA_CONTACT_MAX_RADS2:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_both_alpha_contact_max_rads2 = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_TAU_STEADY_AIR_NM:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_both_tau_steady_air_nm = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_OMEGA_AIR_MIN_TURNS_S:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_omega_air_min_turns_s = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_K_DOM:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_sync_k_dom = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_EPS_ABS_RADS:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_sync_eps_abs_rads = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_K_REL:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_sync_k_rel = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_K_OFF:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_sync_k_off = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_T_ON_MS:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_sync_t_on_ms = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_T_OFF_MS:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_sync_t_off_ms = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_T_ON_MS:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_both_t_on_ms = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_T_OFF_MS:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_both_t_off_ms = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_T_MA_MS:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_both_t_ma_ms = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_T_RECOVER_MS:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_t_recover_ms = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_U_MIN_NM:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_both_u_min_nm = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_PITCH_RATE_MIN_RADS:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_both_pitch_rate_min_rads = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_K:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_sync_k = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_TAU_MAX_NM:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_sync_tau_max_nm = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_K_V:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_both_k_v = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_TAU_MAX_NM:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_both_tau_max_nm = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_BOTH_ENABLE:
+        if (value < 0.0f || value > 1.0f) {
+            return false;
+        }
+        s_params.antipat_both_enable = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_TAU_EMA:
+        if (value < 0.0f || value >= 1.0f) {
+            return false;
+        }
+        s_params.antipat_tau_ema = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_U_FADE_MS:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_u_fade_ms = value;
+        break;
+    case APP_CTRL_PARAM_ANTIPAT_SYNC_KD:
+        if (value < 0.0f) {
+            return false;
+        }
+        s_params.antipat_sync_kd = value;
+        break;
     default:
         return false;
     }
@@ -590,22 +907,22 @@ const char *app_ctrl_params_name(uint16_t param_id)
         [APP_CTRL_PARAM_CASCADE_VEL_KP] = "cascade_vel_kp",
         [APP_CTRL_PARAM_CASCADE_VEL_KD] = "cascade_vel_kd",
         [APP_CTRL_PARAM_CASCADE_PITCH_REF_MAX_RAD] = "cascade_pitch_ref_max_rad",
-        [APP_CTRL_PARAM_FF_GRAV_K] = "ff_grav_k",
-        [APP_CTRL_PARAM_FF_FB_K_PITCH] = "ff_fb_k_pitch",
-        [APP_CTRL_PARAM_FF_FB_K_RATE] = "ff_fb_k_rate",
-        [APP_CTRL_PARAM_FF_OUTPUT_ALPHA] = "ff_output_alpha",
+        [APP_CTRL_PARAM_MECA_K_GRAV] = "meca_k_grav",
+        [APP_CTRL_PARAM_ERR_K_PITCH] = "err_k_pitch",
+        [APP_CTRL_PARAM_MECA_K_PITCH_DAMP] = "meca_k_pitch_damp",
+        [APP_CTRL_PARAM_BALANCE_OUTPUT_ALPHA] = "balance_output_alpha",
         [APP_CTRL_PARAM_WHEEL_ENCODER_VEL_LPF_ALPHA] = "wheel_encoder_vel_lpf_alpha",
         [APP_CTRL_PARAM_TORQUE_DEADBAND_NM] = "torque_deadband_nm",
         [APP_CTRL_PARAM_TORQUE_DEADBAND_PITCH_MAX_RAD] = "torque_deadband_pitch_max_rad",
         [APP_CTRL_PARAM_TORQUE_DEADBAND_RATE_MAX_RADS] = "torque_deadband_rate_max_rads",
-        [APP_CTRL_PARAM_ALPHA_KP] = "alpha_kp",
-        [APP_CTRL_PARAM_ALPHA_MAX_NM] = "alpha_max_nm",
+        [APP_CTRL_PARAM_MOTOR_TORQUE_CORRECTION_KP] = "motor_torque_correction_kp",
+        [APP_CTRL_PARAM_MOTOR_TORQUE_CORRECTION_MAX_NM] = "motor_torque_correction_max_nm",
         [APP_CTRL_PARAM_MOTOR_J] = "motor_J",
         [APP_CTRL_PARAM_MOTOR_FRICTION_C] = "motor_friction_c",
-        [APP_CTRL_PARAM_ALPHA_PITCH_MAX_RAD] = "alpha_pitch_max_rad",
-        [APP_CTRL_PARAM_ALPHA_RATE_MAX_RADS] = "alpha_rate_max_rads",
-        [APP_CTRL_PARAM_ALPHA_VEL_MAX_TURNS_S] = "alpha_vel_max_turns_s",
-        [APP_CTRL_PARAM_ALPHA_LPF] = "alpha_lpf",
+        [APP_CTRL_PARAM_MOTOR_TORQUE_CORRECTION_GATE_PITCH_MAX_RAD] = "motor_torque_correction_gate_pitch_max_rad",
+        [APP_CTRL_PARAM_MOTOR_TORQUE_CORRECTION_GATE_RATE_MAX_RADS] = "motor_torque_correction_gate_rate_max_rads",
+        [APP_CTRL_PARAM_MOTOR_TORQUE_CORRECTION_GATE_VEL_MAX_TURNS_S] = "motor_torque_correction_gate_vel_max_turns_s",
+        [APP_CTRL_PARAM_MOTOR_ACCEL_LPF] = "motor_accel_lpf",
         [APP_CTRL_PARAM_POS_KP] = "pos_kp",
         [APP_CTRL_PARAM_POS_KD] = "pos_kd",
         [APP_CTRL_PARAM_POS_X_REF_M] = "pos_x_ref_m",
@@ -630,6 +947,38 @@ const char *app_ctrl_params_name(uint16_t param_id)
         [APP_CTRL_PARAM_FRICTION_STATIC_NM] = "friction_static_nm",
         [APP_CTRL_PARAM_FRICTION_KINETIC_NM] = "friction_kinetic_nm",
         [APP_CTRL_PARAM_FRICTION_VEL_EPS_TURNS_S] = "friction_vel_eps_turns_s",
+        [APP_CTRL_PARAM_ERR_K_VEL] = "err_k_vel",
+        [APP_CTRL_PARAM_HEADING_EMA] = "heading_ema",
+        [APP_CTRL_PARAM_HEADING_D_EMA] = "heading_d_ema",
+        [APP_CTRL_PARAM_ANTIPAT_ENABLE] = "antipat_enable",
+        [APP_CTRL_PARAM_ANTIPAT_SYNC_ENABLE] = "antipat_sync_enable",
+        [APP_CTRL_PARAM_ANTIPAT_SYNC_TRACK_WIDTH_M] = "antipat_sync_track_width_m",
+        [APP_CTRL_PARAM_ANTIPAT_TAU_MIN_NM] = "antipat_tau_min_nm",
+        [APP_CTRL_PARAM_ANTIPAT_ETA_ON] = "antipat_eta_on",
+        [APP_CTRL_PARAM_ANTIPAT_BOTH_ETA_OFF] = "antipat_both_eta_off",
+        [APP_CTRL_PARAM_ANTIPAT_BOTH_ALPHA_CONTACT_MAX_RADS2] = "antipat_both_alpha_contact_max_rads2",
+        [APP_CTRL_PARAM_ANTIPAT_BOTH_TAU_STEADY_AIR_NM] = "antipat_both_tau_steady_air_nm",
+        [APP_CTRL_PARAM_ANTIPAT_OMEGA_AIR_MIN_TURNS_S] = "antipat_omega_air_min_turns_s",
+        [APP_CTRL_PARAM_ANTIPAT_SYNC_K_DOM] = "antipat_sync_k_dom",
+        [APP_CTRL_PARAM_ANTIPAT_SYNC_EPS_ABS_RADS] = "antipat_sync_eps_abs_rads",
+        [APP_CTRL_PARAM_ANTIPAT_SYNC_K_REL] = "antipat_sync_k_rel",
+        [APP_CTRL_PARAM_ANTIPAT_SYNC_K_OFF] = "antipat_sync_k_off",
+        [APP_CTRL_PARAM_ANTIPAT_SYNC_T_ON_MS] = "antipat_sync_t_on_ms",
+        [APP_CTRL_PARAM_ANTIPAT_SYNC_T_OFF_MS] = "antipat_sync_t_off_ms",
+        [APP_CTRL_PARAM_ANTIPAT_BOTH_T_ON_MS] = "antipat_both_t_on_ms",
+        [APP_CTRL_PARAM_ANTIPAT_BOTH_T_OFF_MS] = "antipat_both_t_off_ms",
+        [APP_CTRL_PARAM_ANTIPAT_BOTH_T_MA_MS] = "antipat_both_t_ma_ms",
+        [APP_CTRL_PARAM_ANTIPAT_T_RECOVER_MS] = "antipat_t_recover_ms",
+        [APP_CTRL_PARAM_ANTIPAT_BOTH_U_MIN_NM] = "antipat_both_u_min_nm",
+        [APP_CTRL_PARAM_ANTIPAT_BOTH_PITCH_RATE_MIN_RADS] = "antipat_both_pitch_rate_min_rads",
+        [APP_CTRL_PARAM_ANTIPAT_SYNC_K] = "antipat_sync_k",
+        [APP_CTRL_PARAM_ANTIPAT_SYNC_TAU_MAX_NM] = "antipat_sync_tau_max_nm",
+        [APP_CTRL_PARAM_ANTIPAT_BOTH_K_V] = "antipat_both_k_v",
+        [APP_CTRL_PARAM_ANTIPAT_BOTH_TAU_MAX_NM] = "antipat_both_tau_max_nm",
+        [APP_CTRL_PARAM_ANTIPAT_BOTH_ENABLE] = "antipat_both_enable",
+        [APP_CTRL_PARAM_ANTIPAT_TAU_EMA] = "antipat_tau_ema",
+        [APP_CTRL_PARAM_ANTIPAT_U_FADE_MS] = "antipat_u_fade_ms",
+        [APP_CTRL_PARAM_ANTIPAT_SYNC_KD] = "antipat_sync_kd",
     };
 
     if (param_id >= (uint16_t)APP_CTRL_PARAM_COUNT) {

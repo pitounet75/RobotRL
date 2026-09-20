@@ -13,6 +13,7 @@
 #include "app_time_us.h"
 #include "app_wheel_config.h"
 #include "control_strategy.h"
+#include "wheel_contact.h"
 #include "wheel_encoder_abz.h"
 
 #include "FreeRTOS.h"
@@ -27,8 +28,8 @@ volatile float g_ctrl_pitch_rate;
 volatile float g_ctrl_vel_wheel;
 volatile float g_ctrl_u_balance;
 volatile float g_ctrl_u_vel;
-volatile float g_ctrl_u_ff;
-volatile float g_ctrl_u_fb;
+volatile float g_ctrl_u_meca;
+volatile float g_ctrl_u_err;
 volatile float g_ctrl_cmd_torque_nm;
 
 static bool wheel_odometry(float *vel_turns_s, float *pos_turns, bool *pos_valid)
@@ -44,6 +45,21 @@ static bool wheel_odometry(float *vel_turns_s, float *pos_turns, bool *pos_valid
 
     const app_encoder_sample_t *left = &bank.encoder[WHEEL_ENCODER_TIM2];
     const app_encoder_sample_t *right = &bank.encoder[WHEEL_ENCODER_TIM4];
+    const wheel_contact_mode_t mode = wheel_contact_last_output()->mode;
+
+    /* SYNC: cascade / odom on the grounded wheel only. Heading (φ) is separate. */
+    if (mode == WC_MODE_SYNC_L && right->valid) {
+        *vel_turns_s = right->vel_turns_s;
+        *pos_turns = right->pos_turns;
+        *pos_valid = true;
+        return true;
+    }
+    if (mode == WC_MODE_SYNC_R && left->valid) {
+        *vel_turns_s = left->vel_turns_s;
+        *pos_turns = left->pos_turns;
+        *pos_valid = true;
+        return true;
+    }
 
     if (left->valid && right->valid) {
         *vel_turns_s = 0.5f * (left->vel_turns_s + right->vel_turns_s);
@@ -191,8 +207,8 @@ void task_control(void *argument)
 
         g_ctrl_u_balance = out.u_balance;
         g_ctrl_u_vel = out.u_vel;
-        g_ctrl_u_ff = out.u_ff;
-        g_ctrl_u_fb = out.u_fb;
+        g_ctrl_u_meca = out.u_meca;
+        g_ctrl_u_err = out.u_err;
         g_ctrl_cmd_torque_nm = out.cmd;
 
         const bool estop = !out.ok || out.estop || control_failsafe_angle(imu.pitch_rad);

@@ -14,6 +14,17 @@ extern volatile uint32_t g_telemetry_rpc_dispatch_count;
 #include <stddef.h>
 #include <string.h>
 
+#define CTRL_ASSERT_FIELD_NAME(name) \
+    _Static_assert(sizeof(name) - 1u < TELEMETRY_MAX_FIELD_NAME_LEN, name)
+
+CTRL_ASSERT_FIELD_NAME("motor_torque_correction_gate_pitch_max_rad");
+CTRL_ASSERT_FIELD_NAME("motor_torque_correction_gate_rate_max_rads");
+CTRL_ASSERT_FIELD_NAME("motor_torque_correction_gate_vel_max_turns_s");
+CTRL_ASSERT_FIELD_NAME("antipat_both_alpha_contact_max_rads2");
+CTRL_ASSERT_FIELD_NAME("antipat_both_tau_steady_air_nm");
+CTRL_ASSERT_FIELD_NAME("antipat_omega_air_min_turns_s");
+CTRL_ASSERT_FIELD_NAME("antipat_both_pitch_rate_min_rads");
+
 static int on_get_control_params(telemetry_t *tel, uint16_t sequence_id, const uint8_t *payload,
                                  uint16_t payload_len, void *user_data)
 {
@@ -70,22 +81,22 @@ bool app_telemetry_ctrl_register(telemetry_t *tel)
         {"cascade_vel_kp", TELEMETRY_TYPE_FLOAT},
         {"cascade_vel_kd", TELEMETRY_TYPE_FLOAT},
         {"cascade_pitch_ref_max_rad", TELEMETRY_TYPE_FLOAT},
-        {"ff_grav_k", TELEMETRY_TYPE_FLOAT},
-        {"ff_fb_k_pitch", TELEMETRY_TYPE_FLOAT},
-        {"ff_fb_k_rate", TELEMETRY_TYPE_FLOAT},
-        {"ff_output_alpha", TELEMETRY_TYPE_FLOAT},
+        {"meca_k_grav", TELEMETRY_TYPE_FLOAT},
+        {"err_k_pitch", TELEMETRY_TYPE_FLOAT},
+        {"meca_k_pitch_damp", TELEMETRY_TYPE_FLOAT},
+        {"balance_output_alpha", TELEMETRY_TYPE_FLOAT},
         {"wheel_encoder_vel_lpf_alpha", TELEMETRY_TYPE_FLOAT},
         {"torque_deadband_nm", TELEMETRY_TYPE_FLOAT},
         {"torque_deadband_pitch_max_rad", TELEMETRY_TYPE_FLOAT},
         {"torque_deadband_rate_max_rads", TELEMETRY_TYPE_FLOAT},
-        {"alpha_kp", TELEMETRY_TYPE_FLOAT},
-        {"alpha_max_nm", TELEMETRY_TYPE_FLOAT},
+        {"motor_torque_correction_kp", TELEMETRY_TYPE_FLOAT},
+        {"motor_torque_correction_max_nm", TELEMETRY_TYPE_FLOAT},
         {"motor_J", TELEMETRY_TYPE_FLOAT},
         {"motor_friction_c", TELEMETRY_TYPE_FLOAT},
-        {"alpha_pitch_max_rad", TELEMETRY_TYPE_FLOAT},
-        {"alpha_rate_max_rads", TELEMETRY_TYPE_FLOAT},
-        {"alpha_vel_max_turns_s", TELEMETRY_TYPE_FLOAT},
-        {"alpha_lpf", TELEMETRY_TYPE_FLOAT},
+        {"motor_torque_correction_gate_pitch_max_rad", TELEMETRY_TYPE_FLOAT},
+        {"motor_torque_correction_gate_rate_max_rads", TELEMETRY_TYPE_FLOAT},
+        {"motor_torque_correction_gate_vel_max_turns_s", TELEMETRY_TYPE_FLOAT},
+        {"motor_accel_lpf", TELEMETRY_TYPE_FLOAT},
         {"pos_kp", TELEMETRY_TYPE_FLOAT},
         {"pos_kd", TELEMETRY_TYPE_FLOAT},
         {"pos_x_ref_m", TELEMETRY_TYPE_FLOAT},
@@ -110,7 +121,42 @@ bool app_telemetry_ctrl_register(telemetry_t *tel)
         {"friction_static_nm", TELEMETRY_TYPE_FLOAT},
         {"friction_kinetic_nm", TELEMETRY_TYPE_FLOAT},
         {"friction_vel_eps_turns_s", TELEMETRY_TYPE_FLOAT},
+        {"err_k_vel", TELEMETRY_TYPE_FLOAT},
+        {"heading_ema", TELEMETRY_TYPE_FLOAT},
+        {"heading_d_ema", TELEMETRY_TYPE_FLOAT},
+        {"antipat_enable", TELEMETRY_TYPE_FLOAT},
+        {"antipat_sync_enable", TELEMETRY_TYPE_FLOAT},
+        {"antipat_sync_track_width_m", TELEMETRY_TYPE_FLOAT},
+        {"antipat_tau_min_nm", TELEMETRY_TYPE_FLOAT},
+        {"antipat_eta_on", TELEMETRY_TYPE_FLOAT},
+        {"antipat_both_eta_off", TELEMETRY_TYPE_FLOAT},
+        {"antipat_both_alpha_contact_max_rads2", TELEMETRY_TYPE_FLOAT},
+        {"antipat_both_tau_steady_air_nm", TELEMETRY_TYPE_FLOAT},
+        {"antipat_omega_air_min_turns_s", TELEMETRY_TYPE_FLOAT},
+        {"antipat_sync_k_dom", TELEMETRY_TYPE_FLOAT},
+        {"antipat_sync_eps_abs_rads", TELEMETRY_TYPE_FLOAT},
+        {"antipat_sync_k_rel", TELEMETRY_TYPE_FLOAT},
+        {"antipat_sync_k_off", TELEMETRY_TYPE_FLOAT},
+        {"antipat_sync_t_on_ms", TELEMETRY_TYPE_FLOAT},
+        {"antipat_sync_t_off_ms", TELEMETRY_TYPE_FLOAT},
+        {"antipat_both_t_on_ms", TELEMETRY_TYPE_FLOAT},
+        {"antipat_both_t_off_ms", TELEMETRY_TYPE_FLOAT},
+        {"antipat_both_t_ma_ms", TELEMETRY_TYPE_FLOAT},
+        {"antipat_t_recover_ms", TELEMETRY_TYPE_FLOAT},
+        {"antipat_both_u_min_nm", TELEMETRY_TYPE_FLOAT},
+        {"antipat_both_pitch_rate_min_rads", TELEMETRY_TYPE_FLOAT},
+        {"antipat_sync_k", TELEMETRY_TYPE_FLOAT},
+        {"antipat_sync_tau_max_nm", TELEMETRY_TYPE_FLOAT},
+        {"antipat_both_k_v", TELEMETRY_TYPE_FLOAT},
+        {"antipat_both_tau_max_nm", TELEMETRY_TYPE_FLOAT},
+        {"antipat_both_enable", TELEMETRY_TYPE_FLOAT},
+        {"antipat_tau_ema", TELEMETRY_TYPE_FLOAT},
+        {"antipat_u_fade_ms", TELEMETRY_TYPE_FLOAT},
+        {"antipat_sync_kd", TELEMETRY_TYPE_FLOAT},
     };
+    _Static_assert(
+        (sizeof(get_response_fields) / sizeof(get_response_fields[0])) <= TELEMETRY_MAX_FIELDS,
+        "GetControlParams schema exceeds TELEMETRY_MAX_FIELDS");
 
     static const telemetry_field_def_t set_request_fields[] = {
         {"param_id", "UInt16"},
