@@ -1,0 +1,90 @@
+{
+  "Équilibre": {
+    "meca_k_grav": 0.14,
+    "err_k_pitch": 0.055,
+    "meca_k_pitch_damp": 0.013,
+    "err_k_vel": -0.0005,
+    "balance_output_alpha": 0.5,
+    "pitch_ref_rad": -0.13,
+    "pitch_failsafe_rad": 0.785398,
+    "cmd_max_torque_nm": 0.08
+  },
+  "Friction / deadband / motor correction": {
+    "friction_mode": 1.0,
+    "friction_static_nm": 0.0045,
+    "friction_kinetic_nm": 0.003,
+    "friction_vel_eps_turns_s": 0.05,
+    "torque_deadband_nm": 0.004,
+    "torque_deadband_pitch_max_rad": 0.05,
+    "torque_deadband_rate_max_rads": 0.3,
+    "motor_torque_correction_kp": 0.0,
+    "motor_torque_correction_max_nm": 0.002,
+    "motor_J": 1.12e-05,
+    "motor_friction_c": 0.0052,
+    "motor_torque_correction_gate_pitch_max_rad": 0.05,
+    "motor_torque_correction_gate_rate_max_rads": 0.3,
+    "motor_torque_correction_gate_vel_max_turns_s": 8.0,
+    "motor_accel_lpf": 0.8
+  },
+  "Vitesse": {
+    "cascade_vel_kp": 0.08,
+    "cascade_vel_kd": 0.008,
+    "cascade_vel_err_ema_alpha": 0.8,
+    "cascade_vel_ema_kp": 0.03,
+    "cascade_vel_accel_kp": 0.04,
+    "vel_ref_slew_turns_s2": 10.0,
+    "cascade_pitch_ref_max_rad": 0.26
+  },
+  "Heading": {
+    "heading_kp": 0.02,
+    "heading_kd": 0.001,
+    "heading_torque_max_nm": 0.03,
+    "heading_ema": 0.99,
+    "heading_d_ema": 0.99
+  },
+  "Antipatinage": {
+    "antipat_enable": 1.0,
+    "antipat_track_width_m": 0.16,
+    "antipat_tau_min_nm": 0.001,
+    "antipat_tau_ema": 0.85,
+    "antipat_eta_on": 8000.0,
+    "antipat_eta_off": 1000.0,
+    "antipat_k_dom": 1.4,
+    "antipat_eps_abs_rads": 10.0,
+    "antipat_k_rel": 0.35,
+    "antipat_k_off": 0.65,
+    "antipat_t_recover_ms": 150.0,
+    "antipat_sync_enable": 1.0,
+    "antipat_t_on_ms": 10.0,
+    "antipat_t_off_ms": 20.0,
+    "antipat_k_sync": 0.021,
+    "antipat_kd_sync": 0.05,
+    "antipat_tau_sync_max_nm": 0.005,
+    "antipat_u_fade_ms": 30.0,
+    "antipat_both_enable": 0.0,
+    "antipat_t_on_both_ms": 15.0,
+    "antipat_t_off_both_ms": 100.0,
+    "antipat_t_ma_ms": 100.0,
+    "antipat_u_min_nm": 0.006,
+    "antipat_pitch_rate_min_rads": 0.08,
+    "antipat_k_both_v": 0.003,
+    "antipat_tau_both_max_nm": 0.012,
+    "antipat_alpha_contact_max_rads2": 500.0,
+    "antipat_tau_both_steady_air_nm": 0.004,
+    "antipat_omega_air_min_turns_s": 0.25
+  },
+  "Position": {
+    "outer_mode": 0.0,
+    "pos_x_ref_m": 0.0,
+    "pos_kp": 0.0,
+    "pos_kd": 0.0,
+    "pos_v_max_turns_s": 0.5,
+    "pos_err_ema_alpha": 0.99,
+    "pos_ema_kp": 0.0,
+    "wheel_radius_m": 0.04
+  },
+  "Système": {
+    "strategy": 0.0,
+    "wheel_encoder_vel_lpf_alpha": 0.75
+  }
+}

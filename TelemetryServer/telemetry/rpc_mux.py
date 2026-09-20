@@ -86,7 +86,9 @@ class SharedRpcClient:
     def get_params(self) -> ControlParamsSnapshot:
         frame = self._transact(TELEM_MSG_GET_CONTROL_PARAMS)
         if not frame.ok:
-            raise RuntimeError(f"GET failed: error_code={frame.error_code}")
+            raise RuntimeError(
+                f"GET failed: error_code={TelemetryErrorCode(frame.error_code).name}"
+            )
         return decode_snapshot(frame.payload)
 
     def set_param(self, name_or_id: str | int, value: float) -> Tuple[int, str, float]:

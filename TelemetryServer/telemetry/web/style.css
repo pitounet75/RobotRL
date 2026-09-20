@@ -28,6 +28,13 @@ header {
   margin-bottom: 16px;
 }
 
+.header-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 header h1 {
   font-size: 1.1rem;
   margin: 0;
@@ -77,26 +84,237 @@ header h1 {
   min-width: 160px;
 }
 
-#gains-form {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 6px;
-  max-height: 320px;
-  overflow-y: auto;
-}
-
-.gains-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 6px;
+.drive-hint {
+  color: var(--muted);
   font-size: 0.85rem;
+  margin-right: 8px;
 }
 
-.gains-row input {
-  width: 100px;
+.vbus-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vbus-lamp {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex: 0 0 12px;
+  background: #2a2e34;
+  box-shadow: inset 0 0 0 1px #111;
+}
+
+.vbus-lamp.warn {
+  background: #f0a202;
+  box-shadow: 0 0 7px #f0a202;
+}
+
+.vbus-lamp.crit {
+  background: #e10600;
+  box-shadow: 0 0 8px #e10600;
+  animation: vbus-blink 0.45s step-end infinite;
+}
+
+@keyframes vbus-blink {
+  50% {
+    background: #3a0000;
+    box-shadow: none;
+  }
+}
+
+.sync-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  font-variant: tabular-nums;
+}
+
+.sync-lamp {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex: 0 0 12px;
+  box-shadow: inset 0 0 0 1px #111;
+}
+
+.sync-lamp.normal {
+  background: #e10600;
+  box-shadow: 0 0 6px #e10600;
+}
+
+.sync-lamp.sync {
+  background: #1ecf4a;
+  box-shadow: 0 0 7px #1ecf4a;
+}
+
+.drive-block input[type="number"] {
+  width: 5.5rem;
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 2px 4px;
+  padding: 2px 6px;
+}
+
+#gains-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  align-items: start;
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.gains-panel {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px 10px;
+  min-width: 0;
+}
+
+.gains-subsection {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.gains-subsection h3 {
+  margin: 0 0 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.gains-panel legend {
+  display: block;
+  float: none;
+  padding: 0 6px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.gains-legend {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  line-height: 1.4;
+  overflow-wrap: break-word;
+}
+
+.gains-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+}
+
+.gains-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 6.75rem;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 0.8rem;
+}
+
+.gains-row label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gains-row input {
+  width: 100%;
+  min-width: 0;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1100px) {
+  #gains-form {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .gains-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+#preset-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 56px 16px 16px;
+}
+
+#preset-overlay[hidden] {
+  display: none;
+}
+
+.preset-panel {
+  width: min(360px, 100%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.preset-panel h2 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+#preset-list {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+#preset-list li {
+  margin: 0 0 6px;
+}
+
+#preset-list button {
+  width: 100%;
+  text-align: left;
+}
+
+.preset-empty {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+#preset-create-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+#preset-create-row input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
 }

@@ -42,8 +42,8 @@ def segment_stats(df: pd.DataFrame, t0: float, t1: float, label: str, cmd_max: f
         "pitch_rad",
         "pitch_rate_rads",
         "cmd_torque_nm",
-        "u_fb_nm",
-        "u_ff_nm",
+        "u_err_nm",
+        "u_meca_nm",
         "vel_wheel_turns_s",
     ]
     if "cmd_torque_left_nm" in seg.columns:
@@ -69,16 +69,16 @@ def segment_stats(df: pd.DataFrame, t0: float, t1: float, label: str, cmd_max: f
         print(f"  dominant pitch freq: {f_pitch:.2f} Hz")
     if f_torq:
         print(f"  dominant torque freq: {f_torq:.2f} Hz")
-    c = np.corrcoef(seg["pitch_rad"], seg["u_fb_nm"])[0, 1]
-    print(f"  corr(pitch, u_fb): {c:+.3f}  (expect negative for stabilizing FB)")
+    c = np.corrcoef(seg["pitch_rad"], seg["u_err_nm"])[0, 1]
+    print(f"  corr(pitch, u_err): {c:+.3f}  (expect negative for P on θ_err)")
 
 
 def gain_hints(df: pd.DataFrame, cmd_max: float) -> None:
     pitch = df["pitch_rad"]
     rate = df["pitch_rate_rads"]
     cmd = df["cmd_torque_nm"]
-    u_fb = df["u_fb_nm"]
-    u_ff = df["u_ff_nm"]
+    u_err = df["u_err_nm"]
+    u_meca = df["u_meca_nm"]
 
     small = df[pitch.abs() < np.radians(5.0)]
     print("\n=== GAIN HINTS (strategy 3 ff_cascade) ===")
@@ -88,33 +88,35 @@ def gain_hints(df: pd.DataFrame, cmd_max: float) -> None:
         rate_std = small["pitch_rate_rads"].std()
         print(f"Small |pitch|<5 deg: cmd_std={cmd_std:.5f} Nm  pitch_rate_std={rate_std:.4f} rad/s")
         if cmd_std > 0.004:
-            print("  -> Jerky at small angle: try  set ff_fb_k_rate 0.001  or  set ff_output_alpha 0.20")
+            print("  -> Jerky at small angle: try  set meca_k_pitch_damp 0.001  or  set balance_output_alpha 0.20")
         if rate_std > 0.15 and cmd_std > 0.003:
-            print("  -> Noisy rate driving torque: lower ff_fb_k_rate first, not ff_fb_k_pitch")
+            print("  -> Noisy rate driving torque: lower meca_k_pitch_damp first, not err_k_pitch")
 
-    if u_ff.abs().max() < 1e-6:
-        print("  -> u_ff always 0: ff_grav_k is 0 or strategy != ff_cascade")
+    if u_meca.abs().max() < 1e-6:
+        print("  -> u_meca always 0: meca_k_grav / meca_k_pitch_damp are 0 or strategy != ff_cascade")
 
     mp = pitch.mean()
     print(f"Session mean pitch: {mp:+.4f} rad ({np.degrees(mp):+.1f} deg)")
     if abs(mp) > 0.025:
-        print("  -> Static tilt: tune pitch_ref_rad or ff_grav_k / ff_fb_k_pitch balance")
+        print("  -> Static tilt: tune pitch_ref_rad or meca_k_grav / err_k_pitch balance")
 
     valid = df[pitch.abs() > 0.003]
     if len(valid) > 10:
-        ratio = (valid["u_fb_nm"] / valid["pitch_rad"]).median()
-        print(f"Effective u_fb/pitch (median): {ratio:.4f}  (nominal ~ -ff_fb_k_pitch)")
+        ratio = (valid["u_err_nm"] / valid["pitch_rad"]).median()
+        print(f"Effective u_err/pitch (median): {ratio:.4f}  (nominal ~ -err_k_pitch if v_err≈0)")
 
     sat_pct = 100 * (cmd.abs() >= cmd_max * 0.95).mean()
     if sat_pct > 8:
-        print(f"  -> Saturated {sat_pct:.0f}%: reduce ff_fb_k_pitch before raising cmd_max_torque_nm")
+        print(f"  -> Saturated {sat_pct:.0f}%: reduce err_k_pitch before raising cmd_max_torque_nm")
 
     release = df[(pitch.abs() > np.radians(2.0)) & (pitch.abs() < np.radians(12.0))]
     if len(release) > 30:
-        lag = release["u_ff_nm"].mean() - release["u_fb_nm"].mean()
-        print(f"Mid-fall window: mean u_ff={release['u_ff_nm'].mean():+.5f}  u_fb={release['u_fb_nm'].mean():+.5f}")
+        print(
+            f"Mid-fall window: mean u_meca={release['u_meca_nm'].mean():+.5f}  "
+            f"u_err={release['u_err_nm'].mean():+.5f}"
+        )
         if release["cmd_torque_nm"].abs().mean() < 0.004 and pitch.abs().mean() > 0.05:
-            print("  -> Weak catch on release: increase |ff_grav_k| (e.g. -0.07) or ff_fb_k_pitch slightly")
+            print("  -> Weak catch on release: increase |meca_k_grav| (e.g. -0.07) or err_k_pitch slightly")
 
 
 def main() -> int:
@@ -135,6 +137,10 @@ def main() -> int:
         return 1
 
     df = pd.read_csv(path)
+    if "u_meca_nm" not in df.columns and "u_ff_nm" in df.columns:
+        print("Note: old CSV columns u_ff_nm/u_fb_nm (different split than u_meca/u_err)")
+        df["u_meca_nm"] = df["u_ff_nm"]
+        df["u_err_nm"] = df["u_fb_nm"]
     df["t_rel"] = df["host_time_s"] - df["host_time_s"].iloc[0]
     dur = df["t_rel"].iloc[-1]
 
@@ -147,7 +153,7 @@ def main() -> int:
         )
 
     print("\nFull session overview:")
-    for col in ("pitch_rad", "pitch_rate_rads", "cmd_torque_nm", "u_fb_nm", "u_ff_nm"):
+    for col in ("pitch_rad", "pitch_rate_rads", "cmd_torque_nm", "u_err_nm", "u_meca_nm"):
         if col not in df.columns:
             continue
         v = df[col]

@@ -46,12 +46,14 @@ class LiveBalancePlotter:
             _Series("cmd_torque", 1),
             _Series("cmd_torque_l", 1),
             _Series("cmd_torque_r", 1),
-            _Series("u_ff", 1),
-            _Series("u_fb", 1),
+            _Series("u_meca", 1),
+            _Series("u_err", 1),
             _Series("vel_l", 2),
             _Series("vel_r", 2),
             _Series("estop", 3),
             _Series("imu_valid", 3),
+            _Series("sync_l", 3),
+            _Series("sync_r", 3),
         ]
         for s in self._series:
             s.data = deque(maxlen=self.max_points)
@@ -112,6 +114,13 @@ class LiveBalancePlotter:
         self._t_first: Optional[float] = None
         self._last_estop_flag = 0
         self._last_imu_flag = 0
+        self._vbus_filt_l: Optional[float] = None
+        self._vbus_filt_r: Optional[float] = None
+        self.vbus_l_v = 0.0
+        self.vbus_r_v = 0.0
+        self.sync_l = 0
+        self.sync_r = 0
+        self.wc_mode = 0
         self._lock = threading.Lock()
         self._animation = None
     def _set_follow(self, follow: bool) -> None:
@@ -206,6 +215,22 @@ class LiveBalancePlotter:
             self._last_frame_num = frame.frame_number
             self._last_estop_flag = frame.estop
             self._last_imu_flag = frame.imu_valid
+            raw_l = float(frame.vbus_l_v)
+            raw_r = float(frame.vbus_r_v)
+            alpha = 0.995
+            if raw_l > 0.5:
+                self._vbus_filt_l = (
+                    raw_l if self._vbus_filt_l is None else alpha * self._vbus_filt_l + (1.0 - alpha) * raw_l
+                )
+                self.vbus_l_v = self._vbus_filt_l
+            if raw_r > 0.5:
+                self._vbus_filt_r = (
+                    raw_r if self._vbus_filt_r is None else alpha * self._vbus_filt_r + (1.0 - alpha) * raw_r
+                )
+                self.vbus_r_v = self._vbus_filt_r
+            self.sync_l = int(frame.sync_l)
+            self.sync_r = int(frame.sync_r)
+            self.wc_mode = int(frame.wc_mode)
 
             self.host_t.append(t)
             self._series_by_label("pitch_rad").data.append(frame.pitch_rad)
@@ -216,12 +241,14 @@ class LiveBalancePlotter:
             self._series_by_label("cmd_torque").data.append(frame.cmd_torque_nm)
             self._series_by_label("cmd_torque_l").data.append(frame.cmd_torque_left_nm)
             self._series_by_label("cmd_torque_r").data.append(frame.cmd_torque_right_nm)
-            self._series_by_label("u_ff").data.append(frame.u_ff_nm)
-            self._series_by_label("u_fb").data.append(frame.u_fb_nm)
+            self._series_by_label("u_meca").data.append(frame.u_meca_nm)
+            self._series_by_label("u_err").data.append(frame.u_err_nm)
             self._series_by_label("vel_l").data.append(frame.vel_wheel_l_turns_s)
             self._series_by_label("vel_r").data.append(frame.vel_wheel_r_turns_s)
             self._series_by_label("estop").data.append(float(frame.estop))
             self._series_by_label("imu_valid").data.append(float(frame.imu_valid))
+            self._series_by_label("sync_l").data.append(1.0 if frame.sync_l else 0.0)
+            self._series_by_label("sync_r").data.append(1.0 if frame.sync_r else 0.0)
 
     def note_reject(self) -> None:
         with self._lock:

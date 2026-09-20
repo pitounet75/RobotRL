@@ -20,13 +20,18 @@ CSV_HEADER = [
     "cmd_torque_nm",
     "cmd_torque_left_nm",
     "cmd_torque_right_nm",
-    "u_ff_nm",
-    "u_fb_nm",
+    "u_meca_nm",
+    "u_err_nm",
     "pitch_ref_rad",
     "imu_valid",
     "estop",
     "strategy_id",
     "source_drop_count_mod256",
+    "vbus_l_v",
+    "vbus_r_v",
+    "wc_mode",
+    "sync_l",
+    "sync_r",
 ]
 
 
@@ -59,13 +64,18 @@ class CsvRecorder:
                 frame.cmd_torque_nm,
                 frame.cmd_torque_left_nm,
                 frame.cmd_torque_right_nm,
-                frame.u_ff_nm,
-                frame.u_fb_nm,
+                frame.u_meca_nm,
+                frame.u_err_nm,
                 frame.pitch_ref_rad,
                 frame.imu_valid,
                 frame.estop,
                 frame.strategy_id,
                 frame.source_drop_count_mod256,
+                frame.vbus_l_v,
+                frame.vbus_r_v,
+                frame.wc_mode,
+                frame.sync_l,
+                frame.sync_r,
             ]
         )
 

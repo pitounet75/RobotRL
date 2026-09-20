@@ -22,7 +22,7 @@ import pandas as pd
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("csv", type=Path)
-    p.add_argument("--channels", default="pitch_rad,cmd_torque_nm,u_ff_nm,u_fb_nm")
+    p.add_argument("--channels", default="pitch_rad,cmd_torque_nm,u_meca_nm,u_err_nm")
     args = p.parse_args()
 
     df = pd.read_csv(args.csv)

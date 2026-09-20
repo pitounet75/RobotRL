@@ -59,8 +59,16 @@ Runtime gains live on the STM32 (`app_ctrl_params`). The PC talks to them over t
 ESP32 UDP bridge via `GetControlParams` / `SetControlParam` (see
 `telemetry/ctrl_params.py` — IDs must match firmware).
 
-Snapshot **version** is in the GET payload (current: **10**). Older firmware still
-GETs (trailing fields padded with 0); unknown SET ids are rejected.
+Snapshot **version** is the first `u32` of the GET payload. It must match
+`APP_CTRL_PARAMS_SNAPSHOT_VERSION` in firmware and `SNAPSHOT_VERSION` in
+`telemetry/ctrl_params.py` (current: **15**). The PC does **not** reject a
+mismatch: a shorter (older) payload is padded with zeros so Refresh still
+works; a longer payload is truncated to the PC struct. **SET does not send
+the version** — only `param_id u16` + `value f32`. An id the flashed firmware
+does not know returns `INVALID_PAYLOAD` (the field can still appear in the UI
+as `0` from padding). Append new floats at the end of the packed snapshot and
+bump both constants together. `TELEMETRY_CTRL_PARAMS_VERSION` in
+`telemetry_ctrl_params.h` is unused leftover — ignore it.
 
 ### CLI
 
@@ -92,7 +100,7 @@ running). Close the plotter first, or stop it briefly.
 |------|--------|
 | `pos_reset` | Zero position odometry / EMA (GET always 0) |
 | `heading_reset` | Zero integrated yaw ψ at current heading (GET always 0) |
-| `heading_inc` | `ψ̇_ref = value` (signed rad/s, clamp ±2); GET/ACK = current ref |
+| `heading_inc` | `ψ̇_ref = value` (signed rad/s, clamp ±4); GET/ACK = current ref |
 | `heading_dec` | alias: `ψ̇_ref = −value` (old UI) |
 
 ### Param reference (id → name)
@@ -107,10 +115,14 @@ running). Close the plotter first, or stop it briefly.
 | 5 | `cascade_vel_kp` | Outer vel → pitch (P) |
 | 6 | `cascade_vel_kd` | D on filtered wheel `v̇` |
 | 7 | `cascade_pitch_ref_max_rad` | Lean limit |
-| 8–11 | `ff_grav_k`, `ff_fb_k_*`, `ff_output_alpha` | Balance FF+PD |
+| 8–11 | `meca_k_grav`, `err_k_pitch`, `meca_k_pitch_damp`, `balance_output_alpha` | `u_meca` + `u_err` + LPF |
+| 48 | `err_k_vel` | Live `Kv` of `u_v` (snapshot v13) |
+| 49 | `heading_ema` | EMA on yaw-rate gyro (0=raw) |
+| 50 | `heading_d_ema` | EMA after dψ̇/dt of raw gyro (snapshot v15 ; 0=raw ψ̈) |
+| 51–79 | `antipat_*` / `antipat_sync_*` / `antipat_both_*` | Antipatinage live (shared / sync / both) |
 | 12 | `wheel_encoder_vel_lpf_alpha` | ABZ vel EMA (0=off) |
 | 13–15 | `torque_deadband_*` | Gated Coulomb boost |
-| 16–23 | `alpha_*`, `motor_J`, `motor_friction_c` | Motor accel P (often off) |
+| 16–23 | `motor_torque_correction_*`, `motor_J`, `motor_friction_c`, `motor_accel_lpf` | Rustine α roue (off if kp=0) |
 | 24–28 | `pos_kp/kd`, `pos_x_ref_m`, `pos_v_max_turns_s`, `wheel_radius_m` | Position outer loop |
 | 29 | `pos_reset` | Action |
 | 30–31 | `pos_err_ema_alpha`, `pos_ema_kp` | Pos EMA |

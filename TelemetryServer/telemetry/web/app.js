@@ -1,7 +1,13 @@
 "use strict";
 
 const WS_TELEMETRY_PATH = "/ws/telemetry";
-const FRAME_BYTES = 56;
+const FRAME_BYTES_MIN = 56;
+const FRAME_BYTES_V3 = 64;
+const FRAME_BYTES_V4 = 68;
+const VBUS_EMA = 0.995;
+const VBUS_PRESENT_V = 0.5;
+const VBUS_WARN_V = 11.4;
+const VBUS_CRIT_V = 11.0;
 // Chart chrome colours; keep in sync with --muted / --border in style.css.
 const AXIS_TEXT = "#9aa0a8";
 const AXIS_GRID = "#2c3038";
@@ -29,20 +35,25 @@ function decodeBalanceFrame(buf) {
     cmd_torque_nm: dv.getFloat32(28, true),
     cmd_torque_left_nm: dv.getFloat32(32, true),
     cmd_torque_right_nm: dv.getFloat32(36, true),
-    u_ff_nm: dv.getFloat32(40, true),
-    u_fb_nm: dv.getFloat32(44, true),
+    u_meca_nm: dv.getFloat32(40, true),
+    u_err_nm: dv.getFloat32(44, true),
     pitch_ref_rad: dv.getFloat32(48, true),
     imu_valid: dv.getUint8(52),
     estop: dv.getUint8(53),
     strategy_id: dv.getUint8(54),
     source_drop_count_mod256: dv.getUint8(55),
+    vbus_l_v: buf.byteLength >= FRAME_BYTES_V3 ? dv.getFloat32(56, true) : 0,
+    vbus_r_v: buf.byteLength >= FRAME_BYTES_V3 ? dv.getFloat32(60, true) : 0,
+    wc_mode: buf.byteLength >= FRAME_BYTES_V4 ? dv.getUint8(64) : 0,
+    sync_l: buf.byteLength >= FRAME_BYTES_V4 ? dv.getUint8(65) : 0,
+    sync_r: buf.byteLength >= FRAME_BYTES_V4 ? dv.getUint8(66) : 0,
   };
 }
 
 const BUFFER_KEYS = [
   "pitch_rad", "pitch_deg", "pitch_rate",
-  "cmd_torque", "cmd_torque_l", "cmd_torque_r", "u_ff", "u_fb",
-  "vel_l", "vel_r", "estop", "imu_valid",
+  "cmd_torque", "cmd_torque_l", "cmd_torque_r", "u_meca", "u_err",
+  "vel_l", "vel_r", "estop", "imu_valid", "sync_l", "sync_r",
 ];
 
 class ChannelBuffers {
@@ -64,12 +75,14 @@ class ChannelBuffers {
     this.y.cmd_torque.push(frame.cmd_torque_nm);
     this.y.cmd_torque_l.push(frame.cmd_torque_left_nm);
     this.y.cmd_torque_r.push(frame.cmd_torque_right_nm);
-    this.y.u_ff.push(frame.u_ff_nm);
-    this.y.u_fb.push(frame.u_fb_nm);
+    this.y.u_meca.push(frame.u_meca_nm);
+    this.y.u_err.push(frame.u_err_nm);
     this.y.vel_l.push(frame.vel_wheel_l_turns_s);
     this.y.vel_r.push(frame.vel_wheel_r_turns_s);
     this.y.estop.push(frame.estop);
     this.y.imu_valid.push(frame.imu_valid);
+    this.y.sync_l.push(frame.sync_l ? 1 : 0);
+    this.y.sync_r.push(frame.sync_r ? 1 : 0);
     // Evict anything older than MAX_BUFFER_S, so the buffer always covers
     // the widest window the slider can ask for.
     const cutoff = t - MAX_BUFFER_S;
@@ -90,7 +103,7 @@ const buffers = new ChannelBuffers(BUFFER_KEYS);
 
 const CHART_HEIGHT = 220;
 
-function makeChart(containerId, title, seriesKeys, labels) {
+function makeChart(containerId, title, seriesKeys, labels, yRange) {
   const container = document.getElementById(containerId);
   const opts = {
     title,
@@ -106,7 +119,10 @@ function makeChart(containerId, title, seriesKeys, labels) {
     // No `range` here: a static range array fights with setScale() below
     // (uPlot keeps reapplying it on every setData, freezing the window).
     // scheduleRedraw() is the sole authority over the x-domain via setScale.
-    scales: { x: { time: false, auto: false } },
+    scales: {
+      x: { time: false, auto: false },
+      ...(yRange ? { y: { auto: false, range: yRange } } : {}),
+    },
     // uPlot defaults to black axes/grid, which is invisible on the dark panel
     // background. These match --muted / --border in style.css.
     axes: [
@@ -131,11 +147,11 @@ const charts = [
   makeChart(
     "chart-torque",
     "Torque (Nm)",
-    ["cmd_torque", "cmd_torque_l", "cmd_torque_r", "u_ff", "u_fb"],
-    ["cmd_torque", "cmd_torque_l", "cmd_torque_r", "u_ff", "u_fb"]
+    ["cmd_torque", "cmd_torque_l", "cmd_torque_r", "u_meca", "u_err"],
+    ["cmd_torque", "cmd_torque_l", "cmd_torque_r", "u_meca", "u_err"]
   ),
   makeChart("chart-velocity", "Wheel velocity (turn/s)", ["vel_l", "vel_r"], ["vel_l", "vel_r"]),
-  makeChart("chart-flags", "Flags", ["estop", "imu_valid"], ["estop", "imu_valid"]),
+  makeChart("chart-flags", "Flags", ["estop", "imu_valid", "sync_l", "sync_r"], ["estop", "imu_valid", "sync_l", "sync_r"], [-0.1, 1.2]),
 ];
 
 function resizeCharts() {
@@ -166,6 +182,53 @@ function scheduleRedraw() {
   });
 }
 
+const vbusLabel = document.getElementById("vbus-label");
+const vbusLamp = document.getElementById("vbus-lamp");
+let vbusFiltL = null;
+let vbusFiltR = null;
+
+function vbusAlertLevel(leftV, rightV) {
+  const rails = [leftV, rightV].filter((v) => v > VBUS_PRESENT_V);
+  if (!rails.length) return "off";
+  const lowest = Math.min(...rails);
+  if (lowest < VBUS_CRIT_V) return "crit";
+  if (lowest < VBUS_WARN_V) return "warn";
+  return "ok";
+}
+
+function setVbusLamp(level) {
+  if (!vbusLamp) return;
+  vbusLamp.className = level === "warn" || level === "crit" ? `vbus-lamp ${level}` : "vbus-lamp";
+}
+
+const syncLampL = document.getElementById("sync-l-lamp");
+const syncLampR = document.getElementById("sync-r-lamp");
+
+function setSyncLamp(el, on) {
+  if (!el) return;
+  el.className = on ? "sync-lamp sync" : "sync-lamp normal";
+}
+
+function updateSyncLamps(frame) {
+  setSyncLamp(syncLampL, frame.sync_l);
+  setSyncLamp(syncLampR, frame.sync_r);
+}
+
+function updateVbusLabel(frame) {
+  if (!vbusLabel) return;
+  const rawL = frame.vbus_l_v;
+  const rawR = frame.vbus_r_v;
+  if (!(rawL > VBUS_PRESENT_V) && !(rawR > VBUS_PRESENT_V)) {
+    vbusLabel.textContent = "Vbus L — V · R — V";
+    setVbusLamp("off");
+    return;
+  }
+  vbusFiltL = vbusFiltL == null ? rawL : VBUS_EMA * vbusFiltL + (1 - VBUS_EMA) * rawL;
+  vbusFiltR = vbusFiltR == null ? rawR : VBUS_EMA * vbusFiltR + (1 - VBUS_EMA) * rawR;
+  vbusLabel.textContent = `Vbus L ${vbusFiltL.toFixed(2)} V · R ${vbusFiltR.toFixed(2)} V`;
+  setVbusLamp(vbusAlertLevel(vbusFiltL, vbusFiltR));
+}
+
 function setStatus(connected) {
   const el = document.getElementById("connection-status");
   if (!el) return;
@@ -185,9 +248,11 @@ function connectTelemetry() {
   ws.onerror = () => ws.close();
   ws.onmessage = (event) => {
     if (frozen) return;
-    if (event.data.byteLength !== FRAME_BYTES) return;
+    if (event.data.byteLength < FRAME_BYTES_MIN) return;
     const frame = decodeBalanceFrame(event.data);
     buffers.push(frame, performance.now() / 1000);
+    updateVbusLabel(frame);
+    updateSyncLamps(frame);
     scheduleRedraw();
   };
 }

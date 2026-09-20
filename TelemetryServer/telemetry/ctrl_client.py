@@ -118,7 +118,9 @@ class ControlParamsClient:
                 last_err = exc
                 continue
             if not frame.ok:
-                raise RuntimeError(f"GET failed: error_code={frame.error_code}")
+                raise RuntimeError(
+                    f"GET failed: error_code={TelemetryErrorCode(frame.error_code).name}"
+                )
             return decode_snapshot(frame.payload)
         raise TimeoutError(
             f"no reply for GetControlParams after 5 attempts ({last_err}). "

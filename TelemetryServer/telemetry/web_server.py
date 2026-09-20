@@ -10,6 +10,8 @@ from typing import Any, Dict, Optional, Set
 from aiohttp import WSMsgType, web
 
 from telemetry.balance_frame import BalanceFrame
+from telemetry.gains_catalog import panels_for_wire
+from telemetry.presets import list_presets, load_preset, save_preset
 from telemetry.rpc_mux import SharedRpcClient
 
 # Bounded broadcast queue: at up to 500Hz this is ~0.2s of buffering before
@@ -22,14 +24,35 @@ def handle_control_message(
     rpc: Optional[SharedRpcClient], msg: Dict[str, Any]
 ) -> Dict[str, Any]:
     """Run one /ws/control request against rpc; never raises."""
+    action = msg.get("action")
+    try:
+        if action == "list_presets":
+            return {"ok": True, "presets": list(list_presets())}
+        if action == "save_preset":
+            name = save_preset(
+                str(msg.get("name", "")),
+                msg.get("values") or {},
+                overwrite=bool(msg.get("overwrite")),
+            )
+            return {"ok": True, "name": name}
+        if action == "load_preset":
+            name, groups, params = load_preset(str(msg.get("name", "")))
+            return {"ok": True, "name": name, "groups": groups, "params": params}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
     if rpc is None:
         return {"ok": False, "error": "RPC unavailable (pass --esp32-host)."}
 
-    action = msg.get("action")
     try:
         if action == "get_params":
             snap = rpc.get_params()
-            return {"ok": True, "params": snap.as_dict(), "version": snap.version}
+            return {
+                "ok": True,
+                "params": snap.as_dict(),
+                "version": snap.version,
+                "panels": panels_for_wire(),
+            }
         if action == "set_param":
             param_id, name, applied = rpc.set_param(msg["name"], float(msg["value"]))
             return {"ok": True, "id": param_id, "name": name, "applied": applied}
@@ -84,12 +107,18 @@ class TelemetryWebServer:
             try:
                 req = json.loads(msg.data)
             except ValueError:
-                await ws.send_json({"ok": False, "error": "invalid JSON"})
+                try:
+                    await ws.send_json({"ok": False, "error": "invalid JSON"})
+                except (ConnectionResetError, ConnectionError, RuntimeError):
+                    break
                 continue
             resp = await loop.run_in_executor(
                 None, handle_control_message, self._rpc, req
             )
-            await ws.send_json(resp)
+            try:
+                await ws.send_json(resp)
+            except (ConnectionResetError, ConnectionError, RuntimeError):
+                break
         return ws
 
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:

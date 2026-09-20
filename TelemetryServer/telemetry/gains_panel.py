@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Dict, Optional, Sequence
 
 from telemetry.ctrl_params import PARAM_NAMES
+from telemetry.gains_catalog import HIDDEN_FROM_GAINS, PANELS, TOOLTIPS, panel_field_names
+from telemetry.presets import list_presets, load_preset, save_preset
 from telemetry.rpc_mux import SharedRpcClient
 
 try:
     from PyQt5.QtCore import Qt
     from PyQt5.QtWidgets import (
-        QFormLayout,
+        QDialog,
         QGridLayout,
         QGroupBox,
         QHBoxLayout,
         QLabel,
         QLineEdit,
+        QListWidget,
         QPushButton,
         QScrollArea,
         QVBoxLayout,
@@ -24,114 +27,22 @@ try:
 except ImportError:  # pragma: no cover
     from PySide2.QtCore import Qt
     from PySide2.QtWidgets import (
-        QFormLayout,
+        QDialog,
         QGridLayout,
         QGroupBox,
         QHBoxLayout,
         QLabel,
         QLineEdit,
+        QListWidget,
         QPushButton,
         QScrollArea,
         QVBoxLayout,
         QWidget,
     )
 
-# One-shot / aliases: buttons or hidden (same store as heading_ref_rad).
+# Buttons / aliases / Drive sliders stay out of the gain groups.
 _ACTION_PARAMS = frozenset({"pos_reset", "heading_reset", "heading_dec"})
-_HIDDEN_ALIASES = frozenset({"heading_inc"})
-
-# Proposed categories for ff_cascade (name stays the SET key).
-CATEGORIES: Sequence[Tuple[str, Sequence[str]]] = (
-    (
-        "Consignes",
-        (
-            "pitch_ref_rad",
-            "vel_ref_turns_s",
-            "heading_ref_rad",
-            "pos_x_ref_m",
-            "outer_mode",
-        ),
-    ),
-    (
-        "Limites",
-        (
-            "pitch_failsafe_rad",
-            "cmd_max_torque_nm",
-            "cascade_pitch_ref_max_rad",
-            "vel_ref_slew_turns_s2",
-        ),
-    ),
-    (
-        "Cascade vitesse / pitch",
-        (
-            "cascade_vel_kp",
-            "cascade_vel_kd",
-            "cascade_vel_err_ema_alpha",
-            "cascade_vel_ema_kp",
-            "cascade_vel_accel_kp",
-        ),
-    ),
-    (
-        "Équilibre (FF + PD)",
-        (
-            "ff_grav_k",
-            "ff_fb_k_pitch",
-            "ff_fb_k_rate",
-            "ff_output_alpha",
-        ),
-    ),
-    (
-        "Lacet",
-        (
-            "heading_kp",
-            "heading_kd",
-            "heading_torque_max_nm",
-        ),
-    ),
-    (
-        "Position",
-        (
-            "pos_kp",
-            "pos_kd",
-            "pos_v_max_turns_s",
-            "pos_err_ema_alpha",
-            "pos_ema_kp",
-            "wheel_radius_m",
-        ),
-    ),
-    (
-        "Friction / deadband",
-        (
-            "friction_mode",
-            "friction_static_nm",
-            "friction_kinetic_nm",
-            "friction_vel_eps_turns_s",
-            "torque_deadband_nm",
-            "torque_deadband_pitch_max_rad",
-            "torque_deadband_rate_max_rads",
-        ),
-    ),
-    (
-        "Accélération moteur",
-        (
-            "alpha_kp",
-            "alpha_max_nm",
-            "motor_J",
-            "motor_friction_c",
-            "alpha_pitch_max_rad",
-            "alpha_rate_max_rads",
-            "alpha_vel_max_turns_s",
-            "alpha_lpf",
-        ),
-    ),
-    (
-        "Système",
-        (
-            "strategy",
-            "wheel_encoder_vel_lpf_alpha",
-        ),
-    ),
-)
+_HIDDEN_ALIASES = frozenset({"heading_inc"}) | HIDDEN_FROM_GAINS
 
 _DIRTY_SS = "QLineEdit { background: #fff3cd; }"
 _CLEAN_SS = ""
@@ -157,12 +68,16 @@ class GainsPanel(QWidget):
         self._btn_apply_all = QPushButton("Apply all")
         self._btn_reset_x = QPushButton("pos_reset")
         self._btn_reset_heading = QPushButton("heading_reset")
+        self._btn_save = QPushButton("Save")
+        self._btn_load = QPushButton("Load")
         btns.addWidget(self._btn_refresh)
         btns.addWidget(self._btn_apply)
         btns.addWidget(self._btn_apply_all)
         btns.addWidget(self._btn_reset_x)
         btns.addWidget(self._btn_reset_heading)
         btns.addStretch(1)
+        btns.addWidget(self._btn_save)
+        btns.addWidget(self._btn_load)
         root.addLayout(btns)
         root.addWidget(self._status)
 
@@ -175,19 +90,24 @@ class GainsPanel(QWidget):
         grid.setVerticalSpacing(12)
 
         used = set()
-        row = 0
-        col = 0
-        for title, keys in CATEGORIES:
-            visible = [n for n in keys if n in PARAM_NAMES]
+        index = 0
+        for panel in PANELS:
+            visible = [n for n in panel_field_names(panel) if n in PARAM_NAMES]
             if not visible:
                 continue
             used.update(visible)
-            box = self._make_group(title, visible)
-            grid.addWidget(box, row, col)
-            col += 1
-            if col >= 2:
-                col = 0
-                row += 1
+            common = [n for n in (panel.get("fields") or ()) if n in PARAM_NAMES]
+            grid.addWidget(
+                self._make_group(
+                    panel["title"],
+                    common,
+                    panel["legend"],
+                    panel.get("sections") or (),
+                ),
+                index // 2,
+                index % 2,
+            )
+            index += 1
 
         extras = [
             n
@@ -195,10 +115,8 @@ class GainsPanel(QWidget):
             if n not in used and n not in _ACTION_PARAMS and n not in _HIDDEN_ALIASES
         ]
         if extras:
-            if col != 0:
-                col = 0
-                row += 1
-            grid.addWidget(self._make_group("Autres", extras), row, 0, 1, 2)
+            grid.addWidget(self._make_group("Autres", extras, ""), index // 2, index % 2)
+        grid.setRowStretch(grid.rowCount(), 1)
 
         scroll.setWidget(host)
         root.addWidget(scroll)
@@ -208,6 +126,8 @@ class GainsPanel(QWidget):
         self._btn_apply_all.clicked.connect(lambda: self.apply(changed_only=False))
         self._btn_reset_x.clicked.connect(self._on_pos_reset)
         self._btn_reset_heading.clicked.connect(self._on_heading_reset)
+        self._btn_save.clicked.connect(lambda: self._open_preset_dialog("save"))
+        self._btn_load.clicked.connect(lambda: self._open_preset_dialog("load"))
 
         if rpc is None:
             self._set_status("RPC unavailable (pass --esp32-host).")
@@ -217,20 +137,58 @@ class GainsPanel(QWidget):
             self._btn_reset_x.setEnabled(False)
             self._btn_reset_heading.setEnabled(False)
 
-    def _make_group(self, title: str, names: Sequence[str]) -> QGroupBox:
-        box = QGroupBox(title)
-        form = QFormLayout(box)
-        form.setLabelAlignment(Qt.AlignRight)
-        form.setHorizontalSpacing(8)
-        form.setVerticalSpacing(4)
-        for name in names:
+    def _add_field_grid(self, layout: QVBoxLayout, names: Sequence[str]) -> None:
+        fields = QGridLayout()
+        fields.setHorizontalSpacing(12)
+        fields.setVerticalSpacing(4)
+        for i, name in enumerate(names):
             edit = QLineEdit()
             edit.setPlaceholderText(name)
             edit.setClearButtonEnabled(True)
+            edit.setMaximumWidth(110)
             edit.textChanged.connect(lambda _t, n=name: self._paint_dirty(n))
             edit.returnPressed.connect(lambda n=name: self._apply_one(n))
+            tip = TOOLTIPS.get(name, "")
+            if tip:
+                edit.setToolTip(tip)
+            label = QLabel(name)
+            label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            if tip:
+                label.setToolTip(tip)
             self._edits[name] = edit
-            form.addRow(name, edit)
+            row, col = divmod(i, 2)
+            fields.addWidget(label, row, col * 2)
+            fields.addWidget(edit, row, col * 2 + 1)
+        fields.setColumnStretch(0, 1)
+        fields.setColumnStretch(2, 1)
+        layout.addLayout(fields)
+
+    def _make_group(
+        self,
+        title: str,
+        names: Sequence[str],
+        legend: str = "",
+        sections: Sequence[object] = (),
+    ) -> QGroupBox:
+        box = QGroupBox(title)
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
+        if legend:
+            legend_lbl = QLabel(legend)
+            legend_lbl.setWordWrap(True)
+            legend_lbl.setStyleSheet("color: #666666; font-size: 10px;")
+            layout.addWidget(legend_lbl)
+        if names:
+            self._add_field_grid(layout, names)
+        for section in sections:
+            sec = section if isinstance(section, dict) else {}
+            visible = [n for n in sec.get("fields", ()) if n in PARAM_NAMES]
+            if not visible:
+                continue
+            layout.addWidget(
+                self._make_group(str(sec.get("title", "")), visible, str(sec.get("legend", "")))
+            )
         return box
 
     def _paint_dirty(self, name: str) -> None:
@@ -283,18 +241,18 @@ class GainsPanel(QWidget):
             updates.append((name, value))
         return updates
 
-    def apply(self, changed_only: bool) -> None:
-        self._send_updates(self._collect_updates(changed_only))
+    def apply(self, changed_only: bool) -> bool:
+        return self._send_updates(self._collect_updates(changed_only))
 
     def _apply_one(self, name: str) -> None:
         self._send_updates(self._collect_updates(changed_only=True, only=name))
 
-    def _send_updates(self, updates: Optional[list[tuple[str, float]]]) -> None:
+    def _send_updates(self, updates: Optional[list[tuple[str, float]]]) -> bool:
         if self._rpc is None or updates is None:
-            return
+            return False
         if not updates:
             self._set_status("Nothing to apply.")
-            return
+            return True
 
         ok = 0
         try:
@@ -309,8 +267,10 @@ class GainsPanel(QWidget):
                 edit.setStyleSheet(_CLEAN_SS)
                 ok += 1
             self._set_status(f"Applied {ok} param(s).")
+            return True
         except Exception as exc:
             self._set_status(f"Apply stopped after {ok}: {exc}", error=True)
+            return False
 
     def _on_pos_reset(self) -> None:
         if self._rpc is None:
@@ -329,3 +289,117 @@ class GainsPanel(QWidget):
             self._set_status("heading_reset pulsed.")
         except Exception as exc:
             self._set_status(f"heading_reset failed: {exc}", error=True)
+
+    def _collect_form_values(self) -> Optional[Dict[str, float]]:
+        values: Dict[str, float] = {}
+        for name, edit in self._edits.items():
+            text = edit.text().strip()
+            if not text:
+                continue
+            try:
+                values[name] = float(text)
+            except ValueError:
+                self._set_status(f"Invalid number for {name!r}: {text!r}", error=True)
+                return None
+        return values
+
+    def _open_preset_dialog(self, mode: str) -> None:
+        dialog = _PresetDialog(mode, list_presets(), self)
+        exec_dialog = getattr(dialog, "exec_", dialog.exec)
+        if exec_dialog() != QDialog.Accepted:
+            return
+        name, overwrite = dialog.result_choice()
+        if not name:
+            return
+        if mode == "save":
+            self._save_preset(name, overwrite)
+        else:
+            self._load_preset(name)
+
+    def _save_preset(self, name: str, overwrite: bool) -> None:
+        values = self._collect_form_values()
+        if values is None:
+            return
+        if not values:
+            self._set_status("Refresh gains before saving a preset.", error=True)
+            return
+        try:
+            saved = save_preset(name, values, overwrite=overwrite)
+            self._set_status(f"Saved preset {saved!r}.")
+        except Exception as exc:
+            self._set_status(f"Save failed: {exc}", error=True)
+
+    def _load_preset(self, name: str) -> None:
+        try:
+            saved, _groups, params = load_preset(name)
+            for key, value in params.items():
+                edit = self._edits.get(key)
+                if edit is None:
+                    continue
+                text = f"{value:.6g}"
+                edit.blockSignals(True)
+                edit.setText(text)
+                edit.blockSignals(False)
+                self._paint_dirty(key)
+            if self.apply(changed_only=False):
+                self._set_status(f"Loaded preset {saved!r}.")
+        except Exception as exc:
+            self._set_status(f"Load failed: {exc}", error=True)
+
+
+class _PresetDialog(QDialog):
+    def __init__(self, mode: str, names: Sequence[str], parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._mode = mode
+        self._chosen = ""
+        self._overwrite = False
+        self.setWindowTitle("Save preset" if mode == "save" else "Load preset")
+        self.setModal(True)
+        layout = QVBoxLayout(self)
+        self._list = QListWidget()
+        self._list.addItems(list(names))
+        if not names:
+            empty = QLabel("No presets yet.")
+            layout.addWidget(empty)
+        layout.addWidget(self._list)
+        if mode == "save":
+            hint = QLabel("Click a name to overwrite, or create a new one.")
+            hint.setWordWrap(True)
+            layout.addWidget(hint)
+            row = QHBoxLayout()
+            self._name = QLineEdit()
+            self._name.setPlaceholderText("New preset name")
+            create = QPushButton("Create")
+            create.clicked.connect(self._on_create)
+            self._name.returnPressed.connect(self._on_create)
+            row.addWidget(self._name)
+            row.addWidget(create)
+            layout.addLayout(row)
+            self._list.itemClicked.connect(self._on_overwrite)
+        else:
+            hint = QLabel("Click a preset to load it.")
+            hint.setWordWrap(True)
+            layout.addWidget(hint)
+            self._list.itemClicked.connect(self._on_load)
+        close = QPushButton("Close")
+        close.clicked.connect(self.reject)
+        layout.addWidget(close)
+
+    def result_choice(self) -> tuple[str, bool]:
+        return self._chosen, self._overwrite
+
+    def _on_create(self) -> None:
+        self._chosen = self._name.text().strip()
+        self._overwrite = False
+        if self._chosen:
+            self.accept()
+
+    def _on_overwrite(self, item) -> None:
+        self._chosen = item.text()
+        self._overwrite = True
+        self.accept()
+
+    def _on_load(self, item) -> None:
+        self._chosen = item.text()
+        self._overwrite = False
+        self.accept()

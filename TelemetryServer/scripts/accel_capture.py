@@ -55,7 +55,7 @@ def main() -> int:
             "cascade_vel_kp", "cascade_vel_kd",
             "cascade_vel_err_ema_alpha", "cascade_vel_ema_kp",
             "cascade_pitch_ref_max_rad", "vel_ref_turns_s",
-            "ff_grav_k", "ff_fb_k_pitch", "ff_fb_k_rate", "ff_output_alpha",
+            "meca_k_grav", "err_k_pitch", "meca_k_pitch_damp", "balance_output_alpha",
             "cmd_max_torque_nm", "heading_kp", "heading_kd",
         ]))
 

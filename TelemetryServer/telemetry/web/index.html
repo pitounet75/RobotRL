@@ -9,8 +9,24 @@
   <body>
     <header>
       <h1>RobotRL Telemetry</h1>
-      <span id="connection-status" class="status-bad">disconnected</span>
+      <div class="header-right">
+        <button id="preset-save">Save</button>
+        <button id="preset-load">Load</button>
+        <span id="connection-status" class="status-bad">disconnected</span>
+      </div>
     </header>
+    <div id="preset-overlay" hidden>
+      <div class="preset-panel" role="dialog" aria-modal="true">
+        <h2 id="preset-overlay-title">Save preset</h2>
+        <ul id="preset-list"></ul>
+        <p id="preset-empty" class="preset-empty" hidden>No presets yet.</p>
+        <div id="preset-create-row">
+          <input id="preset-name" type="text" maxlength="80" placeholder="New preset name" />
+          <button id="preset-create">Create</button>
+        </div>
+        <button id="preset-close" type="button">Close</button>
+      </div>
+    </div>
 
     <main>
       <section id="charts">
@@ -28,17 +44,27 @@
       </div>
 
       <section id="controls">
-        <div class="control-block">
-          <label for="speed-slider">Speed</label>
-          <input type="range" id="speed-slider" min="-4000" max="4000" value="0" step="10" />
+        <div class="control-block drive-block">
+          <span class="drive-hint">↑↓ speed · ←→ yaw — hold to ramp, release to brake</span>
+          <label for="drive-max-mps">Max speed</label>
+          <input id="drive-max-mps" type="number" min="0.01" max="4" step="0.05" value="0.50" />
+          <span>m/s</span>
+          <label for="drive-max-yaw">Max yaw</label>
+          <input id="drive-max-yaw" type="number" min="1" max="229" step="5" value="45" />
+          <span>°/s</span>
           <span id="speed-label">+0.00 m/s (+0.000 motor turn/s)</span>
-          <button id="speed-zero">0</button>
-        </div>
-        <div class="control-block">
-          <label for="heading-slider">Heading</label>
-          <input type="range" id="heading-slider" min="-180" max="180" value="0" step="1" />
-          <span id="heading-label">+0&deg; (+0.000 rad)</span>
-          <button id="heading-zero">0</button>
+          <span id="heading-label">yaw +0.00 rad/s (+0 °/s)</span>
+          <span class="vbus-wrap">
+            <span id="vbus-lamp" class="vbus-lamp" title="Vbus: orange &lt; 11.4 V, rouge clignotant &lt; 11 V"></span>
+            <span id="vbus-label">Vbus L — V · R — V</span>
+          </span>
+          <span class="sync-wrap" title="Vert = cette roue en SYNC / BOTH_AIR, rouge = NORMAL / RECOVERY">
+            <span id="sync-l-lamp" class="sync-lamp normal"></span>
+            <span>sync_l</span>
+            <span id="sync-r-lamp" class="sync-lamp normal"></span>
+            <span>sync_r</span>
+          </span>
+          <button id="drive-zero">0</button>
         </div>
 
         <div class="control-block">

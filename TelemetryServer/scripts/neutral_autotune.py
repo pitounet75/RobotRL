@@ -141,7 +141,7 @@ def propose(snap, m: Metrics) -> dict[str, float]:
 
     # Oscillation: add damping, trim snap; never raise kp/ema while oscillating hard.
     if oscillating:
-        out["ff_fb_k_rate"] = clamp(float(p["ff_fb_k_rate"]) * 1.08, 0.013, 0.022)
+        out["meca_k_pitch_damp"] = clamp(float(p["meca_k_pitch_damp"]) * 1.08, 0.013, 0.022)
         out["cascade_vel_kd"] = clamp(float(p["cascade_vel_kd"]) * 1.10, 0.006, 0.015)
         out["wheel_encoder_vel_lpf_alpha"] = clamp(
             float(p["wheel_encoder_vel_lpf_alpha"]) + 0.02, 0.75, 0.88
@@ -151,7 +151,7 @@ def propose(snap, m: Metrics) -> dict[str, float]:
         )
         if pitch_deg > 0.45:
             out["cascade_vel_kp"] = clamp(float(p["cascade_vel_kp"]) * 0.94, 0.045, 0.08)
-            out["ff_output_alpha"] = clamp(float(p["ff_output_alpha"]) + 0.04, 0.5, 0.72)
+            out["balance_output_alpha"] = clamp(float(p["balance_output_alpha"]) + 0.04, 0.5, 0.72)
 
     # Slow drift only when oscillation is modest.
     if drift > 0.012 and pitch_deg < 0.45 and not oscillating:

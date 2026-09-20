@@ -42,6 +42,22 @@ class HandleControlMessageTests(unittest.TestCase):
         self.assertTrue(resp["ok"])
         self.assertEqual(resp["version"], 10)
         self.assertIn("cascade_vel_kd", resp["params"])
+        titles = [panel["title"] for panel in resp["panels"]]
+        self.assertEqual(
+            titles,
+            [
+                "Équilibre",
+                "Friction / deadband / motor correction",
+                "Vitesse",
+                "Heading",
+                "Antipatinage",
+                "Position",
+                "Système",
+            ],
+        )
+        self.assertEqual(resp["panels"][0]["fields"][0]["name"], "meca_k_grav")
+        antipat = next(p for p in resp["panels"] if p["title"] == "Antipatinage")
+        self.assertEqual([s["title"] for s in antipat.get("sections") or []], ["Sync", "Both"])
 
     def test_set_param_forwards_name_and_value(self) -> None:
         rpc = _FakeRpc()
@@ -86,8 +102,8 @@ def _make_frame() -> BalanceFrame:
         cmd_torque_nm=0.0,
         cmd_torque_left_nm=0.0,
         cmd_torque_right_nm=0.0,
-        u_ff_nm=0.0,
-        u_fb_nm=0.0,
+        u_meca_nm=0.0,
+        u_err_nm=0.0,
         pitch_ref_rad=0.0,
         imu_valid=1,
         estop=0,

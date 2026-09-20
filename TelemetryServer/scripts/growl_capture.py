@@ -70,8 +70,8 @@ def main() -> int:
                 "cmd",
                 "cmd_l",
                 "cmd_r",
-                "u_ff",
-                "u_fb",
+                "u_meca",
+                "u_err",
                 "pitch_ref",
             ]
         )
@@ -88,8 +88,8 @@ def main() -> int:
                     bf.cmd_torque_nm,
                     bf.cmd_torque_left_nm,
                     bf.cmd_torque_right_nm,
-                    bf.u_ff_nm,
-                    bf.u_fb_nm,
+                    bf.u_meca_nm,
+                    bf.u_err_nm,
                     bf.pitch_ref_rad,
                 ]
             )
@@ -108,7 +108,7 @@ def main() -> int:
     vel = col("vel_wheel_turns_s")
     cmd = col("cmd_torque_nm")
     pref = col("pitch_ref_rad")
-    u_fb = col("u_fb_nm")
+    u_err = col("u_err_nm")
 
     def stats(name: str, x: np.ndarray, unit: str = "") -> None:
         x0 = x - np.mean(x)
@@ -126,7 +126,7 @@ def main() -> int:
     stats("pitch_ref", pref, "rad")
     stats("vel_wheel", vel, "turn/s")
     stats("cmd_torque", cmd, "Nm")
-    stats("u_fb", u_fb, "Nm")
+    stats("u_err", u_err, "Nm")
 
     def dom_freq(x: np.ndarray) -> tuple[float, float] | tuple[None, None]:
         x0 = x - np.mean(x)

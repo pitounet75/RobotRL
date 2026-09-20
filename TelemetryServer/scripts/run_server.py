@@ -253,7 +253,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                             f"cmd={bf.cmd_torque_nm:+.5f}  "
                             f"L/R={bf.cmd_torque_left_nm:+.5f}/"
                             f"{bf.cmd_torque_right_nm:+.5f}  "
-                            f"u_fb={bf.u_fb_nm:+.5f}  estop={bf.estop}  "
+                            f"u_err={bf.u_err_nm:+.5f}  estop={bf.estop}  "
                             f"imu={bf.imu_valid}"
                         )
                     if args.diag_stall:
@@ -283,7 +283,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                                     f"cmd={bf.cmd_torque_nm:+.5f}  "
                                     f"L/R={bf.cmd_torque_left_nm:+.5f}/"
                                     f"{bf.cmd_torque_right_nm:+.5f}  "
-                                    f"u_fb={bf.u_fb_nm:+.5f} u_ff={bf.u_ff_nm:+.5f}  "
+                                    f"u_err={bf.u_err_nm:+.5f} u_meca={bf.u_meca_nm:+.5f}  "
                                     f"vel={bf.vel_wheel_turns_s:+.3f}  "
                                     f"estop={bf.estop} imu={bf.imu_valid}"
                                 )

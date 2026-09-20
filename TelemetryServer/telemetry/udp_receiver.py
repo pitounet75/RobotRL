@@ -33,16 +33,25 @@ class UdpTelemetryReceiver:
         self._remote: Optional[Tuple[str, int]] = None
 
     def subscribe(self, payload: bytes = b"subscribe") -> None:
-        """Ping ESP32 so learn-remote mode knows our address."""
+        """Ping ESP32 so learn-remote mode knows our address.
+
+        Unreachable host (Wi-Fi down, wrong subnet) must not kill the RX thread.
+        """
         if not self.esp32_host:
             return
-        self._sock.sendto(payload, (self.esp32_host, self.esp32_port))
+        try:
+            self._sock.sendto(payload, (self.esp32_host, self.esp32_port))
+        except OSError:
+            return
 
     def send_raw(self, payload: bytes) -> None:
         """Send a TM frame (or other payload) to the ESP32 bridge."""
         if not self.esp32_host:
             raise RuntimeError("esp32_host not set")
-        self._sock.sendto(payload, (self.esp32_host, self.esp32_port))
+        try:
+            self._sock.sendto(payload, (self.esp32_host, self.esp32_port))
+        except OSError as exc:
+            raise OSError(f"ESP32 {self.esp32_host}:{self.esp32_port} unreachable: {exc}") from exc
 
     def recv_chunk(self) -> Optional[bytes]:
         try:
