@@ -7,16 +7,22 @@ excites. A ring-down measures it directly, with the loop out of the way.
 
 Procedure, done twice:
 
-  1. Cut the torque (the drives stay armed, so the wheels are free):
-       python scripts/tune_params.py --esp32-host <ip> set pitch_failsafe_rad 0.001
-     THE ROBOT WILL FALL. Lay it down or hold it first.
+  1. Clamp the torque to nothing (the drives stay armed, wheels coast):
+       python scripts/tune_params.py --esp32-host <ip> set cmd_max_torque_nm 0.0001
+     THE ROBOT WILL FALL. Rest it on a stand or lay it down first.
+     Not pitch_failsafe_rad: that estop is recomputed every cycle, so it
+     releases each time the pitch crosses the threshold and lets torque
+     pulses through -- measured at 0.026 Nm during a ground run.
 
-  2. Run this script, then excite and let go:
-       --mode air     robot held off the ground, flick one wheel
-       --mode ground  robot on the ground, push the chassis fore-aft, sharply
+  2. Run this script, then excite and let go. The tap must be SHORT: a hand
+     push carries almost no energy above 20 Hz, so it cannot excite a 35 Hz
+     mode and its absence would prove nothing. Tap the rim with a screwdriver
+     handle, or pluck the belt.
+       --mode air     robot on a stand, wheels free, tap a rim
+       --mode ground  robot upright on the floor, tap the chassis fore-aft
 
   3. Restore:
-       python scripts/tune_params.py --esp32-host <ip> set pitch_failsafe_rad 0.785398
+       python scripts/tune_params.py --esp32-host <ip> set cmd_max_torque_nm 0.04
 
 Reading the result:
 
@@ -110,13 +116,14 @@ def main() -> int:
 
     client = ControlParamsClient(args.esp32_host, bind_port=0, subscribe=True, timeout_s=0.5)
     try:
-        snap = client.get_params()
-        failsafe = float(snap.as_dict()["pitch_failsafe_rad"])
-        if failsafe > 0.01:
-            print(f"ATTENTION: pitch_failsafe_rad = {failsafe:g}, le couple n'est pas coupe.")
-            print("  Les moteurs vont repondre a l'excitation et la mesure ne sera pas libre.")
+        params = client.get_params().as_dict()
+        tau_max = float(params["cmd_max_torque_nm"])
+        if tau_max > 0.001:
+            print(f"ATTENTION: cmd_max_torque_nm = {tau_max:g}, le couple n'est pas coupe.")
+            print("  Les moteurs repondraient a l'excitation: ce serait la boucle qu'on")
+            print("  mesure, pas la structure.")
             print(f"  python scripts/tune_params.py --esp32-host {args.esp32_host}"
-                  " set pitch_failsafe_rad 0.001")
+                  " set cmd_max_torque_nm 0.0001")
             return 2
 
         print(f"[{args.mode}] capture {args.seconds:g} s — excite maintenant, puis lache.")
@@ -154,6 +161,20 @@ def main() -> int:
     if seg.stop - seg.start < 128:
         print("fenetre trop courte apres le choc")
         return 2
+
+    # A resonance can only show up if the tap put energy there. Without this
+    # check, a soft push reads as "no resonance" and closes the question wrongly.
+    f_ex, a_ex = spectrum(vel[seg], fs)
+    e_lo = float(np.sum(a_ex[(f_ex >= 2) & (f_ex < 20)] ** 2))
+    e_hi = float(np.sum(a_ex[(f_ex >= 25) & (f_ex <= 60)] ** 2))
+    # Share of the band, not a ratio: bounded 0-100%% and readable either way.
+    ratio = e_hi / (e_lo + e_hi) if (e_lo + e_hi) > 0 else 0.0
+    if ratio < 0.02:
+        print(f"  excitation: {100 * ratio:.1f}% de l'energie entre 25 et 60 Hz -- trop douce.")
+        print("  Un choc plus bref (manche de tournevis sur la jante) est necessaire:")
+        print("  en l'etat, l'absence de pic a 35 Hz ne prouve rien.")
+    else:
+        print(f"  excitation: {100 * ratio:.1f}% de l'energie entre 25 et 60 Hz, suffisant.")
 
     for label, sig in (("vel_l", vel), ("vel_r", vel_r), ("pitch_rate", pitch_rate)):
         f, a = spectrum(sig[seg], fs)
