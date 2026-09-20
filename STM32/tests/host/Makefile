@@ -25,9 +25,11 @@ SRCS := \
 	test_icm45686_parse.c \
 	test_imu_fusion.c \
 	test_app_samples.c \
+	test_vel_fit.c \
 	$(SENSOR_DIR)/icm45686_parse.c \
 	$(FIRMWARE_SRC)/imu_fusion.c \
-	$(FIRMWARE_SRC)/app_samples.c
+	$(FIRMWARE_SRC)/app_samples.c \
+	$(FIRMWARE_SRC)/vel_fit.c
 
 OBJS := $(SRCS:.c=.o)
 TARGET := run_host_tests
@@ -52,3 +54,4 @@ clean:
 $(SENSOR_DIR)/icm45686_parse.o: $(SENSOR_DIR)/icm45686_parse.c
 $(FIRMWARE_SRC)/imu_fusion.o: $(FIRMWARE_SRC)/imu_fusion.c
 $(FIRMWARE_SRC)/app_samples.o: $(FIRMWARE_SRC)/app_samples.c
+$(FIRMWARE_SRC)/vel_fit.o: $(FIRMWARE_SRC)/vel_fit.c
