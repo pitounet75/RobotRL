@@ -59,7 +59,9 @@ function decodeBalanceFrame(buf) {
 const BUFFER_KEYS = [
   "pitch_rad", "pitch_deg", "pitch_rate",
   "cmd_torque", "cmd_torque_l", "cmd_torque_r", "u_meca", "u_err",
-  "vel_l", "vel_r", "estop", "imu_valid", "sync_l", "sync_r",
+  "vel_l", "vel_r", "vel_fit_l", "vel_fit_r",
+  "acc_fit_l", "acc_fit_r",
+  "estop", "imu_valid", "sync_l", "sync_r",
 ];
 
 class ChannelBuffers {
@@ -85,6 +87,10 @@ class ChannelBuffers {
     this.y.u_err.push(frame.u_err_nm);
     this.y.vel_l.push(frame.vel_wheel_l_turns_s);
     this.y.vel_r.push(frame.vel_wheel_r_turns_s);
+    this.y.vel_fit_l.push(frame.vel_fit_l_turns_s);
+    this.y.vel_fit_r.push(frame.vel_fit_r_turns_s);
+    this.y.acc_fit_l.push(frame.acc_fit_l_turns_s2);
+    this.y.acc_fit_r.push(frame.acc_fit_r_turns_s2);
     this.y.estop.push(frame.estop);
     this.y.imu_valid.push(frame.imu_valid);
     this.y.sync_l.push(frame.sync_l ? 1 : 0);
@@ -156,7 +162,18 @@ const charts = [
     ["cmd_torque", "cmd_torque_l", "cmd_torque_r", "u_meca", "u_err"],
     ["cmd_torque", "cmd_torque_l", "cmd_torque_r", "u_meca", "u_err"]
   ),
-  makeChart("chart-velocity", "Wheel velocity (turn/s)", ["vel_l", "vel_r"], ["vel_l", "vel_r"]),
+  makeChart(
+    "chart-velocity",
+    "Wheel velocity (turn/s) — EMA vs order-2 fit",
+    ["vel_l", "vel_r", "vel_fit_l", "vel_fit_r"],
+    ["vel_l", "vel_r", "vel_fit_l", "vel_fit_r"]
+  ),
+  makeChart(
+    "chart-accel",
+    "Wheel acceleration from the fit (turn/s²)",
+    ["acc_fit_l", "acc_fit_r"],
+    ["acc_fit_l", "acc_fit_r"]
+  ),
   makeChart("chart-flags", "Flags", ["estop", "imu_valid", "sync_l", "sync_r"], ["estop", "imu_valid", "sync_l", "sync_r"], [-0.1, 1.2]),
 ];
 

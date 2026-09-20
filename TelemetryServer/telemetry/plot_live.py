@@ -50,16 +50,20 @@ class LiveBalancePlotter:
             _Series("u_err", 1),
             _Series("vel_l", 2),
             _Series("vel_r", 2),
-            _Series("estop", 3),
-            _Series("imu_valid", 3),
-            _Series("sync_l", 3),
-            _Series("sync_r", 3),
+            _Series("vel_fit_l", 2),
+            _Series("vel_fit_r", 2),
+            _Series("acc_fit_l", 3),
+            _Series("acc_fit_r", 3),
+            _Series("estop", 4),
+            _Series("imu_valid", 4),
+            _Series("sync_l", 4),
+            _Series("sync_r", 4),
         ]
         for s in self._series:
             s.data = deque(maxlen=self.max_points)
 
-        self.fig = plt.figure(figsize=(11, 9))
-        self.axes = self.fig.subplots(4, 1, sharex=True)
+        self.fig = plt.figure(figsize=(11, 10))
+        self.axes = self.fig.subplots(5, 1, sharex=True)
         self.fig.subplots_adjust(right=0.78, left=0.08, top=0.92, bottom=0.08)
         self.fig.suptitle("Balance telemetry (live)")
 
@@ -74,8 +78,9 @@ class LiveBalancePlotter:
         self.axes[0].set_ylabel("rad / deg")
         self.axes[1].set_ylabel("Nm motor")
         self.axes[2].set_ylabel("turn/s")
-        self.axes[3].set_ylabel("flags")
-        self.axes[3].set_ylim(-0.1, 1.2)
+        self.axes[3].set_ylabel("turn/s2")
+        self.axes[4].set_ylabel("flags")
+        self.axes[4].set_ylim(-0.1, 1.2)
 
         for ax in self.axes:
             ax.legend(loc="upper left")
@@ -245,6 +250,10 @@ class LiveBalancePlotter:
             self._series_by_label("u_err").data.append(frame.u_err_nm)
             self._series_by_label("vel_l").data.append(frame.vel_wheel_l_turns_s)
             self._series_by_label("vel_r").data.append(frame.vel_wheel_r_turns_s)
+            self._series_by_label("vel_fit_l").data.append(frame.vel_fit_l_turns_s)
+            self._series_by_label("vel_fit_r").data.append(frame.vel_fit_r_turns_s)
+            self._series_by_label("acc_fit_l").data.append(frame.acc_fit_l_turns_s2)
+            self._series_by_label("acc_fit_r").data.append(frame.acc_fit_r_turns_s2)
             self._series_by_label("estop").data.append(float(frame.estop))
             self._series_by_label("imu_valid").data.append(float(frame.imu_valid))
             self._series_by_label("sync_l").data.append(1.0 if frame.sync_l else 0.0)
