@@ -131,9 +131,21 @@ void task_odrive(void *argument)
 
             }
 
+            if (!odrive_can_dma_is_vbus_fresh_for_drive(drive_idx, APP_ODRIVE_VBUS_STALE_MS)) {
+                if (cfg != 0) {
+                    (void)odrive_can_dma_request_vbus_on_bus(cfg->odrive_can, cfg->odrive_node_id);
+                }
+            }
+
 
 
             odrive_drive_from_snapshot(cfg, &snap, &sample.drive[drive_idx]);
+            {
+                ODriveCanDmaVbusSnapshot vbus = {0};
+                (void)odrive_can_dma_get_vbus_snapshot_for_drive(drive_idx, &vbus);
+                sample.drive[drive_idx].vbus_v = vbus.vbus_v;
+                sample.drive[drive_idx].vbus_valid = vbus.valid;
+            }
 
 
 

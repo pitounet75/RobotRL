@@ -25,12 +25,13 @@ extern "C" {
 #endif
 
 #ifndef TELEMETRY_MAX_FIELDS
-/** Schema field slots per message (GetControlParams snapshot has 53 fields at v7). */
-#define TELEMETRY_MAX_FIELDS 80u
+/** Schema field slots per message (GetControlParams: version + strategy_id + packed floats, snapshot v19). */
+#define TELEMETRY_MAX_FIELDS 96u
 #endif
 
 #ifndef TELEMETRY_MAX_FIELD_NAME_LEN
-#define TELEMETRY_MAX_FIELD_NAME_LEN 32u
+/** Must fit the longest SET key (motor_torque_correction_gate_vel_max_turns_s = 44). */
+#define TELEMETRY_MAX_FIELD_NAME_LEN 48u
 #endif
 
 #ifndef TELEMETRY_MAX_DESC_PAYLOAD

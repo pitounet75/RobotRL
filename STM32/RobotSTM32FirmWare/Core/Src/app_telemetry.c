@@ -15,6 +15,7 @@
 #include "telemetry_balance_frame.h"
 #include "telemetry_ctrl_params.h"
 #include "usart.h"
+#include "wheel_contact.h"
 #include "wheel_encoder_abz.h"
 
 #include "FreeRTOS.h"
@@ -29,8 +30,8 @@ extern volatile float g_ctrl_pitch_rad;
 extern volatile float g_ctrl_pitch_rate;
 extern volatile float g_ctrl_vel_wheel;
 extern volatile float g_ctrl_cmd_torque_nm;
-extern volatile float g_ctrl_u_ff;
-extern volatile float g_ctrl_u_fb;
+extern volatile float g_ctrl_u_meca;
+extern volatile float g_ctrl_u_err;
 extern volatile control_strategy_id_t g_ctrl_strategy;
 
 #define APP_TELEMETRY_TX_QUEUE_DEPTH 16u
@@ -344,13 +345,19 @@ bool app_telemetry_init(void)
         {"cmd_torque_nm", TELEMETRY_TYPE_FLOAT},
         {"cmd_torque_left_nm", TELEMETRY_TYPE_FLOAT},
         {"cmd_torque_right_nm", TELEMETRY_TYPE_FLOAT},
-        {"u_ff_nm", TELEMETRY_TYPE_FLOAT},
-        {"u_fb_nm", TELEMETRY_TYPE_FLOAT},
+        {"u_meca_nm", TELEMETRY_TYPE_FLOAT},
+        {"u_err_nm", TELEMETRY_TYPE_FLOAT},
         {"pitch_ref_rad", TELEMETRY_TYPE_FLOAT},
         {"imu_valid", TELEMETRY_TYPE_UINT32},
         {"estop", TELEMETRY_TYPE_UINT32},
         {"strategy_id", TELEMETRY_TYPE_UINT32},
         {"source_drop_count_mod256", TELEMETRY_TYPE_UINT32},
+        {"vbus_l_v", TELEMETRY_TYPE_FLOAT},
+        {"vbus_r_v", TELEMETRY_TYPE_FLOAT},
+        {"wc_mode", TELEMETRY_TYPE_UINT32},
+        {"sync_l", TELEMETRY_TYPE_UINT32},
+        {"sync_r", TELEMETRY_TYPE_UINT32},
+        {"wc_reserved", TELEMETRY_TYPE_UINT32},
     };
 
     static const telemetry_message_def_t balance_def = {
@@ -366,7 +373,9 @@ bool app_telemetry_init(void)
     }
 
     /* Runtime gain RPC — failure must not block BalanceFrame streaming. */
-    (void)app_telemetry_ctrl_register(&s_telemetry);
+    if (!app_telemetry_ctrl_register(&s_telemetry)) {
+        telemetry_set_error(&s_telemetry, "GetControlParams register failed");
+    }
 
     /* Keep FIFO off — CubeMX disables it; re-enabling breaks UART4 DMA TX completion. */
     (void)HAL_UARTEx_DisableFifoMode(&huart4);
@@ -570,14 +579,34 @@ void app_telemetry_publish_balance_frame(void)
     s_balance_frame.cmd_torque_nm = g_ctrl_cmd_torque_nm;
     s_balance_frame.cmd_torque_left_nm = torque_left;
     s_balance_frame.cmd_torque_right_nm = torque_right;
-    s_balance_frame.u_ff_nm = g_ctrl_u_ff;
-    s_balance_frame.u_fb_nm = g_ctrl_u_fb;
+    s_balance_frame.u_meca_nm = g_ctrl_u_meca;
+    s_balance_frame.u_err_nm = g_ctrl_u_err;
     s_balance_frame.pitch_ref_rad = app_ctrl_params_snapshot()->pitch_ref_rad;
     s_balance_frame.imu_valid = imu_ok ? 1u : 0u;
     s_balance_frame.estop = estop ? 1u : 0u;
     s_balance_frame.strategy_id = (uint8_t)g_ctrl_strategy;
     s_balance_frame.source_drop_count_mod256 =
         (uint8_t)(g_telemetry_balance_frames_send_failed & 0xFFu);
+    {
+        app_odrive_sample_t od;
+        s_balance_frame.vbus_l_v = 0.0f;
+        s_balance_frame.vbus_r_v = 0.0f;
+        if (app_samples_odrive_read(&od)) {
+            if (od.drive[0].vbus_valid) {
+                s_balance_frame.vbus_l_v = od.drive[0].vbus_v;
+            }
+            if (od.drive[1].vbus_valid) {
+                s_balance_frame.vbus_r_v = od.drive[1].vbus_v;
+            }
+        }
+    }
+    {
+        const wheel_contact_output_t *wc = wheel_contact_last_output();
+        s_balance_frame.wc_mode = (uint8_t)wc->mode;
+        s_balance_frame.sync_l = wc->lift_l ? 1u : 0u;
+        s_balance_frame.sync_r = wc->lift_r ? 1u : 0u;
+        s_balance_frame.wc_reserved = 0u;
+    }
 
     if (telemetry_send(&s_telemetry, TELEM_MSG_BALANCE_FRAME) != 0) {
         g_telemetry_balance_frames_send_failed++;

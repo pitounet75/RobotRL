@@ -2,9 +2,9 @@
 
 ## Firmware
 
-- `task_telemetry` pushes **BalanceFrame** (type `0x0100`) @ **100 Hz** on **UART4**.
+- `task_telemetry` pushes **BalanceFrame** (type `0x0100`) @ **500 Hz** on **UART4**.
 - Always streaming (even if no PC connected).
-- Fields: pitch, pitch_rate, wheel velocities, cmd/u_ff/u_fb torque, estop, strategy.
+- Fields: pitch, pitch_rate, wheel velocities, cmd/`u_meca`/`u_err` torque, estop, strategy.
 
 ## Quick test
 

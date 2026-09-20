@@ -2,6 +2,8 @@ import unittest
 
 from telemetry.balance_frame import (
     BALANCE_FRAME_STRUCT_V2,
+    BALANCE_FRAME_STRUCT_V3,
+    BALANCE_FRAME_STRUCT_V4,
     BalanceFrame,
     BalanceFrameSanityLimits,
 )
@@ -19,8 +21,8 @@ def make_frame(**overrides: object) -> BalanceFrame:
         "cmd_torque_nm": 0.1,
         "cmd_torque_left_nm": 0.1,
         "cmd_torque_right_nm": 0.1,
-        "u_ff_nm": 0.0,
-        "u_fb_nm": 0.1,
+        "u_meca_nm": 0.0,
+        "u_err_nm": 0.1,
         "pitch_ref_rad": 0.0,
         "imu_valid": 1,
         "estop": 0,
@@ -43,6 +45,47 @@ class BalanceFrameSanityTests(unittest.TestCase):
         )
         frame = BalanceFrame.decode(payload)
         self.assertEqual(frame.source_drop_count_mod256, 37)
+        self.assertEqual(frame.vbus_l_v, 0.0)
+
+    def test_v3_decodes_vbus(self) -> None:
+        payload = BALANCE_FRAME_STRUCT_V3.pack(
+            10,
+            20,
+            *([0.0] * 11),
+            1,
+            0,
+            2,
+            37,
+            23.5,
+            24.1,
+        )
+        frame = BalanceFrame.decode(payload)
+        self.assertAlmostEqual(frame.vbus_l_v, 23.5, places=5)
+        self.assertAlmostEqual(frame.vbus_r_v, 24.1, places=5)
+        self.assertEqual(frame.sync_l, 0)
+        self.assertEqual(frame.sync_r, 0)
+
+    def test_v4_decodes_sync_flags(self) -> None:
+        payload = BALANCE_FRAME_STRUCT_V4.pack(
+            10,
+            20,
+            *([0.0] * 11),
+            1,
+            0,
+            2,
+            37,
+            23.5,
+            24.1,
+            1,
+            1,
+            0,
+            0,
+        )
+        frame = BalanceFrame.decode(payload)
+        self.assertEqual(frame.wc_mode, 1)
+        self.assertEqual(frame.sync_l, 1)
+        self.assertEqual(frame.sync_r, 0)
+        self.assertAlmostEqual(frame.vbus_l_v, 23.5, places=5)
 
     def test_physical_limit_reason_is_diagnosable(self) -> None:
         frame = make_frame(cmd_torque_left_nm=3.0)
@@ -77,7 +120,7 @@ class BalanceFrameSanityTests(unittest.TestCase):
         # Float fields are packed as float32 on the wire, so a double like 0.1
         # loses precision on the round trip (0.1 -> 0.10000000149011612) --
         # compare floats with assertAlmostEqual, not full dataclass equality.
-        frame = make_frame(frame_number=42, time_us=123456, source_drop_count_mod256=7)
+        frame = make_frame(frame_number=42, time_us=123456, source_drop_count_mod256=7, sync_l=1, wc_mode=1)
 
         decoded = BalanceFrame.decode(frame.encode())
 
@@ -87,6 +130,11 @@ class BalanceFrameSanityTests(unittest.TestCase):
         self.assertEqual(decoded.estop, frame.estop)
         self.assertEqual(decoded.strategy_id, frame.strategy_id)
         self.assertEqual(decoded.source_drop_count_mod256, frame.source_drop_count_mod256)
+        self.assertAlmostEqual(decoded.vbus_l_v, frame.vbus_l_v, places=6)
+        self.assertAlmostEqual(decoded.vbus_r_v, frame.vbus_r_v, places=6)
+        self.assertEqual(decoded.wc_mode, frame.wc_mode)
+        self.assertEqual(decoded.sync_l, frame.sync_l)
+        self.assertEqual(decoded.sync_r, frame.sync_r)
         for field in (
             "pitch_rad",
             "pitch_rate_rads",
@@ -96,9 +144,11 @@ class BalanceFrameSanityTests(unittest.TestCase):
             "cmd_torque_nm",
             "cmd_torque_left_nm",
             "cmd_torque_right_nm",
-            "u_ff_nm",
-            "u_fb_nm",
+            "u_meca_nm",
+            "u_err_nm",
             "pitch_ref_rad",
+            "vbus_l_v",
+            "vbus_r_v",
         ):
             self.assertAlmostEqual(getattr(decoded, field), getattr(frame, field), places=6)
 

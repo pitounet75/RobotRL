@@ -9,7 +9,7 @@ Framed binary protocol over UART. Works with the [ESP32Telemetry](../../ESP32Tel
 
 ### BalanceFrame (type 0x0100)
 
-Unsolicited @ **500 Hz** from STM32 `task_telemetry` (`APP_TELEMETRY_PERIOD_MS=2`). Payload 56 B — see [telemetry_balance_frame.h](telemetry_balance_frame.h). Streaming starts after ESP32 sends `READY\n`; a 5 s timeout starts it anyway so either MCU may boot first (see ESP32Telemetry README).
+Unsolicited @ **500 Hz** from STM32 `task_telemetry` (`APP_TELEMETRY_PERIOD_MS=2`). Payload **68 B** (V4: V3 + `wc_mode` / `sync_l` / `sync_r` / pad) — see [telemetry_balance_frame.h](telemetry_balance_frame.h). Streaming starts after ESP32 sends `READY\n`; a 5 s timeout starts it anyway so either MCU may boot first (see ESP32Telemetry README).
 `frame_number` advances only when a generated sample is accepted into the STM32 UART4 TX queue. Consequently, host-visible gaps mean loss after queue admission; source generation or queue-admission loss is measured by the firmware counters below without changing the wire payload.
 The former reserved payload byte carries the low 8 bits of
 `g_telemetry_balance_frames_send_failed`, exposed on the PC as
@@ -79,7 +79,33 @@ CRC-8 is used in v1.
 | 3 | `TelemetryFrame` | `streaming_interval_ms` **UInt32** | 40 B binary (`telemetry_frame_t`) |
 | 4 | `GetConfig` | empty | `telemetry_config_t` (skeleton) |
 | 5 | `SetEncoderSpeeds` | 2 × **float** LE | empty (ack) |
-| ≥0x0100 | user key | per registration | per registration |
+| 0x0101 | `GetControlParams` | empty | packed snapshot (see below) |
+| 0x0102 | `SetControlParam` | `param_id u16` + `value f32` (6 B) | echo ack, same layout |
+| ≥0x0100 | other user keys | per registration | per registration |
+
+### GetControlParams snapshot (type 0x0101)
+
+Packed little-endian payload, **not** the UART frame `version` byte (that one is protocol v1):
+
+```
+[snapshot_version u32][strategy_id u32][float][float]…
+```
+
+`snapshot_version` is `APP_CTRL_PARAMS_SNAPSHOT_VERSION` (`app_ctrl_params.h`,
+currently **19**). Same number lives on the PC as `SNAPSHOT_VERSION` in
+`TelemetryServer/telemetry/ctrl_params.py`. Floats follow `app_ctrl_param_id_t`
+order starting at `pitch_ref_rad` (id 1). New fields are **appended**; bump
+both constants in the same change.
+
+| Situation | GET | SET |
+|---|---|---|
+| Firmware older than PC | PC pads missing floats with `0` — UI shows phantom fields | Unknown `param_id` → `INVALID_PAYLOAD` |
+| Firmware newer than PC | PC reads only its struct size; extra floats ignored | PC cannot name new ids |
+| Versions equal | Full snapshot | SET by id, no version in the request |
+
+There is no schema handshake. The UI `Loaded snapshot version=N` is just that
+`u32` from the robot. `TELEMETRY_CTRL_PARAMS_VERSION` (still `9` in
+`telemetry_ctrl_params.h`) is unused — do not treat it as the snapshot version.
 
 Catalog string (`GetDictionary`):
 

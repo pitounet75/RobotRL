@@ -2,8 +2,10 @@
  * @file telemetry_ctrl_params.h
  * @brief Runtime control-parameter RPC over telemetry (host <-> STM32).
  *
- * TELEM_MSG_GET_CONTROL_PARAMS (0x0101): empty request -> packed snapshot.
- * TELEM_MSG_SET_CONTROL_PARAM   (0x0102): param_id u16 + value f32 -> echo ack.
+ * TELEM_MSG_GET_CONTROL_PARAMS (0x0101): empty request -> packed snapshot
+ *   [APP_CTRL_PARAMS_SNAPSHOT_VERSION u32][strategy_id u32][floats in enum order].
+ * TELEM_MSG_SET_CONTROL_PARAM   (0x0102): param_id u16 + value f32 -> echo ack
+ *   (no snapshot version in the request).
  */
 #ifndef TELEMETRY_CTRL_PARAMS_H
 #define TELEMETRY_CTRL_PARAMS_H
@@ -19,6 +21,8 @@ extern "C" {
 #define TELEMETRY_KEY_GET_CONTROL_PARAMS "GetControlParams"
 #define TELEMETRY_KEY_SET_CONTROL_PARAM  "SetControlParam"
 
+/* Unused leftover. Snapshot version is APP_CTRL_PARAMS_SNAPSHOT_VERSION
+ * (GET payload u32) / SNAPSHOT_VERSION on the PC — not this define. */
 #define TELEMETRY_CTRL_PARAMS_VERSION    9u
 
 /** SET request / ack payload length. */

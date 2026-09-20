@@ -116,6 +116,12 @@ typedef struct {
 
 } ODriveCanDmaEncoderSnapshot;
 
+typedef struct {
+    float vbus_v;
+    uint32_t last_update_ms;
+    bool valid;
+} ODriveCanDmaVbusSnapshot;
+
 
 
 bool odrive_can_dma_init(ODriveCanHalHandle *hcan);
@@ -179,6 +185,10 @@ bool odrive_can_dma_get_encoder_snapshot_for_drive(uint32_t drive_idx, ODriveCan
 
 bool odrive_can_dma_is_encoder_fresh(uint32_t node_id, uint32_t max_age_ms);
 bool odrive_can_dma_is_encoder_fresh_for_drive(uint32_t drive_idx, uint32_t max_age_ms);
+
+bool odrive_can_dma_request_vbus_on_bus(ODriveCanHalHandle *hcan, uint32_t node_id);
+bool odrive_can_dma_get_vbus_snapshot_for_drive(uint32_t drive_idx, ODriveCanDmaVbusSnapshot *out);
+bool odrive_can_dma_is_vbus_fresh_for_drive(uint32_t drive_idx, uint32_t max_age_ms);
 
 
 

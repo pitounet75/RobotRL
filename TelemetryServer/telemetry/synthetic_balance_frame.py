@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import math
 
-from telemetry.balance_frame import BALANCE_FRAME_STRUCT_V2
+from telemetry.balance_frame import BALANCE_FRAME_STRUCT_V4
 
 
 def make_payload(frame_number: int, t: float) -> bytes:
     """A slowly oscillating, physically-plausible BalanceFrame payload at time t (s)."""
     pitch = 0.05 * math.sin(t)
-    return BALANCE_FRAME_STRUCT_V2.pack(
+    return BALANCE_FRAME_STRUCT_V4.pack(
         frame_number & 0xFFFFFFFF,
         int(t * 1_000_000) & 0xFFFFFFFF,
         pitch,
@@ -25,6 +25,12 @@ def make_payload(frame_number: int, t: float) -> bytes:
         0.01,
         0.0,
         1,
+        0,
+        0,
+        0,
+        24.0,
+        24.0,
+        0,
         0,
         0,
         0,

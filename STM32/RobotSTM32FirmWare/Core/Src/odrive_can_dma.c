@@ -61,6 +61,7 @@ static uint32_t s_default_node_id;
 
 
 static ODriveCanDmaEncoderSnapshot s_enc_snap[ODRIVE_CAN_DMA_DRIVE_COUNT];
+static ODriveCanDmaVbusSnapshot s_vbus_snap[ODRIVE_CAN_DMA_DRIVE_COUNT];
 
 static SemaphoreHandle_t s_tx_mtx;
 
@@ -281,66 +282,50 @@ void odrive_can_dma_process_tx(ODriveCanHalHandle *hcan)
 
 
 static void odrive_can_dma_on_rx_frame_for_index(int idx, uint32_t std_id, const uint8_t *data, uint8_t dlc)
-
 {
-
-    if (data == NULL || dlc < 8u) {
-
+    if (data == NULL || idx < 0) {
         return;
-
     }
 
+    const uint8_t cmd = odrive_can_cmd_from_id(std_id);
+    if (cmd == (uint8_t)(ODRIVE_MSG_GET_ENCODER_ESTIMATES & 0x1Fu) && dlc >= 8u) {
+        float pos;
+        float vel;
+        memcpy(&pos, data, sizeof(pos));
+        memcpy(&vel, data + 4, sizeof(vel));
 
-    if (idx < 0) {
+        ODriveCanDmaEncoderSnapshot snap;
+        snap.encoder_pos_turns = pos;
+        snap.encoder_vel_turns_s = vel;
+        snap.encoder_pos_counts = (int32_t)(pos * (float)APP_ODRIVE_ENCODER_CPR);
+        snap.last_update_ms = s_hal_ticks_ms();
+        snap.valid = true;
 
+        uint32_t prim = __get_PRIMASK();
+        __disable_irq();
+        s_enc_snap[idx] = snap;
+        if (!prim) {
+            __enable_irq();
+        }
         return;
-
     }
 
-    if (odrive_can_cmd_from_id(std_id) != (uint8_t)(ODRIVE_MSG_GET_ENCODER_ESTIMATES & 0x1Fu)) {
+    if (cmd == (uint8_t)(ODRIVE_MSG_GET_VBUS_VOLTAGE & 0x1Fu) && dlc >= 4u) {
+        float vbus = 0.0f;
+        memcpy(&vbus, data, sizeof(vbus));
 
-        return;
+        ODriveCanDmaVbusSnapshot snap;
+        snap.vbus_v = vbus;
+        snap.last_update_ms = s_hal_ticks_ms();
+        snap.valid = true;
 
+        uint32_t prim = __get_PRIMASK();
+        __disable_irq();
+        s_vbus_snap[idx] = snap;
+        if (!prim) {
+            __enable_irq();
+        }
     }
-
-
-
-    float pos;
-
-    float vel;
-
-    memcpy(&pos, data, sizeof(pos));
-
-    memcpy(&vel, data + 4, sizeof(vel));
-
-
-
-    ODriveCanDmaEncoderSnapshot snap;
-
-    snap.encoder_pos_turns = pos;
-
-    snap.encoder_vel_turns_s = vel;
-
-    snap.encoder_pos_counts = (int32_t)(pos * (float)APP_ODRIVE_ENCODER_CPR);
-
-    snap.last_update_ms = s_hal_ticks_ms();
-
-    snap.valid = true;
-
-
-
-    uint32_t prim = __get_PRIMASK();
-
-    __disable_irq();
-
-    s_enc_snap[idx] = snap;
-
-    if (!prim) {
-
-        __enable_irq();
-
-    }
-
 }
 
 void odrive_can_dma_on_rx_frame(uint32_t std_id, const uint8_t *data, uint8_t dlc)
@@ -669,6 +654,37 @@ bool odrive_can_dma_is_encoder_fresh_for_drive(uint32_t drive_idx, uint32_t max_
 }
 
 
+
+bool odrive_can_dma_request_vbus_on_bus(ODriveCanHalHandle *hcan, uint32_t node_id)
+{
+    return enqueue_std_on_bus(bus_from_handle(hcan), odrive_can_std_id(node_id, ODRIVE_MSG_GET_VBUS_VOLTAGE),
+                              true, NULL, 8);
+}
+
+bool odrive_can_dma_get_vbus_snapshot_for_drive(uint32_t drive_idx, ODriveCanDmaVbusSnapshot *out)
+{
+    if (out == NULL || drive_idx >= ODRIVE_CAN_DMA_DRIVE_COUNT) {
+        return false;
+    }
+
+    uint32_t prim = __get_PRIMASK();
+    __disable_irq();
+    *out = s_vbus_snap[drive_idx];
+    if (!prim) {
+        __enable_irq();
+    }
+    return out->valid;
+}
+
+bool odrive_can_dma_is_vbus_fresh_for_drive(uint32_t drive_idx, uint32_t max_age_ms)
+{
+    ODriveCanDmaVbusSnapshot snap;
+    if (!odrive_can_dma_get_vbus_snapshot_for_drive(drive_idx, &snap)) {
+        return false;
+    }
+    const uint32_t now = s_hal_ticks_ms();
+    return (now - snap.last_update_ms) <= max_age_ms;
+}
 
 void odrive_can_dma_get_last_controller_modes_written(ODriveControlMode *out_cm, ODriveInputMode *out_im)
 
