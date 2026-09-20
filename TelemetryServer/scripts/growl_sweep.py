@@ -138,6 +138,8 @@ def main() -> int:
     p.add_argument("values", nargs="+", type=float, help="Values to try, in order")
     p.add_argument("--seconds", type=float, default=3.0, help="Capture per value")
     p.add_argument("--settle-s", type=float, default=1.0, help="Discarded after each SET")
+    p.add_argument("--repeat", type=int, default=1,
+                   help="Passes over the value list, interleaved (A B A B), then median")
     p.add_argument("--csv", type=Path, default=Path("logs") / "growl_sweep.csv")
     args = p.parse_args()
 
@@ -158,16 +160,20 @@ def main() -> int:
             return 2
         original = float(params[args.param])
         print(f"{args.param}: valeur actuelle {original:g}")
-        print(f"{'valeur':>10} {'trames':>7} {'fs':>7} {'pic':>8} "
+        print(f"{'passe':>6} {'valeur':>10} {'trames':>7} {'fs':>7} {'pic':>8} "
               f"{'ampl vel_l':>11} {'ampl couple':>12} {'accel':>10} "
               f"{'pitch rms':>10} {'vel <5Hz':>9}")
 
-        for value in args.values:
+        # Interleaved: every pass walks the whole list, so a slow drift (the
+        # battery sagging) hits every value alike instead of only the last.
+        for rep in range(max(1, args.repeat)):
+          for value in args.values:
             client.set_param(args.param, value)
             time.sleep(args.settle_s)
             rows = capture(client, args.seconds)
             if len(rows) < 500:
-                print(f"{value:>10g} {len(rows):>7}  trop peu de trames, robot arrete ?")
+                print(f"{rep + 1:>6} {value:>10g} {len(rows):>7}"
+                      f"  trop peu de trames, robot arrete ?")
                 continue
 
             fs = sample_rate(rows)
@@ -185,11 +191,11 @@ def main() -> int:
             # error; vel below 5 Hz is how much the robot actually wanders.
             pitch_rms = float(np.sqrt(np.mean((pitch - pitch_ref) ** 2)))
             vel_slow = low_freq_rms(vel_l, fs)
-            print(f"{value:>10g} {len(rows):>7} {fs:>7.1f} {f_vel:>7.1f}Hz "
+            print(f"{rep + 1:>6} {value:>10g} {len(rows):>7} {fs:>7.1f} {f_vel:>7.1f}Hz "
                   f"{a_vel:>11.3f} {a_tau:>12.4f} {accel:>7.0f}t/s2 "
                   f"{pitch_rms:>10.4f} {vel_slow:>9.3f}")
-            results.append((args.param, value, len(rows), fs, f_vel, a_vel, a_tau,
-                            accel, pitch_rms, vel_slow))
+            results.append((args.param, rep + 1, value, len(rows), fs, f_vel, a_vel,
+                            a_tau, accel, pitch_rms, vel_slow))
     except KeyboardInterrupt:
         print("\ninterrompu")
     finally:
@@ -199,25 +205,49 @@ def main() -> int:
                 print(f"{args.param} remis a {original:g}")
             except Exception as exc:  # noqa: BLE001 - must report, never mask
                 print(f"ATTENTION: restauration de {args.param} echouee: {exc}")
+                print("  Le robot tourne peut-etre encore avec la derniere valeur"
+                      " essayee. Les parametres ne sont PAS en memoire non volatile:"
+                      f" coupe et rallume le robot pour revenir a {original:g}.")
         client.close()
 
     if results:
         args.csv.parent.mkdir(exist_ok=True)
         with args.csv.open("w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
-            w.writerow(["param", "value", "frames", "fs_hz", "peak_hz",
+            w.writerow(["param", "pass", "value", "frames", "fs_hz", "peak_hz",
                         "amp_vel_l_turns_s", "amp_tau_l_nm", "accel_turns_s2",
                         "pitch_rms_rad", "vel_below_5hz_rms"])
             w.writerows(results)
         print(f"-> {args.csv}")
 
-        peaks = [r[4] for r in results]
-        amps = [r[5] for r in results]
-        if len(peaks) > 1:
-            print(f"\npic: {min(peaks):.1f}..{max(peaks):.1f} Hz | "
-                  f"amplitude: {min(amps):.3f}..{max(amps):.3f} turn/s")
-            print("Pic fixe et amplitude stable -> mecanique. "
-                  "Pic qui bouge ou amplitude qui s'effondre -> boucle de commande.")
+        print()
+        print(f"{'valeur':>10} {'n':>3} {'pic med':>9} {'ampl med':>9} "
+              f"{'etendue':>9} {'vel<5Hz med':>12}")
+        for value in args.values:
+            got = [r for r in results if r[2] == value]
+            if not got:
+                continue
+            amps = sorted(r[6] for r in got)
+            peaks = [r[5] for r in got]
+            slows = [r[10] for r in got]
+            print(f"{value:>10g} {len(got):>3} {float(np.median(peaks)):>8.1f}Hz "
+                  f"{float(np.median(amps)):>9.3f} {amps[-1] - amps[0]:>9.3f} "
+                  f"{float(np.median(slows)):>12.3f}")
+
+        per_value = [len([r for r in results if r[2] == v]) for v in args.values]
+        if max(per_value) < 2:
+            # One pass ranks values that a second pass may reorder: the scatter
+            # between runs measured the same size as the effect, and the
+            # battery sags during a sweep, which penalises whatever is tested
+            # last. Interleaving cancels the drift; repeats expose the scatter.
+            print("Une seule passe: la dispersion entre essais vaut autant que l'effet,"
+                  " et la batterie faiblit pendant le balayage, ce qui penalise les"
+                  " dernieres valeurs. Relancer avec --repeat 3.")
+        else:
+            print("Comparer l'ecart entre medianes a l'etendue de chaque valeur:"
+                  " un ecart plus petit que l'etendue ne prouve rien.")
+        print("Pic qui bouge ou amplitude qui s'effondre -> boucle de commande."
+              " Pic fixe et amplitude stable -> mecanique.")
     return 0
 
 
