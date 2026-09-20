@@ -118,6 +118,8 @@ static void load_defaults(void)
     s_params.antipat_tau_ema = APP_ANTIPAT_TAU_EMA;
     s_params.antipat_u_fade_ms = (float)APP_ANTIPAT_U_FADE_MS;
     s_params.antipat_sync_kd = APP_ANTIPAT_SYNC_KD;
+    s_params.cascade_vel_dot_src = (float)APP_CTRL_CASCADE_VEL_DOT_SRC;
+    s_params.cascade_vel_dot_lpf = APP_CTRL_CASCADE_VEL_DOT_LPF;
     s_pos_reset_req = false;
     s_heading_reset_req = false;
 }
@@ -425,6 +427,12 @@ bool app_ctrl_params_get_value(uint16_t param_id, float *out_value)
         return true;
     case APP_CTRL_PARAM_ANTIPAT_SYNC_KD:
         *out_value = s_params.antipat_sync_kd;
+        return true;
+    case APP_CTRL_PARAM_CASCADE_VEL_DOT_SRC:
+        *out_value = s_params.cascade_vel_dot_src;
+        return true;
+    case APP_CTRL_PARAM_CASCADE_VEL_DOT_LPF:
+        *out_value = s_params.cascade_vel_dot_lpf;
         return true;
     default:
         return false;
@@ -879,6 +887,18 @@ bool app_ctrl_params_set(uint16_t param_id, float value, float *out_value)
         }
         s_params.antipat_sync_kd = value;
         break;
+    case APP_CTRL_PARAM_CASCADE_VEL_DOT_SRC:
+        if (value < 0.0f || value > 1.0f) {
+            return false;
+        }
+        s_params.cascade_vel_dot_src = (value >= 0.5f) ? 1.0f : 0.0f;
+        break;
+    case APP_CTRL_PARAM_CASCADE_VEL_DOT_LPF:
+        if (value < 0.0f || value >= 1.0f) {
+            return false;
+        }
+        s_params.cascade_vel_dot_lpf = value;
+        break;
     default:
         return false;
     }
@@ -979,6 +999,8 @@ const char *app_ctrl_params_name(uint16_t param_id)
         [APP_CTRL_PARAM_ANTIPAT_TAU_EMA] = "antipat_tau_ema",
         [APP_CTRL_PARAM_ANTIPAT_U_FADE_MS] = "antipat_u_fade_ms",
         [APP_CTRL_PARAM_ANTIPAT_SYNC_KD] = "antipat_sync_kd",
+        [APP_CTRL_PARAM_CASCADE_VEL_DOT_SRC] = "cascade_vel_dot_src",
+        [APP_CTRL_PARAM_CASCADE_VEL_DOT_LPF] = "cascade_vel_dot_lpf",
     };
 
     if (param_id >= (uint16_t)APP_CTRL_PARAM_COUNT) {

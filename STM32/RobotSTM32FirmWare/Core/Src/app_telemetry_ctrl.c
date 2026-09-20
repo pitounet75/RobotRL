@@ -153,6 +153,8 @@ bool app_telemetry_ctrl_register(telemetry_t *tel)
         {"antipat_tau_ema", TELEMETRY_TYPE_FLOAT},
         {"antipat_u_fade_ms", TELEMETRY_TYPE_FLOAT},
         {"antipat_sync_kd", TELEMETRY_TYPE_FLOAT},
+        {"cascade_vel_dot_src", TELEMETRY_TYPE_FLOAT},
+        {"cascade_vel_dot_lpf", TELEMETRY_TYPE_FLOAT},
     };
     _Static_assert(
         (sizeof(get_response_fields) / sizeof(get_response_fields[0])) <= TELEMETRY_MAX_FIELDS,

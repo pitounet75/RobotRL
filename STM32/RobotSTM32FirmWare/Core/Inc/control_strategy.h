@@ -46,6 +46,12 @@ typedef struct {
     float acc_wheel_l_turns_s2;
     float acc_wheel_r_turns_s2;
     bool wheel_lr_valid;
+    /** Wheel acceleration matching vel_wheel_turns_s: same wheel
+     *  selection (grounded wheel in SYNC, else the mean), from the
+     *  order-2 fit. Lets the cascade D term use a 10 ms estimate
+     *  instead of differentiating the EMA at ~17 ms. */
+    float acc_wheel_turns_s2;
+    bool acc_wheel_valid;
 } control_strategy_input_t;
 
 typedef struct {

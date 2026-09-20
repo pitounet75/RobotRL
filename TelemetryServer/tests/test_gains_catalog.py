@@ -37,8 +37,8 @@ class GainsCatalogTests(unittest.TestCase):
         visible = set(PARAM_NAMES) - HIDDEN_FROM_GAINS
         self.assertEqual(listed, visible)
 
-    def test_snapshot_v19_new_names(self) -> None:
-        self.assertEqual(SNAPSHOT_VERSION, 19)
+    def test_snapshot_v20_new_names(self) -> None:
+        self.assertEqual(SNAPSHOT_VERSION, 20)
         heading = next(p for p in PANELS if p["title"] == "Heading")
         antipat = next(p for p in PANELS if p["title"] == "Antipatinage")
         self.assertIn("heading_d_ema", heading["fields"])
@@ -47,6 +47,9 @@ class GainsCatalogTests(unittest.TestCase):
         self.assertIn("antipat_u_fade_ms", antipat["fields"])
         self.assertIn("antipat_sync_kd", panel_field_names(antipat))
         self.assertIn("antipat_both_enable", panel_field_names(antipat))
+        cascade = next(p for p in PANELS if "cascade_vel_kd" in panel_field_names(p))
+        self.assertIn("cascade_vel_dot_lpf", panel_field_names(cascade))
+        self.assertIn("cascade_vel_dot_src", panel_field_names(cascade))
         section_titles = [s["title"] for s in antipat.get("sections") or ()]
         self.assertEqual(section_titles, ["Sync", "Both"])
         sync = next(s for s in antipat["sections"] if s["title"] == "Sync")
@@ -65,8 +68,8 @@ class GainsCatalogTests(unittest.TestCase):
         self.assertEqual(PARAM_NAMES["antipat_tau_ema"], 77)
         self.assertEqual(PARAM_NAMES["antipat_u_fade_ms"], 78)
         self.assertEqual(PARAM_NAMES["antipat_sync_kd"], 79)
-        self.assertEqual(SNAPSHOT_STRUCT.size, 8 + 79 * 4)
-        self.assertEqual(len(ControlParamsSnapshot.__dataclass_fields__), 81)
+        self.assertEqual(SNAPSHOT_STRUCT.size, 8 + 81 * 4)
+        self.assertEqual(len(ControlParamsSnapshot.__dataclass_fields__), 83)
 
     def test_decode_snapshot_matches_dataclass(self) -> None:
         from telemetry.ctrl_params import decode_snapshot

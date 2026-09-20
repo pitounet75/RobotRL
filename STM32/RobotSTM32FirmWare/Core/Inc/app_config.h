@@ -459,6 +459,21 @@
 #ifndef APP_ANTIPAT_SYNC_K
 #define APP_ANTIPAT_SYNC_K                   0.0025f /* Nm/(turn/s) */
 #endif
+/**
+ * Cascade D term source: 0 = EMA chain, 1 = order-2 wheel fit (vel_fit.h).
+ * Defaults to 0, the behaviour measured so far. The fit path exists to test
+ * whether the ~40 Hz growl is the D term pumping through its own 17 ms of
+ * estimation lag (245 deg at 40 Hz, against 144 deg for the fit).
+ */
+/** EMA on the cascade D term (was a constant in ctrl_velocity.c). */
+#ifndef APP_CTRL_CASCADE_VEL_DOT_LPF
+#define APP_CTRL_CASCADE_VEL_DOT_LPF     0.85f
+#endif
+
+#ifndef APP_CTRL_CASCADE_VEL_DOT_SRC
+#define APP_CTRL_CASCADE_VEL_DOT_SRC     0u
+#endif
+
 #ifndef APP_ANTIPAT_SYNC_KD
 #define APP_ANTIPAT_SYNC_KD                  0.0f /* Nm/(turn/s^2); D on e = ω_sol−ω_air */
 #endif

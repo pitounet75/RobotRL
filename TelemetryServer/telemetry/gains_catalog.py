@@ -128,6 +128,19 @@ TOOLTIPS: Dict[str, str] = {
         "dérivée de l’erreur. Freine les oscillations de la cascade quand la "
         "vitesse change vite."
     ),
+    "cascade_vel_dot_src": (
+        "Source du v̇ utilisé par le gain D : 0 = chaîne EMA (dérivée de la "
+        "vitesse filtrée, ~17 ms de retard), 1 = ajustement d’ordre 2 des "
+        "encodeurs (~10 ms). Mesuré : à 40 Hz la chaîne EMA ne laisse passer "
+        "que 0,15 de la dérivée idéale, l’ajustement 0,57. Plus fidèle veut "
+        "donc dire plus de grognement. À 1, surveiller le pic 15-45 Hz."
+    ),
+    "cascade_vel_dot_lpf": (
+        "EMA appliquée au terme D après dérivation (était figée à 0,85). "
+        "C’est le réglage du grognement : 0,85 laisse passer au pire 0,55 de "
+        "la dérivée idéale entre 15 et 45 Hz, 0,94 seulement 0,27 — au prix de "
+        "13° de phase en plus à 2 Hz. Refusé hors de [0, 1)."
+    ),
     "cascade_vel_err_ema_alpha": (
         "Mémoire de l’intégrateur sur l’erreur de vitesse : e_f = α·e_f + "
         "(1−α)·e. Plus proche de 1 = l’erreur passée compte plus longtemps. "
@@ -396,6 +409,8 @@ PANELS: Sequence[PanelSpec] = (
         "fields": (
             "cascade_vel_kp",
             "cascade_vel_kd",
+            "cascade_vel_dot_lpf",
+            "cascade_vel_dot_src",
             "cascade_vel_err_ema_alpha",
             "cascade_vel_ema_kp",
             "cascade_vel_accel_kp",

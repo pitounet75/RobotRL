@@ -15,7 +15,7 @@ extern "C" {
 /* GET payload starts with this u32. Bump together with SNAPSHOT_VERSION
  * (TelemetryServer/telemetry/ctrl_params.py) when appending a packed float.
  * SET is param_id+f32 only — no version on the wire. */
-#define APP_CTRL_PARAMS_SNAPSHOT_VERSION 19u
+#define APP_CTRL_PARAMS_SNAPSHOT_VERSION 20u
 
 /** Outer loop: 0 = velocity (vel_ref), 1 = position (x → v_ref). Mutually exclusive. */
 #define APP_CTRL_OUTER_MODE_VEL 0u
@@ -102,6 +102,8 @@ typedef enum {
     APP_CTRL_PARAM_ANTIPAT_TAU_EMA,
     APP_CTRL_PARAM_ANTIPAT_U_FADE_MS,
     APP_CTRL_PARAM_ANTIPAT_SYNC_KD,
+    APP_CTRL_PARAM_CASCADE_VEL_DOT_SRC,
+    APP_CTRL_PARAM_CASCADE_VEL_DOT_LPF,
     APP_CTRL_PARAM_COUNT
 } app_ctrl_param_id_t;
 
@@ -188,6 +190,18 @@ typedef struct __attribute__((packed)) {
     float antipat_tau_ema;
     float antipat_u_fade_ms;
     float antipat_sync_kd;
+    /** Source of the cascade D term: 0 = the EMA chain (~17 ms lag),
+     *  1 = the order-2 wheel fit (~10 ms). At 40 Hz those are 245 deg
+     *  and 144 deg of phase: enough lag turns a damping term into one
+     *  that pumps, which is the growl. Runtime switch so the two can
+     *  be compared on the robot. */
+    float cascade_vel_dot_src;
+    /** EMA on the cascade D term, applied after differentiating.
+     *  Was hard-coded at 0.85. It sets how much 15-45 Hz reaches the
+     *  D path: 0.85 passes 0.55 of the ideal derivative at worst,
+     *  0.94 passes 0.27, for 13 more degrees of phase at 2 Hz. That is
+     *  the growl trade, and it belongs on a knob, not in a constant. */
+    float cascade_vel_dot_lpf;
 } app_ctrl_params_snapshot_t;
 
 _Static_assert(sizeof(app_ctrl_params_snapshot_t) ==

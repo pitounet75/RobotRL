@@ -16,7 +16,8 @@ static float s_vel_prev_turns;
 static float s_vel_dot_turns_s2;
 static bool s_vel_dot_valid;
 
-static const float k_vel_dot_lpf = 0.85f;
+/* Was a constant here; it is now p->cascade_vel_dot_lpf, because it sets how
+ * much 15-45 Hz reaches the D term and that is the growl knob. */
 
 volatile float g_ctrl_pos_v_ref_turns_s;
 volatile float g_ctrl_pos_pitch_trim_rad;
@@ -76,12 +77,25 @@ void ctrl_velocity_step(const control_strategy_input_t *in, float vel_ref_cmd,
 
     float vel_dot = 0.0f;
     if (integrator_trust && in->dt_s > 1.0e-6f) {
-        const float raw_dot = (in->vel_wheel_turns_s - s_vel_prev_turns) / in->dt_s;
-        if (s_vel_dot_valid) {
-            s_vel_dot_turns_s2 = k_vel_dot_lpf * s_vel_dot_turns_s2 + (1.0f - k_vel_dot_lpf) * raw_dot;
-        } else {
-            s_vel_dot_turns_s2 = raw_dot;
+        /* Two ways to get the same quantity, with very different spectra.
+         * Source 1 is the order-2 wheel fit: faithful up to ~40 Hz, 10 ms of
+         * lag. Source 0 differentiates the EMA'd velocity and filters again:
+         * sloppy, and that is the point -- it only passes 0.15 of the ideal
+         * derivative at 40 Hz, where being faithful means pumping the growl.
+         * Measured on the robot, the D term drives a ~40 Hz limit cycle, so
+         * the source and the filter below are both knobs, not constants. */
+        const float lpf = ctrl_clampf(p->cascade_vel_dot_lpf, 0.0f, 0.9999f);
+        if (p->cascade_vel_dot_src >= 0.5f && in->acc_wheel_valid) {
+            s_vel_dot_turns_s2 = in->acc_wheel_turns_s2;
             s_vel_dot_valid = true;
+        } else {
+            const float raw_dot = (in->vel_wheel_turns_s - s_vel_prev_turns) / in->dt_s;
+            if (s_vel_dot_valid) {
+                s_vel_dot_turns_s2 = lpf * s_vel_dot_turns_s2 + (1.0f - lpf) * raw_dot;
+            } else {
+                s_vel_dot_turns_s2 = raw_dot;
+                s_vel_dot_valid = true;
+            }
         }
         vel_dot = s_vel_dot_turns_s2;
         s_vel_prev_turns = in->vel_wheel_turns_s;

@@ -8,7 +8,7 @@ from typing import Dict, Iterable, Tuple
 
 # Must match APP_CTRL_PARAMS_SNAPSHOT_VERSION. GET pad/truncate on mismatch;
 # SET has no version — unknown ids fail on the flashed firmware.
-SNAPSHOT_VERSION = 19
+SNAPSHOT_VERSION = 20
 
 PARAM_NAMES: Dict[str, int] = {
     "strategy": 0,
@@ -91,6 +91,8 @@ PARAM_NAMES: Dict[str, int] = {
     "antipat_tau_ema": 77,
     "antipat_u_fade_ms": 78,
     "antipat_sync_kd": 79,
+    "cascade_vel_dot_src": 80,
+    "cascade_vel_dot_lpf": 81,
 }
 
 NAME_BY_ID = {v: k for k, v in PARAM_NAMES.items()}
@@ -98,7 +100,7 @@ NAME_BY_ID = {v: k for k, v in PARAM_NAMES.items()}
 SNAPSHOT_STRUCT = struct.Struct(
     "<"
     "II"  # version, strategy_id
-    + "f" * 79
+    + "f" * 81
 )
 
 SET_PARAM_STRUCT = struct.Struct("<Hf")
@@ -187,6 +189,10 @@ class ControlParamsSnapshot:
     antipat_tau_ema: float
     antipat_u_fade_ms: float
     antipat_sync_kd: float
+    # 0 = EMA chain, 1 = order-2 wheel fit. The EMA path is sloppy above
+    # 15 Hz, which is what keeps it from pumping the ~40 Hz growl.
+    cascade_vel_dot_src: float = 0.0
+    cascade_vel_dot_lpf: float = 0.85
 
     def as_dict(self) -> Dict[str, float | int]:
         return {
@@ -270,6 +276,8 @@ class ControlParamsSnapshot:
             "antipat_tau_ema": self.antipat_tau_ema,
             "antipat_u_fade_ms": self.antipat_u_fade_ms,
             "antipat_sync_kd": self.antipat_sync_kd,
+            "cascade_vel_dot_src": self.cascade_vel_dot_src,
+            "cascade_vel_dot_lpf": self.cascade_vel_dot_lpf,
         }
 
 

@@ -32,11 +32,14 @@ volatile float g_ctrl_u_meca;
 volatile float g_ctrl_u_err;
 volatile float g_ctrl_cmd_torque_nm;
 
-static bool wheel_odometry(float *vel_turns_s, float *pos_turns, bool *pos_valid)
+static bool wheel_odometry(float *vel_turns_s, float *pos_turns, bool *pos_valid,
+                           float *acc_turns_s2, bool *acc_valid)
 {
     *vel_turns_s = 0.0f;
     *pos_turns = 0.0f;
     *pos_valid = false;
+    *acc_turns_s2 = 0.0f;
+    *acc_valid = false;
 
     app_encoder_bank_sample_t bank;
     if (!app_samples_encoder_bank_read(&bank)) {
@@ -52,12 +55,16 @@ static bool wheel_odometry(float *vel_turns_s, float *pos_turns, bool *pos_valid
         *vel_turns_s = right->vel_turns_s;
         *pos_turns = right->pos_turns;
         *pos_valid = true;
+        *acc_turns_s2 = right->acc_fit_turns_s2;
+        *acc_valid = right->fit_valid;
         return true;
     }
     if (mode == WC_MODE_SYNC_R && left->valid) {
         *vel_turns_s = left->vel_turns_s;
         *pos_turns = left->pos_turns;
         *pos_valid = true;
+        *acc_turns_s2 = left->acc_fit_turns_s2;
+        *acc_valid = left->fit_valid;
         return true;
     }
 
@@ -65,18 +72,24 @@ static bool wheel_odometry(float *vel_turns_s, float *pos_turns, bool *pos_valid
         *vel_turns_s = 0.5f * (left->vel_turns_s + right->vel_turns_s);
         *pos_turns = 0.5f * (left->pos_turns + right->pos_turns);
         *pos_valid = true;
+        *acc_turns_s2 = 0.5f * (left->acc_fit_turns_s2 + right->acc_fit_turns_s2);
+        *acc_valid = left->fit_valid && right->fit_valid;
         return true;
     }
     if (left->valid) {
         *vel_turns_s = left->vel_turns_s;
         *pos_turns = left->pos_turns;
         *pos_valid = true;
+        *acc_turns_s2 = left->acc_fit_turns_s2;
+        *acc_valid = left->fit_valid;
         return true;
     }
     if (right->valid) {
         *vel_turns_s = right->vel_turns_s;
         *pos_turns = right->pos_turns;
         *pos_valid = true;
+        *acc_turns_s2 = right->acc_fit_turns_s2;
+        *acc_valid = right->fit_valid;
         return true;
     }
     return false;
@@ -198,7 +211,9 @@ void task_control(void *argument)
         float vel_wheel = 0.0f;
         float pos_wheel = 0.0f;
         bool pos_ok = false;
-        (void)wheel_odometry(&vel_wheel, &pos_wheel, &pos_ok);
+        float acc_wheel = 0.0f;
+        bool acc_ok = false;
+        (void)wheel_odometry(&vel_wheel, &pos_wheel, &pos_ok, &acc_wheel, &acc_ok);
         g_ctrl_vel_wheel = vel_wheel;
 
         float vel_m_l = 0.0f;
@@ -245,6 +260,8 @@ void task_control(void *argument)
             .acc_wheel_l_turns_s2 = acc_w_l,
             .acc_wheel_r_turns_s2 = acc_w_r,
             .wheel_lr_valid = wheel_lr_ok,
+            .acc_wheel_turns_s2 = acc_wheel,
+            .acc_wheel_valid = acc_ok,
         };
 
         control_strategy_output_t out = {0};
