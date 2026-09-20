@@ -9,8 +9,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-static int g_tests_run;
-static int g_tests_failed;
+/* Defined once in test_main.c: every test file must bump the SAME counters,
+ * or failures raised outside main's translation unit stay invisible. */
+extern int g_tests_run;
+extern int g_tests_failed;
 
 #define TEST_ASSERT(cond)                                                          \
     do {                                                                           \
@@ -31,12 +33,11 @@ static int g_tests_failed;
         }                                                                          \
     } while (0)
 
-#define TEST_RUN(name)                                                             \
+#define TEST_RUN(fn)                                                               \
     do {                                                                           \
-        const char *_name = (name);                                                \
         int _fail_before = g_tests_failed;                                         \
-        printf("TEST %s\n", _name);                                                 \
-        name(void);                                                                \
+        printf("TEST %s\n", #fn);                                                  \
+        fn();                                                                      \
         g_tests_run++;                                                             \
         if (g_tests_failed == _fail_before) {                                      \
             printf("  PASS\n");                                                    \

@@ -54,3 +54,6 @@ ODrive/**/*.png
 # Eclipse/CubeIDE per-machine indexer state (rewritten on every IDE open)
 **/.settings/language.settings.xml
 **/.settings/stm32cubeide.project.prefs
+
+# Host test binary
+STM32/tests/host/run_host_tests.exe
