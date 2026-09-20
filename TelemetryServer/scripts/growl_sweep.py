@@ -11,7 +11,7 @@ Usage (the robot must be balancing, on a safe surface, someone ready to catch):
 
   python scripts/growl_sweep.py --esp32-host 192.168.1.7 cascade_vel_kd 0.008 0.004 0.002 0
   python scripts/growl_sweep.py --esp32-host 192.168.1.7 friction_mode 1 0
-  python scripts/growl_sweep.py --esp32-host 192.168.1.7 ff_fb_k_rate 0.02 0.01
+  python scripts/growl_sweep.py --esp32-host 192.168.1.7 meca_k_pitch_damp 0.02 0.01
 
 The original value is read first and restored on exit, including on Ctrl-C and
 on error. Only one parameter is touched per run: two changes at once and the
@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import difflib
 import sys
 import time
 from pathlib import Path
@@ -106,6 +107,19 @@ def peak_in_band(x: np.ndarray, fs: float, half_width_hz: float = 3.0) -> tuple[
     return f_peak, rms * np.sqrt(2.0)
 
 
+def low_freq_rms(x: np.ndarray, fs: float, cutoff_hz: float = 5.0) -> float:
+    """RMS of what is below cutoff_hz: the robot's real motion, not the growl."""
+    x = np.asarray(x, dtype=float)
+    n = len(x)
+    if n < 256:
+        return float("nan")
+    spec = np.abs(np.fft.rfft((x - x.mean()) * np.hanning(n)))
+    freqs = np.fft.rfftfreq(n, 1.0 / fs)
+    psd = (spec ** 2) * 2.0 / (fs * np.sum(np.hanning(n) ** 2))
+    band = (freqs > 0) & (freqs <= cutoff_hz)
+    return float(np.sqrt(np.sum(psd[band]) * (fs / n)))
+
+
 def sample_rate(rows: Sequence[BalanceFrame]) -> float:
     t = np.array([r.time_us for r in rows], dtype=np.int64)
     # time_us is a free-running 32-bit microsecond counter: unwrap the rollover
@@ -133,10 +147,20 @@ def main() -> int:
 
     try:
         snap = client.get_params()
-        original = float(snap.as_dict()[args.param])
+        params = snap.as_dict()
+        if args.param not in params:
+            close = difflib.get_close_matches(args.param, params, n=5, cutoff=0.4)
+            print(f"parametre inconnu: {args.param}")
+            if close:
+                print("  proche(s):", ", ".join(close))
+            print("  (les noms ont change avec la refonte ctrl_*: ff_fb_k_rate ->"
+                  " meca_k_pitch_damp, ff_fb_k_pitch -> err_k_pitch)")
+            return 2
+        original = float(params[args.param])
         print(f"{args.param}: valeur actuelle {original:g}")
         print(f"{'valeur':>10} {'trames':>7} {'fs':>7} {'pic':>8} "
-              f"{'ampl vel_l':>11} {'ampl couple':>12} {'accel impliquee':>16}")
+              f"{'ampl vel_l':>11} {'ampl couple':>12} {'accel':>10} "
+              f"{'pitch rms':>10} {'vel <5Hz':>9}")
 
         for value in args.values:
             client.set_param(args.param, value)
@@ -149,13 +173,23 @@ def main() -> int:
             fs = sample_rate(rows)
             vel_l = np.array([r.vel_wheel_l_turns_s for r in rows])
             tau_l = np.array([r.cmd_torque_left_nm for r in rows])
+            pitch = np.array([r.pitch_rad for r in rows])
+            pitch_ref = np.array([r.pitch_ref_rad for r in rows])
             f_vel, a_vel = peak_in_band(vel_l, fs)
             _f_tau, a_tau = peak_in_band(tau_l, fs)
             # A sine of amplitude A at f has acceleration A*2*pi*f.
             accel = a_vel * 2.0 * np.pi * f_vel
+            # Killing the growl is easy if you are allowed to ruin the loop:
+            # drop every damping gain and the robot wallows instead of buzzing.
+            # These two say what the quieter run cost. pitch rms is tracking
+            # error; vel below 5 Hz is how much the robot actually wanders.
+            pitch_rms = float(np.sqrt(np.mean((pitch - pitch_ref) ** 2)))
+            vel_slow = low_freq_rms(vel_l, fs)
             print(f"{value:>10g} {len(rows):>7} {fs:>7.1f} {f_vel:>7.1f}Hz "
-                  f"{a_vel:>11.3f} {a_tau:>12.4f} {accel:>13.0f} t/s2")
-            results.append((args.param, value, len(rows), fs, f_vel, a_vel, a_tau, accel))
+                  f"{a_vel:>11.3f} {a_tau:>12.4f} {accel:>7.0f}t/s2 "
+                  f"{pitch_rms:>10.4f} {vel_slow:>9.3f}")
+            results.append((args.param, value, len(rows), fs, f_vel, a_vel, a_tau,
+                            accel, pitch_rms, vel_slow))
     except KeyboardInterrupt:
         print("\ninterrompu")
     finally:
@@ -172,7 +206,8 @@ def main() -> int:
         with args.csv.open("w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
             w.writerow(["param", "value", "frames", "fs_hz", "peak_hz",
-                        "amp_vel_l_turns_s", "amp_tau_l_nm", "accel_turns_s2"])
+                        "amp_vel_l_turns_s", "amp_tau_l_nm", "accel_turns_s2",
+                        "pitch_rms_rad", "vel_below_5hz_rms"])
             w.writerows(results)
         print(f"-> {args.csv}")
 
