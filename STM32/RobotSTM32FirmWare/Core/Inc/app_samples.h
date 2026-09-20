@@ -34,6 +34,11 @@ typedef struct {
     uint8_t timer_bits;
     float pos_turns;
     float vel_turns_s;
+    /** Order-2 sliding fit (vel_fit.h), 10 ms lag, reported at window centre.
+     *  vel_turns_s keeps its EMA so the balance cascade is untouched. */
+    float vel_fit_turns_s;
+    float acc_fit_turns_s2;
+    bool fit_valid;
 } app_encoder_sample_t;
 
 void app_samples_encoder_publish(const app_encoder_sample_t *sample);
@@ -57,6 +62,8 @@ typedef struct {
     float vel_turns_s;
     int32_t pos_counts;
     uint32_t last_update_ms;
+    float vbus_v;
+    bool vbus_valid;
 } app_odrive_drive_sample_t;
 
 typedef struct {

@@ -8,6 +8,8 @@
 
 #include "wheel_encoder_abz.h"
 
+#include "vel_fit.h"
+
 #include "app_config.h"
 #include "app_ctrl_params.h"
 
@@ -40,6 +42,8 @@ typedef struct {
     float vel_lpf_turns_s;
 
     bool vel_lpf_valid;
+
+    vel_fit_t fit;
 
 } encoder_state_t;
 
@@ -199,6 +203,8 @@ void wheel_encoder_abz_init(void)
 
         enc->vel_lpf_valid = false;
 
+        vel_fit_reset(&enc->fit);
+
     }
 
 
@@ -281,6 +287,12 @@ bool wheel_encoder_abz_sample_encoder(wheel_encoder_id_t encoder, wheel_encoder_
 
     out->vel_turns_s = 0.0f;
 
+    out->vel_fit_turns_s = 0.0f;
+
+    out->acc_fit_turns_s2 = 0.0f;
+
+    out->fit_valid = false;
+
 
 
     if (!enc->have_prev) {
@@ -350,6 +362,13 @@ bool wheel_encoder_abz_sample_encoder(wheel_encoder_id_t encoder, wheel_encoder_
 
 
     out->vel_turns_s = filter_velocity(enc, vel_raw);
+
+    /* Fed with position, not velocity: the fit is what differentiates, so the
+     * reported vel and acc stay consistent and no filter is stacked. */
+
+    out->fit_valid = vel_fit_push(&enc->fit, out->pos_turns, dt_s,
+
+                                  &out->vel_fit_turns_s, &out->acc_fit_turns_s2);
 
     out->valid = true;
 

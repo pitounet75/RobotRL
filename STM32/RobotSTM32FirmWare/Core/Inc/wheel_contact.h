@@ -44,6 +44,15 @@ typedef struct {
     float pos_wheel_turns;
     float x_m;
     bool pos_wheel_valid;
+    /** Per-wheel local ABZ at the control rate (500 Hz), order-2 fit, robot
+     *  frame, WHEEL side. The vel_motor and alpha fields above come from the
+     *  ODrive over CAN and only refresh every ~80 ms, so any ms-scale decision
+     *  belongs on these. Convert with APP_WHEEL_GEAR_* to compare the two. */
+    float vel_wheel_l_turns_s;
+    float vel_wheel_r_turns_s;
+    float acc_wheel_l_turns_s2;
+    float acc_wheel_r_turns_s2;
+    bool wheel_lr_valid;
 } wheel_contact_input_t;
 
 typedef struct {

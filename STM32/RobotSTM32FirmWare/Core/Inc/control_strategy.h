@@ -35,6 +35,17 @@ typedef struct {
     bool pos_wheel_valid;
     /** Yaw rate about vertical (rad/s), from IMU gyro. */
     float yaw_rate_rads;
+    /** Per-wheel local ABZ, robot frame, order-2 fit at 500 Hz (vel_fit.h).
+     *  For the antipatinage: it compares the two wheels and needs both sides
+     *  sampled at the control rate. The ODrive CAN estimates below refresh
+     *  only every ~80 ms (RTR poll), far too slow to debounce in ms.
+     *  Wheel side, NOT motor shaft: multiply by APP_WHEEL_GEAR_WHEEL /
+     *  APP_WHEEL_GEAR_MOTOR to compare with vel_motor_*. */
+    float vel_wheel_l_turns_s;
+    float vel_wheel_r_turns_s;
+    float acc_wheel_l_turns_s2;
+    float acc_wheel_r_turns_s2;
+    bool wheel_lr_valid;
 } control_strategy_input_t;
 
 typedef struct {

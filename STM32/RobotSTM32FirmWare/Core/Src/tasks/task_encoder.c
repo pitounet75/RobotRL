@@ -48,6 +48,9 @@ void task_encoder(void *argument)
             bank.encoder[i].timer_bits = raw[i].timer_bits;
             bank.encoder[i].pos_turns = raw[i].pos_turns;
             bank.encoder[i].vel_turns_s = raw[i].vel_turns_s;
+            bank.encoder[i].vel_fit_turns_s = raw[i].vel_fit_turns_s;
+            bank.encoder[i].acc_fit_turns_s2 = raw[i].acc_fit_turns_s2;
+            bank.encoder[i].fit_valid = raw[i].fit_valid;
             bank.encoder[i].valid = raw[i].valid;
         }
 

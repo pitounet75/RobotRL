@@ -82,6 +82,39 @@ static bool wheel_odometry(float *vel_turns_s, float *pos_turns, bool *pos_valid
     return false;
 }
 
+/**
+ * Per-wheel ABZ velocity/acceleration from the order-2 fit, robot frame.
+ *
+ * The antipatinage compares the two wheels, so it needs both sides at the
+ * control rate. Only reported valid once BOTH fits are converged, so a
+ * consumer never compares a fresh wheel against a stale one.
+ */
+static void wheel_lr_fit(float *vel_l, float *vel_r, float *acc_l, float *acc_r, bool *valid)
+{
+    *vel_l = 0.0f;
+    *vel_r = 0.0f;
+    *acc_l = 0.0f;
+    *acc_r = 0.0f;
+    *valid = false;
+
+    app_encoder_bank_sample_t bank;
+    if (!app_samples_encoder_bank_read(&bank)) {
+        return;
+    }
+
+    const app_encoder_sample_t *left = &bank.encoder[WHEEL_ENCODER_TIM2];
+    const app_encoder_sample_t *right = &bank.encoder[WHEEL_ENCODER_TIM4];
+    if (!left->fit_valid || !right->fit_valid) {
+        return;
+    }
+
+    *vel_l = left->vel_fit_turns_s;
+    *vel_r = right->vel_fit_turns_s;
+    *acc_l = left->acc_fit_turns_s2;
+    *acc_r = right->acc_fit_turns_s2;
+    *valid = true;
+}
+
 /** ODrive motor-shaft velocities in robot frame (drive[0]=left, drive[1]=right). */
 static void odrive_motor_vel_robot(float *vel_l, float *vel_r,
                                    bool *ok_l, bool *ok_r,
@@ -177,6 +210,13 @@ void task_control(void *argument)
         odrive_motor_vel_robot(&vel_m_l, &vel_m_r, &vel_m_l_ok, &vel_m_r_ok,
                                &vel_m_l_ms, &vel_m_r_ms);
 
+        float vel_w_l = 0.0f;
+        float vel_w_r = 0.0f;
+        float acc_w_l = 0.0f;
+        float acc_w_r = 0.0f;
+        bool wheel_lr_ok = false;
+        wheel_lr_fit(&vel_w_l, &vel_w_r, &acc_w_l, &acc_w_r, &wheel_lr_ok);
+
         float yaw_rate = 0.0f;
         if (APP_IMU_YAW_GYRO_AXIS >= 0 && APP_IMU_YAW_GYRO_AXIS <= 2) {
             yaw_rate = (float)APP_IMU_YAW_GYRO_SIGN *
@@ -200,6 +240,11 @@ void task_control(void *argument)
             .pos_wheel_turns = pos_wheel,
             .pos_wheel_valid = pos_ok,
             .yaw_rate_rads = yaw_rate,
+            .vel_wheel_l_turns_s = vel_w_l,
+            .vel_wheel_r_turns_s = vel_w_r,
+            .acc_wheel_l_turns_s2 = acc_w_l,
+            .acc_wheel_r_turns_s2 = acc_w_r,
+            .wheel_lr_valid = wheel_lr_ok,
         };
 
         control_strategy_output_t out = {0};

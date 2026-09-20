@@ -90,6 +90,11 @@ void control_strategy_ff_cascade_update(const control_strategy_input_t *in,
         .pos_wheel_turns = in->pos_wheel_turns,
         .x_m = pos.x_m,
         .pos_wheel_valid = in->pos_wheel_valid,
+        .vel_wheel_l_turns_s = in->vel_wheel_l_turns_s,
+        .vel_wheel_r_turns_s = in->vel_wheel_r_turns_s,
+        .acc_wheel_l_turns_s2 = in->acc_wheel_l_turns_s2,
+        .acc_wheel_r_turns_s2 = in->acc_wheel_r_turns_s2,
+        .wheel_lr_valid = in->wheel_lr_valid,
     };
     wheel_contact_output_t wco;
     wheel_contact_update(&wci, &wco);

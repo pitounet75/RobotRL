@@ -27,6 +27,13 @@ typedef struct {
     float pos_turns;
     float vel_turns_s;
     bool valid;
+    /** Sliding order-2 fit over pos_turns (see vel_fit.h), reported at the
+     *  window centre: quieter and better timed than differentiating the EMA
+     *  above, at a fixed 10 ms lag. Consumed by the antipatinage; the balance
+     *  cascade still runs on vel_turns_s, so the two differ on purpose. */
+    float vel_fit_turns_s;
+    float acc_fit_turns_s2;
+    bool fit_valid;
 } wheel_encoder_sample_t;
 
 void wheel_encoder_abz_init(void);
