@@ -123,10 +123,10 @@ Rebuild and flash. Watch Live Expressions:
 Start conservative (example):
 
 ```c
-#define APP_CTRL_FF_GRAV_K           0.05f   /* sin(theta) FF, tune up slowly */
-#define APP_CTRL_FF_FB_K_PITCH       0.05f
-#define APP_CTRL_FF_FB_K_RATE        0.02f
-#define APP_CTRL_FF_OUTPUT_ALPHA     0.85f
+#define APP_CTRL_MECA_K_GRAV           0.05f   /* sin(theta) FF, tune up slowly */
+#define APP_CTRL_ERR_K_PITCH       0.05f
+#define APP_CTRL_MECA_K_PITCH_DAMP        0.02f
+#define APP_CTRL_BALANCE_OUTPUT_ALPHA     0.85f
 ```
 
 - Strategy: `g_ctrl_strategy = 3` (ff_cascade)

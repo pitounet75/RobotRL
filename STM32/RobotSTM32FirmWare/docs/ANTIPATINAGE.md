@@ -1,9 +1,9 @@
 # Antipatinage — détection roue en l'air et mode de repli
 
-Spécification **figée** pour le firmware STM32 (`control_strategy_ff_cascade`, `task_control`).  
-**Statut :** **implémenté** v1 dans `wheel_contact.c` + `ff_cascade` (2026-08).
+Spécification **figée** pour le firmware STM32 (`ff_cascade` / `task_control`).  
+**Statut :** **implémenté** v1 — FSM dans `antipat_common.c` (`antipat_sync.c` / `antipat_both.c`), mix dans `ctrl_abs.c`.
 
-Voir aussi : [CONTROL_ARCHITECTURE.md](CONTROL_ARCHITECTURE.md), [BALANCE_BASELINE.md](../../../ODrive/OdriveTool/Commands/BALANCE_BASELINE.md), `control_strategy_ff_cascade.c`, `app_config.h`.
+Voir aussi : [CONTROL_ARCHITECTURE.md](CONTROL_ARCHITECTURE.md), [BALANCE_BASELINE.md](../../../ODrive/OdriveTool/Commands/BALANCE_BASELINE.md), `ctrl_abs.c`, `app_config.h`.
 
 ---
 
@@ -27,7 +27,7 @@ Le nom **antipatinage** couvre à la fois la détection (roue qui patine / ne tr
 | Mode | Déclenchement | `u` balance | Couple roues |
 |------|---------------|-------------|--------------|
 | **NORMAL** | contact | actif | `u ± u_yaw ± Δτ` |
-| **SYNC_L / SYNC_R** | η + decorrelated + `k_dom` | actif (roue au sol) | air : `u + τ_sync` ; sol : `u ± u_yaw` |
+| **SYNC_L / SYNC_R** | η + decorrelated + `antipat_sync_k_dom` | actif, **fade** (`antipat_u_fade_ms`) | air : `u·scale + τ_sync` ; sol : `u ± u_yaw` |
 | **BOTH_AIR** | η_L + η_R + pitch_mismatch | **coupé** | P → **`v_good`** ; **`integrator_trust=0`** |
 | **RECOVERY** | post-contact | rampe **`u`**, **`pitch_trim`** | re-ancrage **`x_m`**, reset fuite pitch |
 
@@ -101,18 +101,24 @@ Deux **voies** distinctes : lift **unilatéral** (SYNC) et **BOTH_AIR** (voie ra
 ### Critère 1 — roue « déchargée » (inertie seule)
 
 ```text
-η_i = |α_i| / max(|τ_i|, τ_min)
+η_i = |α_i| / max(EMA(|τ_cmd,i|), τ_min)
 ```
 
+- `τ_cmd` = dernière consigne **vraiment envoyée** (après mix + clamp), pas la loi balance pré-ABS.
+- EMA sur `|τ|` seulement (pas le couple moteur) : un tick à τ≈0 ne fait pas exploser η. `antipat_tau_ema` (défaut 0,85).
 - `η_i` **élevé** : forte accélération moteur pour peu de couple utile → roue ne charge plus le sol.
 - `τ_min` évite la division par zéro (~0,001 N·m).
 
 **Seuils (hystérésis) :**
 
 ```text
-lift_i  ←  η_i > η_on   pendant T_on  (ex. 50–80 ms)
-contact ←  η_i < η_off  pendant T_off (η_off < η_on)
+lift_i     ←  η_i > antipat_eta_on  pendant antipat_sync_t_on_ms
+SYNC exit  ←  recorrelé pendant antipat_sync_t_off_ms
+              (bloqué si |ω_air − ω_sol| > antipat_omega_air_min_turns_s)
+BOTH exit  ←  η_L et η_R < antipat_both_eta_off  pendant antipat_both_t_off_ms
 ```
+
+En SYNC, le fade de `u` sur la roue en l’air met `|cmd|≈0`. L’EMA `|τ|` de cette roue est **gelée** (plus d’update avec le couple fondu) et le dénominateur d’η est **plancheré par `|u|`**, sinon η explose et on ne sort plus jamais.
 
 ### Critère 2 — lacet gyro découplé de la cinématique roues
 
@@ -253,18 +259,20 @@ u_yaw = clamp(Kp·wrap(φ_ref − ψ) − Kd·ψ̇, ±τ_yaw_max)
 
 Pour la roue **i** en l'air, roue **j** au sol :
 
-### 1. Désenclencher φ sur la roue en l'air
+### 1. Désenclencher φ pendant tout le lift
 
-- **`u_yaw` gelé à 0** pour toute la durée du lift (au moins une roue en l'air).
-- Sur la roue **j** (sol) : conserver `± u_yaw` comme en NORMAL.
-- Sur la roue **i** (air) : **pas** de terme `u_yaw` — évite d'accélérer une roue qui ne freine plus le yaw.
+- **`u_yaw = 0`** dès qu’une roue est en l’air (SYNC ou BOTH_AIR), **les deux** roues, et **pendant tout RECOVERY**.
+- **`heading_ema` / `heading_d_ema` / ψ gelés** jusqu’au retour **NORMAL** (après la rampe `u_scale`).
+- Au front montant de `yaw_allowed` (RECOVERY → NORMAL) : **`heading_ema` = gyro actuel**, D = 0 (pas l’EMA d’avant le lift).
 
 Exemple lift gauche :
 
 ```text
-τ_L = u + Δτ_L + τ_sync_L          (pas de −u_yaw)
-τ_R = u + Δτ_R + u_yaw               (heading actif côté sol)
+τ_L = u · u_scale_L + Δτ_L + τ_sync_L     (u_scale_L : 1→0 sur antipat_u_fade_ms)
+τ_R = u · u_scale_R + Δτ_R                (pas de u_yaw ; u_scale_R = 1)
 ```
+
+À la sortie SYNC → RECOVERY, `u_scale` de la roue qui volait rampe **0→1** sur la même durée. `u` est toujours calculé ; seul le facteur change. `0` ms = marche (comportement d’avant).
 
 ### 2. Aligner la vitesse moteur en l'air sur la roue au sol
 
@@ -273,8 +281,9 @@ Référence : **`ω_ref_i = ω_j`** (même sens moteur, signes ODrive déjà app
 En mode **couple** ODrive, overlay P sur l'écart de vitesse :
 
 ```text
-τ_sync_i = K_sync · (ω_j − ω_i)
-τ_sync_i = clamp(τ_sync_i, ±τ_sync_max)
+τ_sync_i = antipat_sync_k · (ω_j − ω_i) + antipat_sync_kd · ė
+ė = (alpha_j − alpha_i) / 2π     (tr/s², alpha_*_rads2 déjà EMA motor_accel_lpf)
+τ_sync_i = clamp(τ_sync_i, ±antipat_sync_tau_max_nm)
 ```
 
 - `K_sync`, `τ_sync_max` : paramètres télémetrie.
@@ -380,7 +389,7 @@ v_good_L = ring_mean(ω_L, t ∈ [t₀ − T_excl − T_ma, t₀ − T_excl], co
 | **`s_x_err_ema`** | fuite sur **`x_err`** | mémoire fausse pendant le vol |
 | **`s_vel_err_ema`** | fuite sur **`vel_ref − vel_wheel`** | pic **`pitch_trim`** |
 | **`vel_dot`** (cascade D) | Δ**`vel_wheel`** / Δt | step → pic D sur **`pitch_trim`** |
-| **`u_vel`** | **`vel_ref − vel_wheel`** | même discontinuité dans **`u_fb`** |
+| **`u_vel`** | **`vel_ref − vel_wheel`** | même discontinuité dans **`u_err`** |
 | **`s_vel_ref_slew`** | rampe **`vel_ref`** | **`vel_ref`** incohérent après vol |
 | **Bias roues** (futur) | ODrive vs ABZ | à geler si lift |
 
@@ -388,11 +397,11 @@ v_good_L = ring_mean(ω_L, t ∈ [t₀ − T_excl − T_ma, t₀ − T_excl], co
 
 | Consommateur | Source | Effet au recontact |
 |--------------|--------|-------------------|
-| **`pitch_trim`** | P + **leaky I** **`s_vel_err_ema`** + D **`vel_dot`** | trim **faux** accumulé → **`pitch_ref_eff`** décalé → **`u_fb`** coup de fouet |
+| **`pitch_trim`** | P + **leaky I** **`s_vel_err_ema`** + D **`vel_dot`** | trim **faux** accumulé → **`pitch_ref_eff`** décalé → **`u_err`** coup de fouet |
 | **`pitch_ref_eff`** | **`pitch_ref + pitch_trim`** | consigne pitch effective **sautée** |
 | **`theta_err`** | **`pitch_ref_eff − θ`** | PD pitch réagit à un **faux** **`pitch_ref_eff`** |
 | **`s_u_prev`** | LPF sur **`u_raw`** | mémoire de **`u`** d'avant vol / BOTH_AIR → reprise **`u`** en rampe **désynchronisée** |
-| **`u_ff`** | **`sin(θ)`** | OK — ne dépend pas des roues |
+| **`u_meca`** | **`sin(θ)`** + **`θ̇` IMU** | OK — ne dépend pas des roues |
 | **`s_heading_rad`** | ∫ gyro yaw | **peu affecté** — ne pas geler ; **`u_yaw`** géré à part |
 | **`θ`, `θ̇`** (IMU) | gyro + fusion | **mesure fiable** ; ne pas geler — seulement ne pas **corriger** avec des trim falsifiés |
 
@@ -465,8 +474,8 @@ s_vel_ref_slew     ← vel_ref demandé @ contact (mode pos / slew)
 ```text
 pitch_trim_ctrl ← pitch_trim_frozen · (1 − recover_ramp) + pitch_trim_nom · recover_ramp
 // recover_ramp : 0 → 1 sur T_recover
-u_fb pitch path  : utiliser pitch_ref_eff dérivé de pitch_trim_ctrl
-s_u_prev         : laisser LPF converger (ff_output_alpha) — pas de step u_raw
+u_err pitch path  : utiliser pitch_ref_eff dérivé de pitch_trim_ctrl
+s_u_prev         : laisser LPF converger (balance_output_alpha) — pas de step u_raw
 ```
 
 Ainsi **`x_m`** repart de **`x_m_frozen`** et **`pitch_ref_eff`** ne **saute** pas au recontact.
@@ -492,7 +501,7 @@ cascade_vel_* eff.   : idem si besoin
 
 **AIRBORNE** unilatéral :
 
-- `η_i < η_off` **et** `e_ψ` sous seuil **et** debounce **`T_off`**
+- `η_i < η_off` **ou** `e_ψ < k_off · seuil` pendant debounce **`T_off`**
 
 **BOTH_AIR** :
 
@@ -536,28 +545,39 @@ Une roue au sol : **`integrator_trust`** reste **false** tant qu'une roue est en
 
 ## Paramètres (télémetrie / `app_config`)
 
-| Param | Rôle | Calibration initiale |
-|-------|------|----------------------|
-| `motor_J` | **J** axe moteur (roue libre) | **1,12×10⁻⁵ kg·m²** — **mesuré bench** |
-| `motor_friction_c` | Coulomb axe moteur | **0,0052 N·m** — **mesuré bench** |
-| `track_width_m` | `D` dans `ψ_kin` | mesure chassis |
-| `τ_min` | plancher critère 1 | ~0,001 N·m |
-| `η_on`, `η_off` | seuils lift η | bench : roue levée vs roulage |
-| `k_dom` | dominance L/R si les deux η > η_on | ~1,4 ; tune si faux BOTH_AIR |
-| `u_min` | plancher \|u\| pour pitch_mismatch | ~0,005–0,01 N·m |
-| `θ̇_min` | plancher \|θ̇\| pour pitch_mismatch | tune bench |
-| `T_on_both`, `T_off_both` | debounce BOTH_AIR | 10–20 ms / 80–120 ms |
-| `T_ma` | fenêtre MA vitesse sol | 80–150 ms |
-| `T_excl` | lookback exclu avant BOTH_AIR | **2·T_on_both** (figé) |
-| `K_both_v`, `τ_both_max` | P vitesse → `v_good` en BOTH_AIR | tune bench ; `τ_both_max` ≪ `τ_max` |
-| `ε_abs` | zone morte décorrélation | max `e_ψ` au sol (ligne droite + petits virages) × 1,5–2 |
-| `k_rel` | marge relative en virage | `e_ψ` vs `\|ψ̇\|` en virage nominal |
-| `k_off` | hystérésis sortie décorrélation | ~0,5–0,7 |
-| `T_on`, `T_off` | debounce ms | 50–80 ms / 80–120 ms |
-| `K_sync`, `τ_sync_max` | resynchro vitesse | tune bench lift L puis R |
-| `T_recover` | sous-état RECOVERY post-contact | 100–200 ms |
-| `vel_recover_slew` | rampe `vel_wheel_ctrl` | tune reprise |
-| `pos_kp_recover_ramp` | rampe mode pos après lift | 0→1 sur `T_recover` |
+| Param | Chemin | Rôle | Calibration initiale |
+|-------|--------|------|----------------------|
+| `antipat_enable` | commun | FSM on/off | 0 au boot |
+| `antipat_tau_min_nm` | commun | plancher dénominateur η | ~0,001 N·m |
+| `antipat_tau_ema` | commun | EMA `|cmd|` pour η | 0,85 ; 0 = brut |
+| `antipat_eta_on` | commun | seuil η d’entrée SYNC et BOTH | bench |
+| `antipat_omega_air_min_turns_s` | commun | latch still-flying (SYNC et BOTH) | 0,25 tr/s |
+| `antipat_t_recover_ms` | commun | durée RECOVERY | 100–200 ms |
+| `antipat_u_fade_ms` | commun | rampe u sur roue levée | 100 ms ; 0 = marche |
+| `antipat_sync_enable` | sync | autorise SYNC_L/R | 0 au boot |
+| `antipat_sync_track_width_m` | sync | `D` dans `ψ_kin` | mesure chassis |
+| `antipat_sync_k_dom` | sync | dominance L/R | ~1,4 |
+| `antipat_sync_eps_abs_rads` | sync | zone morte décorrélation | bench |
+| `antipat_sync_k_rel` | sync | marge relative en virage | bench |
+| `antipat_sync_k_off` | sync | hystérésis sortie recorrelée | ~0,5–0,7 |
+| `antipat_sync_t_on_ms` | sync | debounce entrée | 50–80 ms |
+| `antipat_sync_t_off_ms` | sync | debounce sortie | 80–120 ms |
+| `antipat_sync_k` | sync | P `τ_sync` | bench lift L puis R |
+| `antipat_sync_kd` | sync | D sur ė | 0 au boot |
+| `antipat_sync_tau_max_nm` | sync | plafond `τ_sync` | ≪ τ_max |
+| `antipat_both_enable` | both | autorise BOTH_AIR | 0 au boot |
+| `antipat_both_eta_off` | both | les deux η sous le seuil = recontact | sous `antipat_eta_on` |
+| `antipat_both_u_min_nm` | both | plancher \|u\| pitch_mismatch | ~0,005–0,01 N·m |
+| `antipat_both_pitch_rate_min_rads` | both | plancher \|θ̇\| pitch_mismatch | tune bench |
+| `antipat_both_t_on_ms` | both | debounce entrée | 10–20 ms |
+| `antipat_both_t_off_ms` | both | debounce sortie | 80–120 ms |
+| `antipat_both_t_ma_ms` | both | fenêtre MA `v_good` | 80–150 ms |
+| `antipat_both_k_v` | both | P vers `v_good` | tune bench |
+| `antipat_both_tau_max_nm` | both | plafond `τ_both` | ≪ τ_max |
+| `antipat_both_alpha_contact_max_rads2` | both | sortie alternative sur \|alpha_rads2\| | 0 = ignoré |
+| `antipat_both_tau_steady_air_nm` | both | still-flying si \|τ_both\| petit | 0,004 N·m |
+| `motor_J` | — | **J** axe moteur | **1,12×10⁻⁵ kg·m²** |
+| `motor_friction_c` | — | Coulomb axe moteur | **0,0052 N·m** |
 
 ---
 
@@ -573,6 +593,7 @@ Une roue au sol : **`integrator_trust`** reste **false** tant qu'une roue est en
 | `tau_both_l`, `tau_both_r` | overlay P → `v_good` | tune `K_both_v` |
 | `tau_sync_l`, `tau_sync_r` | overlay SYNC unilatéral | debug |
 | `antipatinage_mode` | 0=NORMAL, 1=SYNC_L, 2=SYNC_R, 3=BOTH_AIR, 4=RECOVERY |
+| `sync_l` / `sync_r` (BalanceFrame V4) | 1 = cette roue en SYNC/BOTH_AIR (voyant vert), 0 = NORMAL/RECOVERY (rouge) |
 | `odom_trust` / `integrator_trust` | intégrateurs vitesse + pitch actifs | debug reprise |
 | `x_m_frozen` | distance logique gelée en lift | debug |
 | `pitch_trim_frozen` | trim cascade gelé en lift | debug |
@@ -581,7 +602,7 @@ Une roue au sol : **`integrator_trust`** reste **false** tant qu'une roue est en
 
 ## Intégration firmware (plan)
 
-1. Module `wheel_contact.c` : calcul `η`, `ψ_kin`, `e_ψ`, `pitch_mismatch`, debounce ; ring buffer **`v_good`** ; FSM **RECOVERY** ; **`odom_trust`** ; **`x_m_frozen`** + re-ancrage **`pos_offset`**.
+1. Modules `antipat_common.c` (η, FSM, fade, recovery), `antipat_sync.c` (décorrélation, τ_sync), `antipat_both.c` (pitch_mismatch, v_good, τ_both).
 2. Gate **`ff_cascade`** : si **`!integrator_trust`**, geler **`s_vel_err_ema`**, **`s_x_err_ema`**, **`vel_dot`**, **`pitch_trim`**, **`s_u_prev`**, **`s_vel_ref_slew`**.
 3. Geler `u_yaw` si lift unilatéral ; couper **`u`** + **`Δτ`** en BOTH_AIR ( **`τ`** via **`K_both_v`** seulement ).
 4. Params + télémétrie vN.
@@ -601,4 +622,5 @@ Une roue au sol : **`integrator_trust`** reste **false** tant qu'une roue est en
 | 2026-08 | § Plant mesuré : J, c bench + ordres de grandeur α / Δω |
 | 2026-08 | BOTH_AIR : `v_good` lookback `T_excl≥2·T_on_both`, P vitesse borné vs τ=0 |
 | 2026-08 | Doc : synthèse modes, cas d'usage, chronologie lookback, ring buffer |
+| 2026-09 | η : `|τ|` = dernier cmd envoyé, EMA `antipat_tau_ema` (snapshot v17) |
 | 2026-08 | Reprise contact : `integrator_trust`, RECOVERY, gel odom + **chaîne pitch** |

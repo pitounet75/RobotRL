@@ -126,7 +126,7 @@ Ajouter à la télémétrie ou aux variables de debug :
 - angle fusionné ;
 - valeur effective de `alpha` ;
 - norme de l'accélération ;
-- contributions `u_ff`, `u_fb` et commande finale ;
+- contributions `u_meca`, `u_err` et commande finale ;
 - timestamps ou âge de l'échantillon IMU lu par la boucle de contrôle.
 
 ## Protocole de validation
@@ -168,8 +168,8 @@ Ne modifier aucun gain du contrôleur pendant cette comparaison.
 
 Une fois le filtre retenu :
 
-- retuner le gain de vitesse angulaire `ff_fb_k_rate` ;
-- vérifier ensuite le gain angulaire `ff_fb_k_pitch` ;
+- retuner le gain de vitesse angulaire `meca_k_pitch_damp` ;
+- vérifier ensuite le gain angulaire `err_k_pitch` ;
 - seulement après, activer et régler la boucle vitesse externe.
 
 ## Critères d'acceptation

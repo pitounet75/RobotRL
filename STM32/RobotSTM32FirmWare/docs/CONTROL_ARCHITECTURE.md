@@ -267,9 +267,9 @@ typedef struct {
 
 | ID | Name | File |
 |----|------|------|
-| 0 | ff_cascade | `control_strategy_ff_cascade.c` |
+| 0 | ff_cascade | `control_strategy_ff_cascade.c` (orchestrateur) + `ctrl_*.c` |
 
-Gains in `app_config.h`. Failsafe: IMU invalid or `|pitch| > APP_CTRL_PITCH_FAILSAFE_RAD` → estop, zero velocity.
+Gains in `app_config.h` / live snapshot `app_ctrl_params` (GET/SET, currently **v15**). Failsafe: IMU invalid or `|pitch| > APP_CTRL_PITCH_FAILSAFE_RAD` → estop, zero torque.
 
 ---
 

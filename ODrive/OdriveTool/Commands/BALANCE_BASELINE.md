@@ -21,10 +21,10 @@ Strategy: **`3`** (`CTRL_STRATEGY_FF_CASCADE`)
 
 | Param | Value | Notes |
 |---|---|---|
-| `ff_grav_k` | **0.14** | ~80% of full gravity FF (~0.178) |
-| `ff_fb_k_pitch` | **0.055** | |
-| `ff_fb_k_rate` | **0.013** | |
-| `ff_output_alpha` | **0.50** | output LPF |
+| `meca_k_grav` | **0.14** | ~80% of full gravity FF (~0.178) |
+| `err_k_pitch` | **0.055** | |
+| `meca_k_pitch_damp` | **0.013** | |
+| `balance_output_alpha` | **0.50** | output LPF |
 | `cmd_max_torque_nm` | **0.04** | motor-shaft Nm |
 | `outer_mode` | **0** | velocity hold |
 | `cascade_vel_kp` | **0.001** | gentle vel → pitch |
@@ -35,7 +35,7 @@ Strategy: **`3`** (`CTRL_STRATEGY_FF_CASCADE`)
 | `torque_deadband_nm` | **0.0017** | gated Coulomb |
 | `torque_deadband_pitch_max_rad` | **0.05** | ~3° |
 | `torque_deadband_rate_max_rads` | **0.30** | |
-| `Kv` (`APP_CTRL_FF_FB_K_VEL`) | **−0.0005** | compile-time only for now |
+| `Kv` (`err_k_vel`) | **−0.0005** | live since snapshot v13 ; clamp ±0.010 Nm still compile-time |
 | `APP_IMU_COMPLEMENTARY_ALPHA` | **0.999** | compile-time; gyro boot-cal TODO |
 
 Plant (for reference): m=1.335 kg, h=0.145 m, gear 3:16, `K_ff_full≈0.178` Nm/motor.
@@ -46,10 +46,10 @@ Plant (for reference): m=1.335 kg, h=0.145 m, gear 3:16, `K_ff_full≈0.178` Nm/
 
 ```powershell
 cd H:\Projects\RobotRL
-python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 set ff_grav_k 0.14
-python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 set ff_fb_k_pitch 0.055
-python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 set ff_fb_k_rate 0.013
-python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 set ff_output_alpha 0.50
+python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 set meca_k_grav 0.14
+python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 set err_k_pitch 0.055
+python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 set meca_k_pitch_damp 0.013
+python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 set balance_output_alpha 0.50
 python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 set torque_deadband_nm 0.0017
 python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 set torque_deadband_pitch_max_rad 0.05
 python TelemetryServer/scripts/tune_params.py --esp32-host 192.168.1.5 set torque_deadband_rate_max_rads 0.30
@@ -82,7 +82,7 @@ Defaults in `STM32/RobotSTM32FirmWare/Core/Inc/app_config.h` should match this t
 
 ## Shelved (2026-08): motor accel P vs residual cogging
 
-**Status:** implemented in firmware, **left OFF** (`alpha_kp = 0`). Decision after vacation tests: do **not** pursue STM32-side accel asservissement to fight cogging for now. Prefer ODrive anticogging (custom FW: bidirectional map cal is better). Revisit only if maps still leave low-speed ripple.
+**Status:** implemented in firmware, **left OFF** (`motor_torque_correction_kp = 0`). Decision after vacation tests: do **not** pursue STM32-side accel asservissement to fight cogging for now. Prefer ODrive anticogging (custom FW: bidirectional map cal is better). Revisit only if maps still leave low-speed ripple.
 
 ### Idea
 
@@ -95,7 +95,7 @@ Near upright / slow motion, free-wheel model:
 
 - \(u\) = balance command **before** \(\Delta\tau\) (avoids algebraic loop)
 - \(\omega,\alpha_{\mathrm{mes}}\) from **ODrive** `vel_estimate` (not ABZ), per wheel
-- Gated on pitch / rate / motor speed; \(\lvert\Delta\tau\rvert \le\) `alpha_max_nm`
+- Gated on pitch / rate / motor speed; \(\lvert\Delta\tau\rvert \le\) `motor_torque_correction_max_nm`
 
 Caveat: when the robot pitches, torque also goes into body dynamics — model is only local near \(x\approx0\).
 
@@ -113,10 +113,10 @@ Script: `ODrive/OdriveTool/Commands/identify_motor_inertia.py` (step torque + co
 
 ### Code / telemetry (still present)
 
-- Law: `control_strategy_ff_cascade.c`
-- Defaults: `app_config.h` (`APP_CTRL_MOTOR_J_*`, `APP_CTRL_ALPHA_*`)
-- Live params (snapshot ≥ v3): `alpha_kp`, `alpha_max_nm`, `motor_J`, `motor_friction_c`, gates, `alpha_lpf`
-- Keep `alpha_kp = 0` in normal use so baseline is unchanged
+- Law: `control_strategy_ff_cascade.c` (orchestrator) + `ctrl_*.c`
+- Defaults: `app_config.h` (`APP_CTRL_MOTOR_J_*`, `APP_CTRL_MOTOR_TORQUE_CORRECTION_*`, `APP_CTRL_MOTOR_ACCEL_LPF`)
+- Live params (snapshot ≥ v3): `motor_torque_correction_kp`, `motor_torque_correction_max_nm`, `motor_J`, `motor_friction_c`, gates, `motor_accel_lpf`
+- Keep `motor_torque_correction_kp = 0` in normal use so baseline is unchanged
 
 ### Related (active path for cogging)
 
